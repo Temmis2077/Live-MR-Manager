@@ -1,0 +1,18 @@
+<svg viewBox="0 0 260 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="OSW — Open Stem Wave">
+  <defs>
+    <linearGradient id="oswPlanet2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8b5cf6"/>
+      <stop offset="1" stop-color="#6d28d9"/>
+    </linearGradient>
+  </defs>
+  <!-- 토성 마크 -->
+  <g transform="translate(20 0) rotate(-18 110 110)">
+    <path d="M 18 110 A 92 28 0 0 1 202 110" fill="none" stroke="#8b5cf6" stroke-width="15" stroke-linecap="round"/>
+    <circle cx="110" cy="110" r="50" fill="url(#oswPlanet2)"/>
+    <path d="M 18 110 A 92 28 0 0 0 202 110" fill="none" stroke="#a78bfa" stroke-width="15" stroke-linecap="round"/>
+  </g>
+  <!-- Ο.Σ.Ω 워드마크 -->
+  <text x="130" y="270" text-anchor="middle"
+        font-family="Georgia, 'Times New Roman', serif" font-size="66" font-weight="700"
+        letter-spacing="2" fill="#7c3aed">Ο.Σ.Ω</text>
+</svg>
