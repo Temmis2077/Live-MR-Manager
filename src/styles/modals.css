@@ -625,6 +625,33 @@
 
 .manager-body.active {
   display: flex !important;
+  flex-direction: column;
+}
+
+/* 곡 관리 필터 바 — 카테고리·장르·가사상태별로 좁혀 보는 관리 화면. */
+.manager-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 12px 4px 14px;
+  flex: 0 0 auto;
+}
+
+.manager-filter-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.manager-filter-item select {
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--surface-1);
+  color: var(--text-main);
+  border: 1px solid var(--glass-border);
+  font-size: 0.82rem;
 }
 
 .manager-footer {

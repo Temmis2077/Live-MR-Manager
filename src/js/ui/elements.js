@@ -65,6 +65,10 @@ export const elements = {
   // Library Manager
   managerModal: null,
   btnOpenManager: null,
+  btnLibraryManage: null,
+  mgrFilterCategory: null,
+  mgrFilterGenre: null,
+  mgrFilterSync: null,
   btnManagerSave: null,
   btnManagerCancel: null,
   managerModalClose: null,
@@ -177,6 +181,10 @@ export function initDomReferences() {
   // Library Manager
   elements.managerModal = document.getElementById("library-manager-modal");
   elements.btnOpenManager = document.getElementById("btn-open-manager");
+  elements.btnLibraryManage = document.getElementById("btn-library-manage");
+  elements.mgrFilterCategory = document.getElementById("mgr-filter-category");
+  elements.mgrFilterGenre = document.getElementById("mgr-filter-genre");
+  elements.mgrFilterSync = document.getElementById("mgr-filter-sync");
   elements.btnManagerSave = document.getElementById("manager-modal-save");
   elements.btnManagerCancel = document.getElementById("manager-modal-cancel");
   elements.managerModalClose = document.getElementById("manager-modal-close");

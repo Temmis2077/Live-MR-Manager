@@ -155,13 +155,13 @@ export function initModalListeners() {
     };
   }
 
-  // Open Library Manager
-  if (elements.btnOpenManager) {
-    elements.btnOpenManager.onclick = async () => {
-      const { openLibraryManager } = await import('../ui/manager.js');
-      openLibraryManager();
-    };
-  }
+  // Open Library Manager (설정의 옛 버튼 + 라이브러리 툴바의 새 버튼 둘 다 지원)
+  const openManager = async () => {
+    const { openLibraryManager } = await import('../ui/manager.js');
+    openLibraryManager();
+  };
+  if (elements.btnOpenManager) elements.btnOpenManager.onclick = openManager;
+  if (elements.btnLibraryManage) elements.btnLibraryManage.onclick = openManager;
 
   // Modal Cancel/Close
   const modalCancel = document.getElementById("modal-cancel");

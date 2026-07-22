@@ -4,6 +4,7 @@
 import { state } from '../state.js';
 import { elements } from './elements.js';
 import { getSongCategory } from './library.js';
+import { filterSongLibrary, getSongCategoryFromMetadata } from '../library-filters.js';
 
 export function openLibraryManager() {
   if (!elements.managerModal) return;
@@ -20,16 +21,46 @@ export function openLibraryManager() {
     c.style.display = isList ? "flex" : "none";
   });
 
+  populateManagerFilters();
   renderManagerTable();
   initTableResizing();
   initManagerEvents();
 }
 
+/** 카테고리·장르 드롭다운을 현재 라이브러리의 실제 값으로 채운다(선택 보존). */
+function populateManagerFilters() {
+  const songs = state.songLibrary || [];
+  const fill = (sel, values) => {
+    if (!sel) return;
+    const prev = sel.value;
+    const opts = ['<option value="all">전체</option>']
+      .concat(values.map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`));
+    sel.innerHTML = opts.join('');
+    // 이전 선택이 여전히 유효하면 유지.
+    if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
+  };
+
+  const cats = new Set();
+  const genres = new Set();
+  for (const s of songs) {
+    const c = getSongCategoryFromMetadata(s);
+    if (c) cats.add(c);
+    (s.categories || []).forEach((x) => { if (x) cats.add(String(x).trim()); });
+    if (s.genre && String(s.genre).trim()) genres.add(String(s.genre).trim());
+  }
+  fill(elements.mgrFilterCategory, [...cats].sort((a, b) => a.localeCompare(b)));
+  fill(elements.mgrFilterGenre, [...genres].sort((a, b) => a.localeCompare(b)));
+  // 가사 상태(mgrFilterSync)는 고정 옵션이라 채우지 않는다.
+}
+
 export function initManagerEvents() {
-  // 1. Search Input
+  // 1. Search Input + 카테고리·장르·가사상태 필터
   if (elements.managerSearchInput) {
     elements.managerSearchInput.oninput = () => renderManagerTable();
   }
+  [elements.mgrFilterCategory, elements.mgrFilterGenre, elements.mgrFilterSync].forEach((sel) => {
+    if (sel) sel.onchange = () => renderManagerTable();
+  });
 
   // 2. Tab Switching
   const tabBtns = document.querySelectorAll(".manager-tab-btn");
@@ -298,13 +329,18 @@ export function renderManagerTable() {
   if (!elements.managerTableBody) return;
 
   const songs = state.songLibrary;
-  const filtered = songs.filter(s => {
-    const q = (elements.managerSearchInput ? elements.managerSearchInput.value : "").toLowerCase();
-    return s.title.toLowerCase().includes(q) || (s.artist || "").toLowerCase().includes(q);
+  // 검색 + 카테고리·장르·가사상태 필터(라이브러리 뷰와 동일한 순수 로직 재사용).
+  const filtered = filterSongLibrary(songs, {
+    query: elements.managerSearchInput ? elements.managerSearchInput.value : "",
+    categoryFilter: elements.mgrFilterCategory ? elements.mgrFilterCategory.value : "all",
+    genreFilter: elements.mgrFilterGenre ? elements.mgrFilterGenre.value : "all",
+    syncFilter: elements.mgrFilterSync ? elements.mgrFilterSync.value : "all",
+    sortBy: "title",
+    currentTab: "library",
   });
 
   elements.managerTableBody.innerHTML = filtered.map((song) => {
-    const originalIndex = songs.indexOf(song);
+    const originalIndex = song.originalIndex;
     const tagsStr = (song.tags || []).join(', ');
     const catsStr =
       song.categories && song.categories.length > 0

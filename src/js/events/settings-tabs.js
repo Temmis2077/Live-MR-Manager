@@ -14,7 +14,7 @@ const SCAT_ANCHORS = {
   general: ['btn-check-app-update', 'theme-mode-select', 'toggle-intro-skip'],
   media: ['btn-meloming-pull', 'output-device-select'],
   ai: ['btn-install-gpu-pack'],
-  library: ['btn-open-manager'],
+  library: ['btn-import-spreadsheet'],
   about: ['btn-open-faq', 'btn-open-privacy-policy'],
 };
 

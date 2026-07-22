@@ -190,6 +190,16 @@
                   <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
                 </svg>
               </button>
+              <button class="view-btn" id="btn-library-manage" title="곡 관리 (카테고리·장르·가사상태별 확인 및 일괄 편집)">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="4" y1="6" x2="20" y2="6"></line>
+                  <line x1="4" y1="12" x2="20" y2="12"></line>
+                  <line x1="4" y1="18" x2="20" y2="18"></line>
+                  <circle cx="9" cy="6" r="1.6" fill="currentColor"></circle>
+                  <circle cx="15" cy="12" r="1.6" fill="currentColor"></circle>
+                  <circle cx="9" cy="18" r="1.6" fill="currentColor"></circle>
+                </svg>
+              </button>
             </div>
             <!-- [NEW] Broadcast Toggle in same line with title -->
             <div id="broadcast-tasks-control" class="broadcast-tasks-control" style="display: none;">
@@ -746,21 +756,14 @@
                   <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
                   <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
                 </svg>
-                <h3>곡 정보 관리</h3>
+                <h3>가져오기 · 백업</h3>
               </div>
-              <div class="ai-model-card">
-                <div class="ai-info-left">
-                  <h2 class="ai-title-large">곡 정보 일괄 수정</h2>
-                  <div class="ai-model-desc">
-                    라이브러리 곡 정보를 표 형태로 한꺼번에 수정합니다.
-                  </div>
-                </div>
-                <div class="ai-actions-right">
-                  <button id="btn-open-manager" class="btn-ai-action">관리자 열기</button>
-                </div>
+              <div class="ai-model-desc" style="margin: -8px 0 16px; font-size: 0.82rem;">
+                곡 정보 일괄 편집은 라이브러리 상단 <strong>곡 관리</strong> 버튼으로 옮겼습니다
+                (카테고리·장르·가사상태별 확인 + 표 편집).
               </div>
 
-              <div class="ai-model-card" style="margin-top: 15px;">
+              <div class="ai-model-card">
                 <div class="ai-info-left">
                   <h2 class="ai-title-large">엑셀(CSV) 가져오기 / 보내기</h2>
                   <div class="ai-model-desc">
@@ -1656,6 +1659,22 @@
 
       <!-- Tab 1: Song List -->
       <div class="modal-body manager-body active" id="manager-tab-list">
+        <div class="manager-filters" id="manager-filters">
+          <label class="manager-filter-item">카테고리
+            <select id="mgr-filter-category"><option value="all">전체</option></select>
+          </label>
+          <label class="manager-filter-item">장르
+            <select id="mgr-filter-genre"><option value="all">전체</option></select>
+          </label>
+          <label class="manager-filter-item">가사 상태
+            <select id="mgr-filter-sync">
+              <option value="all">전체</option>
+              <option value="synced">싱크됨</option>
+              <option value="unsynced">미싱크</option>
+              <option value="none">가사 없음</option>
+            </select>
+          </label>
+        </div>
         <div class="table-container">
           <table id="manager-table">
             <colgroup id="manager-table-colgroup">
