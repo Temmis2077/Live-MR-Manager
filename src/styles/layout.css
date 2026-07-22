@@ -57,16 +57,27 @@
 
 .logo-text {
   font-family: 'SUITE', sans-serif;
-  font-size: 1.25rem;
+  font-size: 1.7rem;
   font-weight: 900;
-  line-height: 1.1;
-  letter-spacing: -0.5px;
+  line-height: 1.05;
+  letter-spacing: 1.5px;
   background: linear-gradient(to right, var(--text-main), var(--text-dim));
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
   -webkit-font-smoothing: subpixel-antialiased;
   display: block;
+}
+
+/* OSW = Open Stem Wave. 약자 아래 풀네임을 작게 병기해 발견성을 보완한다. */
+.logo-subtext {
+  font-family: 'SUITE', sans-serif;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-top: 3px;
 }
 
 .nav-group {

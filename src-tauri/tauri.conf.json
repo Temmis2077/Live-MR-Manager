@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Live MR Manager(Beta)",
+  "productName": "OSW",
   "version": "0.6.0-beta.6",
   "identifier": "com.autumncolor77.live-mr-manager",
   "build": {
@@ -12,7 +12,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "Live MR Manager(Beta) v0.5.1",
+        "title": "OSW — Open Stem Wave",
         "width": 1319,
         "height": 787,
         "minWidth": 1024,
