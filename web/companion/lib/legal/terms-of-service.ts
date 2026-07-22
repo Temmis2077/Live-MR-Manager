@@ -10,7 +10,7 @@ export const TERMS_SECTIONS: LegalSection[] = [
     paragraphs: [
       "본 이용약관(이하 「약관」)은 OSW(이하 「서비스」)의 이용 조건을 정합니다. 서비스는 Windows 데스크톱 애플리케이션과 Companion 웹사이트(lmrm.vercel.app)를 포함합니다.",
       "서비스는 현재 베타(Beta) 단계로 제공되며, 기능·UI·연동 범위가 예고 없이 변경될 수 있습니다.",
-      "운영자: 개인 개발자 AutumnColor77",
+      "운영자: 총괄 프로듀싱 Temmis2077",
       `시행일: ${TERMS_EFFECTIVE_DATE}`,
       `일반 문의·커뮤니티: 문의 허브(${QA_URL}) 및 Discord(해당 페이지 안내)`,
       `버그·개인정보·공식 신고: GitHub Issues (${GITHUB_ISSUES_URL})`,

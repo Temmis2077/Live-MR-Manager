@@ -26,7 +26,7 @@ export const PRIVACY_SECTIONS: LegalSection[] = [
     paragraphs: [
       "OSW(이하 「서비스」)는 Windows 데스크톱 앱과 Companion 웹사이트(lmrm.vercel.app)를 통해 방송·연습용 MR 관리 및 멜로밍 노래책 연동 안내를 제공합니다.",
       "본 개인정보 처리방침은 서비스 이용 과정에서 처리되는 정보의 범위, 목적, 보유 기간 등을 설명합니다.",
-      "개인정보 처리자: 개인 개발자 AutumnColor77",
+      "개인정보 처리자: 총괄 프로듀싱 Temmis2077",
       `시행일: ${PRIVACY_EFFECTIVE_DATE}`,
       `일반 문의·커뮤니티: 문의 허브(${QA_URL}) 및 Discord(해당 페이지 안내). Discord 대화는 운영 목적으로 확인될 수 있으니 토큰·비밀번호 등 민감 정보는 올리지 마세요.`,
       `개인정보·공식 버그 신고: GitHub Issues (${GITHUB_ISSUES_URL})`,
