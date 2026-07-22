@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 |------|------|
 | 문서 버전 | 1.0 (2026-06-02) |
-| 대상 앱 | Live MR Manager (Tauri 2.x) |
+| 대상 앱 | OSW (Tauri 2.x) |
 | 관련 이슈 | [ToDo.md §7](../ToDo.md), [README 로드맵](../README.md) |
 | 공식 API | [채널 노래책 API](https://developers.meloming.com/docs/openapi/reference/songbook) |
 | Base URL | `https://openapi.meloming.com` |
@@ -17,7 +17,7 @@
 
 [멜로밍 채널 노래책 API](https://developers.meloming.com/docs/openapi/reference/songbook)와 앱 **로컬 라이브러리**를 **양방향 메타데이터 동기화**하여, 다음을 하나의 워크플로우로 맞춘다.
 
-- 방송·연습: Live MR Manager에서 MR 재생·AI 분리·가사 동기화
+- 방송·연습: OSW에서 MR 재생·AI 분리·가사 동기화
 - 플랫폼 노출: 멜로밍 노래책(시청자용 목록·검색·숙련도/난이도 등)
 
 ### 1.2 설계 원칙 (README P1~P3 준수)
@@ -131,7 +131,7 @@ curl -X POST "https://openapi.meloming.com/v1/channels/CHANNEL_ID/songs" \
 
 ### 3.3 모델 불일치
 
-| Live MR Manager | 멜로밍 |
+| OSW | 멜로밍 |
 |-----------------|--------|
 | `artist` (문자열) | `artistId` (숫자) |
 | `categories` / `curationCategory` | `categoryIds[]` |
@@ -200,7 +200,7 @@ CREATE TABLE IF NOT EXISTS Meloming_Category_Map (
 
 ## 5. 필드 매핑
 
-| 멜로밍 | Live MR Manager | 동기화 방향 |
+| 멜로밍 | OSW | 동기화 방향 |
 |--------|-----------------|-------------|
 | `title` | `title` | ↔ |
 | `artistId` | `melomingArtistId` + `artist` | ↔ (이름은 artists API) |

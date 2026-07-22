@@ -8,7 +8,7 @@ export const TERMS_SECTIONS: LegalSection[] = [
     id: "intro",
     title: "1. 총칙",
     paragraphs: [
-      "본 이용약관(이하 「약관」)은 Live MR Manager(이하 「서비스」)의 이용 조건을 정합니다. 서비스는 Windows 데스크톱 애플리케이션과 Companion 웹사이트(lmrm.vercel.app)를 포함합니다.",
+      "본 이용약관(이하 「약관」)은 OSW(이하 「서비스」)의 이용 조건을 정합니다. 서비스는 Windows 데스크톱 애플리케이션과 Companion 웹사이트(lmrm.vercel.app)를 포함합니다.",
       "서비스는 현재 베타(Beta) 단계로 제공되며, 기능·UI·연동 범위가 예고 없이 변경될 수 있습니다.",
       "운영자: 개인 개발자 AutumnColor77",
       `시행일: ${TERMS_EFFECTIVE_DATE}`,

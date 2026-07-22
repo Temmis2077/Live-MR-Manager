@@ -9,7 +9,7 @@ export const FAQ_ITEMS: FaqItem[] = [
   {
     id: "what-is-app",
     category: "시작하기",
-    question: "Live MR Manager는 어떤 앱인가요?",
+    question: "OSW는 어떤 앱인가요?",
     answer:
       "방송·연습용 MR을 관리하는 Windows 데스크톱 앱입니다. 유튜브·로컬 음원 재생, AI로 MR 분리, 가사 동기화, OBS 오버레이 등을 한곳에서 다룰 수 있습니다. 음원 파일은 내 PC에서만 처리됩니다.",
   },
@@ -18,7 +18,7 @@ export const FAQ_ITEMS: FaqItem[] = [
     category: "시작하기",
     question: "이 웹페이지는 무엇인가요?",
     answer:
-      "Live MR Manager와 멜로밍 노래책을 함께 쓰는 방법을 안내하는 공식 도움말 페이지입니다. 앱 다운로드 링크, 자주 묻는 질문, 멜로밍 로그인 후 앱으로 돌아오는 연결 화면도 제공합니다.",
+      "OSW와 멜로밍 노래책을 함께 쓰는 방법을 안내하는 공식 도움말 페이지입니다. 앱 다운로드 링크, 자주 묻는 질문, 멜로밍 로그인 후 앱으로 돌아오는 연결 화면도 제공합니다.",
   },
   {
     id: "meloming-why",
@@ -74,7 +74,7 @@ export const FAQ_ITEMS: FaqItem[] = [
     category: "멜로밍 노래책",
     question: "멜로밍 로그인 후 이 페이지가 뜨는 이유는?",
     answer:
-      "데스크톱 앱에서 「멜로밍 로그인」을 시작하면 브라우저가 이 페이지(/oauth/callback)를 거친 뒤 설치된 Live MR Manager 앱으로 돌아갑니다. 웹에서 /login으로 시작한 경우에는 웹 세션으로 처리됩니다.",
+      "데스크톱 앱에서 「멜로밍 로그인」을 시작하면 브라우저가 이 페이지(/oauth/callback)를 거친 뒤 설치된 OSW 앱으로 돌아갑니다. 웹에서 /login으로 시작한 경우에는 웹 세션으로 처리됩니다.",
   },
   {
     id: "contact",

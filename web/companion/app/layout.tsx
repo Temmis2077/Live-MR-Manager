@@ -9,7 +9,7 @@ export const metadata: Metadata = {
     template: `%s · ${SITE_NAME}`,
   },
   description:
-    "Live MR Manager 설치, 멜로밍 노래책 연동, 곡 정보 관리 도움말.",
+    "OSW 설치, 멜로밍 노래책 연동, 곡 정보 관리 도움말.",
   icons: {
     icon: SITE_ICON,
     apple: SITE_ICON,

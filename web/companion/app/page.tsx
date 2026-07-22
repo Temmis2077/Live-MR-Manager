@@ -10,7 +10,7 @@ export default function HomePage() {
           <span className="badge">퍼포머를 위한 MR 관리</span>
           <h1>연습·방송은 앱에서, 노래책은 멜로밍과 함께</h1>
           <p>
-            Live MR Manager로 MR·가사·재생을 관리하고, 멜로밍 노래책과 곡 정보를
+            OSW로 MR·가사·재생을 관리하고, 멜로밍 노래책과 곡 정보를
             맞춰 보세요. 음원은 내 PC에서만 다루고, 시청자에게 보이는 목록만
             깔끔하게 동기화할 수 있습니다.
           </p>
@@ -20,7 +20,7 @@ export default function HomePage() {
           <article className="card">
             <h2>앱 받기</h2>
             <p>
-              Windows용 Live MR Manager를 설치하고 라이브러리에 곡을 담아 보세요.
+              Windows용 OSW를 설치하고 라이브러리에 곡을 담아 보세요.
             </p>
             <Link href="/download" className="btn btn-primary">
               다운로드
@@ -100,7 +100,7 @@ export default function HomePage() {
         >
           <strong style={{ color: "var(--text)" }}>멜로밍에서 이 페이지를 여셨나요?</strong>
           <p style={{ margin: "0.5rem 0 0" }}>
-            멜로밍 안에서 보이는 이 화면은 Live MR Manager 연동 안내입니다. 앱
+            멜로밍 안에서 보이는 이 화면은 OSW 연동 안내입니다. 앱
             설치·노래책 맞추기 방법은 위 단계와{" "}
             <Link href="/faq">FAQ</Link>를 참고해 주세요. 멜로밍 로그인 직후에는
             잠시 연결 화면이 뜬 뒤 앱으로 돌아갑니다.

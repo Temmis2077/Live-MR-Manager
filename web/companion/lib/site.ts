@@ -1,11 +1,11 @@
-export const GITHUB_REPO = "AutumnColor77/Live-MR-Manager";
+export const GITHUB_REPO = "Temmis2077/Live-MR-Manager-Mod";
 export const GITHUB_RELEASES_URL = `https://github.com/${GITHUB_REPO}/releases`;
 export const GITHUB_ISSUES_URL = `https://github.com/${GITHUB_REPO}/issues`;
 
 export const MELOMING_DOCS_URL =
   "https://developers.meloming.com/docs/openapi/reference/songbook";
 
-export const SITE_NAME = "Live MR Manager";
+export const SITE_NAME = "OSW";
 
 export const SITE_LOGO = "/images/logo.png";
 export const SITE_ICON = "/images/app-icon.png";
@@ -16,7 +16,7 @@ export const COMPANION_BASE =
 export const FAQ_URL = `${COMPANION_BASE}/faq`;
 export const QA_URL = `${COMPANION_BASE}/qa`;
 
-/** Discord 초대 링크 — [LMRM] Live MR Manager */
+/** Discord 초대 링크 — [LMRM] OSW */
 export const DISCORD_INVITE_URL =
   process.env.NEXT_PUBLIC_DISCORD_INVITE_URL?.trim() ||
   "https://discord.gg/qfJnk3VJyf";

@@ -1,4 +1,4 @@
-# Live MR Manager — Vercel Companion
+# OSW — Vercel Companion
 
 멜로밍 노래책 연동용 **사용자-facing** companion 웹 (Next.js). 앱 안내·도움말·OAuth 콜백·(테스트) 웹 로그인.
 

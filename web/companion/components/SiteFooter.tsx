@@ -9,7 +9,7 @@ export function SiteFooter() {
   return (
     <footer className="site-footer">
       <p>
-        Live MR Manager — 방송·연습용 MR 관리 앱. 음원은 내 PC에서만 처리됩니다.
+        OSW — 방송·연습용 MR 관리 앱. 음원은 내 PC에서만 처리됩니다.
       </p>
       <p>
         <Link href="/faq">도움말</Link>

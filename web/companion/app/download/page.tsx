@@ -4,7 +4,7 @@ import { GITHUB_RELEASES_URL } from "@/lib/site";
 
 export const metadata = {
   title: "다운로드",
-  description: "Live MR Manager Windows 앱 다운로드",
+  description: "OSW Windows 앱 다운로드",
 };
 
 export default function DownloadPage() {
@@ -14,7 +14,7 @@ export default function DownloadPage() {
       <main>
         <section className="hero">
           <span className="badge">Windows</span>
-          <h1>Live MR Manager 받기</h1>
+          <h1>OSW 받기</h1>
           <p>
             PC에 설치한 뒤 MR 라이브러리를 만들고, 멜로밍 노래책과 곡 정보를
             맞출 수 있습니다.

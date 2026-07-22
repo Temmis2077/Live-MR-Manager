@@ -4,7 +4,7 @@ import { FaqList } from "@/components/FaqList";
 export const metadata = {
   title: "도움말",
   description:
-    "Live MR Manager 설치, 멜로밍 노래책 연동, 곡 정보·동기화에 대한 자주 묻는 질문",
+    "OSW 설치, 멜로밍 노래책 연동, 곡 정보·동기화에 대한 자주 묻는 질문",
 };
 
 export default function FaqPage() {

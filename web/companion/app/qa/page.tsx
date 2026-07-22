@@ -12,7 +12,7 @@ import {
 export const metadata = {
   title: "문의하기",
   description:
-    "Live MR Manager 설치·멜로밍 연동 문의 — Discord, FAQ, GitHub Issues",
+    "OSW 설치·멜로밍 연동 문의 — Discord, FAQ, GitHub Issues",
 };
 
 export default function QaPage() {

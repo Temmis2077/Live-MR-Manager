@@ -8,7 +8,7 @@ import {
 export const metadata = {
   title: "이용약관",
   description:
-    "Live MR Manager 및 Companion 웹 이용약관 — 베타 안내, 멜로밍 연동, 저작권·면책",
+    "OSW 및 Companion 웹 이용약관 — 베타 안내, 멜로밍 연동, 저작권·면책",
 };
 
 export default function TermsPage() {
@@ -20,7 +20,7 @@ export default function TermsPage() {
           <span className="badge">법적 고지</span>
           <h1>이용약관</h1>
           <p>
-            Live MR Manager 데스크톱 앱과 Companion 웹(lmrm.vercel.app) 이용
+            OSW 데스크톱 앱과 Companion 웹(lmrm.vercel.app) 이용
             조건을 안내합니다. 시행일: {TERMS_EFFECTIVE_DATE}
           </p>
         </section>
