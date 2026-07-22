@@ -32,12 +32,12 @@ export function showAppModePicker() {
   overlay.innerHTML = `
     <div class="modal-content mode-picker-modal">
       <div class="mode-picker-header">
-        <h3>어떤 모드로 시작할까요?</h3>
-        <p class="mode-picker-sub">나중에 설정에서 언제든 바꿀 수 있어요.</p>
+        <h3>어떤 용도로 쓰실 건가요?</h3>
+        <p class="mode-picker-sub">라이브 방송인가요, 녹음(커버 제작)인가요? 나중에 설정에서 언제든 바꿀 수 있어요.</p>
       </div>
       <div class="mode-card-grid">
-        ${card(APP_MODES.basic)}
-        ${card(APP_MODES.studio)}
+        ${card(APP_MODES.live)}
+        ${card(APP_MODES.recording)}
       </div>
     </div>`;
   document.body.appendChild(overlay);

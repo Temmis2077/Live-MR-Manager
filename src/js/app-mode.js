@@ -1,11 +1,11 @@
 /**
- * app-mode.js — 앱 모드(기본 / 스튜디오)
+ * app-mode.js — 앱 모드(라이브 / 녹음)
  *
- * OSW는 두 갈래로 쓰인다:
- *  - **기본(basic)**: 지금의 음악 플레이어형. 곡을 보컬/MR로 분리하고 재생·가사
- *    싱크·오버레이. 노래 방송·연습에 바로.
- *  - **스튜디오(studio)**: 고급. 보컬은 물론 **악기별 스템 분리**와 믹싱까지
- *    다루는 미니 DAW 방향(악기 분리·전용 레이아웃은 준비 중).
+ * OSW는 "무엇을 하는가"로 두 갈래로 나뉜다(실력 사다리가 아니라 용도 축):
+ *  - **라이브(live)**: 방송·공연. 실시간으로 MR에 맞춰 노래한다. 모니터/MR 채널
+ *    분리, 실시간 출력 장치 전환, OBS 오버레이. 보컬·MR 중심.
+ *  - **녹음(recording)**: 커버 제작. 곡을 스템으로 열어 **악기까지 분리**하고
+ *    믹싱·이펙트로 트랙을 만든다. 미니 DAW 방향(악기 분리·전용 화면은 준비 중).
  *
  * 첫 실행 때 한 번 고르고(showAppModePicker), 설정에서 언제든 바꿀 수 있다.
  * 선택은 localStorage에 저장하고, body[data-app-mode]로 노출해 UI가 게이팅한다.
@@ -14,31 +14,31 @@
 const KEY = 'appMode';
 
 export const APP_MODES = {
-  basic: {
-    id: 'basic',
-    label: '기본',
-    tagline: '노래 방송·연습',
-    desc: '곡을 보컬/MR로 분리하고 재생·가사 싱크·OBS 오버레이. 지금 바로 쓰기 좋은 형태입니다.',
-    supports: '보컬 · MR',
-    emoji: '🎤',
+  live: {
+    id: 'live',
+    label: '라이브',
+    tagline: '방송 · 공연',
+    desc: '실시간으로 MR에 맞춰 노래합니다. 모니터/MR 채널 분리, 실시간 출력 장치 전환, OBS 오버레이. 노래 방송에 바로 쓰기 좋은 형태입니다.',
+    supports: '보컬 · MR · 실시간 출력',
+    emoji: '📡',
   },
-  studio: {
-    id: 'studio',
-    label: '스튜디오',
-    tagline: '고급 · 미니 DAW',
-    desc: '보컬은 물론 악기별 스템 분리와 믹싱까지. 곡을 완전히 열어 다룹니다. (악기 분리·전용 화면은 준비 중)',
-    supports: '보컬 · MR · 악기 스템',
+  recording: {
+    id: 'recording',
+    label: '녹음',
+    tagline: '커버 제작 · 미니 DAW',
+    desc: '곡을 스템으로 열어 악기까지 분리하고 믹싱·이펙트로 트랙을 만듭니다. 커버 제작·연습에. (악기 분리·전용 화면은 준비 중)',
+    supports: '보컬 · MR · 악기 스템 · 믹싱',
     emoji: '🎛️',
   },
 };
 
-export const DEFAULT_MODE = 'basic';
+export const DEFAULT_MODE = 'live';
 
 export function isValidMode(mode) {
-  return mode === 'basic' || mode === 'studio';
+  return mode === 'live' || mode === 'recording';
 }
 
-/** 저장된 모드('basic'|'studio') 또는 아직 안 골랐으면 null. */
+/** 저장된 모드('live'|'recording') 또는 아직 안 골랐으면 null. */
 export function getAppMode() {
   const v = localStorage.getItem(KEY);
   return isValidMode(v) ? v : null;
