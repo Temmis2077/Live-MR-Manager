@@ -78,11 +78,17 @@ html[data-theme="dark"] {
   --glass-bg: rgba(255, 255, 255, 0.03);
   --glass-border: rgba(255, 255, 255, 0.08);
 
-  --accent-primary: #3b82f6;
-  --accent-rgb: 59 130 246;
-  --accent-secondary: #8b5cf6;
-  --accent-gradient: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
-  --accent-glow: rgba(59, 130, 246, 0.4);
+  /* 브랜드 보라(마크·워드마크와 동일 계열) — 이전엔 범용 파랑(#3b82f6)이었다. */
+  --accent-primary: #8b5cf6;
+  --accent-rgb: 139 92 246;
+  --accent-secondary: #a78bfa;
+  --accent-gradient: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%);
+  --accent-glow: rgba(139, 92, 246, 0.4);
+
+  /* 앱 모드별 지오메트리 — 기본(라이브 모드 방향)은 넉넉한 라운드.
+     녹음 모드는 body[data-app-mode="recording"]에서 더 각지게 오버라이드. */
+  --radius-nav: 10px;
+  --radius-card: 14px;
 
   --text-main: #f8fafc;
   --text-muted: #94a3b8;
@@ -109,6 +115,14 @@ html[data-theme="dark"] {
   --btn-h-md: 34px;
   --btn-h-lg: 46px;
   --btn-h-xl: 60px;
+}
+
+/* 앱 모드(라이브/녹음)에 따른 지오메트리 — 라이브는 위 기본값(넉넉한 라운드),
+   녹음은 미니 DAW 방향에 맞춰 더 각지고 절제된 톤으로. body[data-app-mode]는
+   app-mode.js가 설정한다. */
+body[data-app-mode="recording"] {
+  --radius-nav: 6px;
+  --radius-card: 9px;
 }
 
 html[data-theme="light"] {
