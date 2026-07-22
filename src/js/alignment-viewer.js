@@ -1693,9 +1693,17 @@ export class ForcedAlignmentViewer {
         }
     }
 
+    /** AI가 놓은(approx) 줄 중 음향 신뢰도가 낮아 사용자 검토가 권장되는 줄인지.
+     *  신뢰도(0~1)는 백엔드가 준 line.confidence를 세그먼트에 실은 값이다.
+     *  고친 줄은 다음 정렬에서 하드 앵커가 되어 정확도가 누적된다. */
+    _needsReview(s) {
+        return !!(s && s.approx) && typeof s.confidence === 'number' && s.confidence < 0.45;
+    }
+
     renderLyricList() {
         const container = document.getElementById('lyric-lines-container');
         if (!container) return;
+        const REVIEW_BADGE = '<span class="review-badge" title="AI 정렬 신뢰도가 낮은 줄입니다. 들어보고 필요하면 시간을 직접 맞춰 주세요 — 고치면 다음 자동 정렬의 기준(앵커)이 됩니다.">확인</span>';
         const toggleBtn = document.getElementById('toggle-translation-btn');
         if (toggleBtn) {
             const showing = getShowTranslation();
@@ -1709,16 +1717,18 @@ export class ForcedAlignmentViewer {
                     ? displayLines.map((l, li) => `<span class="triplet-line triplet-line-${li}">${l}</span>`).join('')
                     : '&nbsp;';
                 return `
-            <div class="lyric-line-item" data-index="${i}">
+            <div class="lyric-line-item${this._needsReview(s) ? ' needs-review' : ''}" data-index="${i}">
                 <span class="time-range" title="이 시간으로 재생 이동">${this.formatTime(s.start)}</span>
                 <span class="lyric-text triplet-text" title="이 가사 위치로 탐색 및 타겟 지정">${html}</span>
+                ${this._needsReview(s) ? REVIEW_BADGE : ''}
             </div>
         `;
             }
             return `
-            <div class="lyric-line-item" data-index="${i}">
+            <div class="lyric-line-item${this._needsReview(s) ? ' needs-review' : ''}" data-index="${i}">
                 <span class="time-range" title="이 시간으로 재생 이동">${this.formatTime(s.start)}</span>
                 <span class="lyric-text" title="이 가사 위치로 탐색 및 타겟 지정">${(s.text && s.text.trim()) ? s.text : '&nbsp;'}</span>
+                ${this._needsReview(s) ? REVIEW_BADGE : ''}
             </div>
         `;
         }).join('');

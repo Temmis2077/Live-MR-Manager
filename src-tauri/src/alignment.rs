@@ -134,6 +134,12 @@ pub struct LineAlignment {
     pub start_ms: i64,
     pub end_ms: i64,
     pub words: Vec<WordAlignment>,
+    /// 이 줄 정렬의 음향적 확신도 0~1 (그 줄 토큰이 배정된 프레임에서의 평균
+    /// emission 확률의 기하평균). 모델이 "여기서 이 글자를 들었다"고 강하게 말한
+    /// 줄일수록 1에 가깝다. UI가 낮은 줄을 표시해 사용자가 우선 검토하게 한다.
+    /// 배정 프레임이 없는 줄(타 언어·보간)은 0.
+    #[serde(default)]
+    pub confidence: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -742,6 +748,43 @@ fn resolve_anchor_points(
     clean
 }
 
+/// 줄별 음향 확신도(0~1)를 계산한다. 각 줄의 토큰이 최종 경로에서 배정된
+/// 프레임에서의 평균 emission 로그확률을 exp()해 기하평균 확률로 돌려준다.
+/// 배정 프레임이 없는 줄(타 언어·보간)은 0.0.
+fn line_confidences(
+    emission_probs: &Array2<f32>,
+    target_tokens: &[usize],
+    line_spans: &[LineTokenSpan],
+    path: &[usize],
+) -> Vec<f32> {
+    let mut out = Vec::with_capacity(line_spans.len());
+    for ls in line_spans {
+        if ls.tok_to <= ls.tok_from {
+            out.push(0.0);
+            continue;
+        }
+        let mut sum = 0f32;
+        let mut cnt = 0usize;
+        for (f, &tok_idx) in path.iter().enumerate() {
+            if tok_idx == usize::MAX {
+                continue;
+            }
+            if tok_idx >= ls.tok_from && tok_idx < ls.tok_to {
+                sum += emission_probs[[f, target_tokens[tok_idx]]];
+                cnt += 1;
+            }
+        }
+        if cnt == 0 {
+            out.push(0.0);
+        } else {
+            // 로그확률 평균 → exp로 기하평균 확률(0~1)로. NaN/음수는 0으로 가둔다.
+            let c = (sum / cnt as f32).exp();
+            out.push(if c.is_finite() { c.clamp(0.0, 1.0) } else { 0.0 });
+        }
+    }
+    out
+}
+
 /// 노래 가능한 글자 수 — 길이 타당성의 기준이 되는 줄 "무게".
 /// 공백·문장부호를 빼고 실제 발음되는 글자만 센다(최소 1).
 fn singable_len(text: &str) -> usize {
@@ -868,11 +911,15 @@ fn perform_alignment_internal(
     };
     let timestamps = aligner.get_word_timestamps(&path, &word_spans, frame_duration_ms);
 
+    // 줄별 음향 확신도 — UI가 낮은 줄을 표시해 우선 검토를 유도한다(고친 줄은
+    // 다음 정렬에서 앵커가 되어 선순환).
+    let confidences = line_confidences(&emission_probs, &target_tokens, &line_spans, &path);
+
     let greedy_path = aligner.greedy_decode(&emission_probs);
 
     let mut all_line_alignments = Vec::new();
     let mut word_idx = 0;
-    for line_text in lyric_lines {
+    for (li, line_text) in lyric_lines.into_iter().enumerate() {
         let words_in_line: Vec<&str> = line_text.split_whitespace().collect();
         let mut line_words = Vec::new();
         let mut line_start_ms = 0;
@@ -903,6 +950,7 @@ fn perform_alignment_internal(
                 start_ms: line_start_ms,
                 end_ms: line_end_ms,
                 words: line_words,
+                confidence: confidences.get(li).copied().unwrap_or(0.0),
             });
         }
     }
@@ -1804,6 +1852,33 @@ mod aligner_tests {
         assert_eq!(pts, vec![(0usize, 50usize), (8usize, 100usize)]);
     }
 
+    #[test]
+    fn line_confidences_reflect_emission_strength() {
+        // 토큰 2개짜리 두 줄. 첫 줄은 강한 emission, 둘째 줄은 약한 emission.
+        let line_spans = vec![
+            LineTokenSpan { tok_from: 0, tok_to: 2 },
+            LineTokenSpan { tok_from: 2, tok_to: 4 },
+            LineTokenSpan { tok_from: 4, tok_to: 4 }, // 토큰 없는 줄(타 언어) → 0
+        ];
+        let target_tokens = vec![1usize, 2, 3, 4];
+        let vocab = 6;
+        let mut e = Array2::<f32>::from_elem((4, vocab), -8.0);
+        // 프레임0,1 → 첫 줄 토큰(로그확률 ≈ ln(0.9)= -0.105): 확신도 높음
+        e[[0, 1]] = (0.9f32).ln();
+        e[[1, 2]] = (0.9f32).ln();
+        // 프레임2,3 → 둘째 줄 토큰(로그확률 = ln(0.1)= -2.30): 확신도 낮음
+        e[[2, 3]] = (0.1f32).ln();
+        e[[3, 4]] = (0.1f32).ln();
+        let path = vec![0usize, 1, 2, 3]; // 전역 토큰 인덱스
+
+        let conf = line_confidences(&e, &target_tokens, &line_spans, &path);
+        assert_eq!(conf.len(), 3);
+        assert!((conf[0] - 0.9).abs() < 0.05, "강한 줄 확신도 ≈ 0.9: {}", conf[0]);
+        assert!((conf[1] - 0.1).abs() < 0.05, "약한 줄 확신도 ≈ 0.1: {}", conf[1]);
+        assert_eq!(conf[2], 0.0, "토큰 없는 줄은 0");
+        assert!(conf[0] > conf[1], "강한 줄이 약한 줄보다 확신도 높아야");
+    }
+
     fn mk_line(text: &str, start_ms: i64, end_ms: i64) -> LineAlignment {
         LineAlignment {
             text: text.to_string(),
@@ -1811,6 +1886,7 @@ mod aligner_tests {
             start_ms,
             end_ms,
             words: vec![WordAlignment { word: text.to_string(), start_ms, end_ms }],
+            confidence: 1.0,
         }
     }
 

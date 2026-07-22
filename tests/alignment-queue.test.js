@@ -98,6 +98,14 @@ describe('mergeAlignmentResult', () => {
     expect(segments[0].start).toBeCloseTo(3);
   });
 
+  it('carries per-line confidence onto the filled segment for review flagging', () => {
+    const segments = [{ text: '미싱크 줄', start: 0, end: 0 }];
+    const lines = [{ text: '미싱크 줄', start_ms: 1000, end_ms: 2000, confidence: 0.12 }];
+    mergeAlignmentResult(segments, lines);
+    expect(segments[0].confidence).toBeCloseTo(0.12);
+    expect(segments[0].approx).toBe(true);
+  });
+
   it('returns 0 for empty inputs without throwing', () => {
     expect(mergeAlignmentResult([], [])).toBe(0);
     expect(mergeAlignmentResult(null, null)).toBe(0);

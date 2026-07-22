@@ -348,6 +348,36 @@ canvas#waveform-canvas {
     border-color: color-mix(in srgb, var(--accent-primary) 55%, transparent);
 }
 
+/* AI 정렬 신뢰도가 낮아 검토가 권장되는 줄 — 은근한 앰버 틴트 + "확인" 배지.
+   사용자가 이 줄을 고치면 다음 정렬의 하드 앵커가 되어 정확도가 누적된다. */
+.lyric-line-item.needs-review {
+    border-color: color-mix(in srgb, #e0a020 55%, var(--align-item-border));
+    background: color-mix(in srgb, #e0a020 8%, var(--align-item-bg));
+}
+
+.lyric-line-item .review-badge {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    padding: 2px 7px;
+    border-radius: 999px;
+    color: #7a5200;
+    background: color-mix(in srgb, #e0a020 78%, white);
+    border: 1px solid color-mix(in srgb, #e0a020 60%, transparent);
+    cursor: help;
+}
+
+@media (prefers-color-scheme: dark) {
+    .lyric-line-item .review-badge {
+        color: #ffd27a;
+        background: color-mix(in srgb, #e0a020 24%, transparent);
+        border-color: color-mix(in srgb, #e0a020 50%, transparent);
+    }
+}
+
 @keyframes sync-pulse {
     0% { border-color: var(--align-sync-pulse-border-1); box-shadow: 0 0 15px var(--align-sync-pulse-shadow-1); }
     50% { border-color: var(--align-sync-pulse-border-2); box-shadow: 0 0 35px var(--align-sync-pulse-shadow-2); }

@@ -344,6 +344,8 @@ export function mergeAlignmentResult(segments, lines) {
     seg.start = Math.max(0, line.start_ms / 1000);
     seg.end = Math.max(seg.start + 0.05, line.end_ms / 1000);
     seg.approx = true;
+    // 정렬 신뢰도(0~1, 표시 전용). UI가 낮은 줄을 "검토 필요"로 강조한다.
+    if (typeof line.confidence === 'number') seg.confidence = line.confidence;
     appliedCount++;
   });
   return appliedCount;
