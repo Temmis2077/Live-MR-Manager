@@ -4,7 +4,8 @@ use serde_json::Value;
 use tauri::{Emitter, WebviewWindow};
 use std::path::{PathBuf, Path};
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::process::Command;
 use tokio::io::AsyncWriteExt;
 use tokio_util::codec::{FramedRead, LinesCodec};
@@ -42,6 +43,9 @@ pub struct YoutubeManager;
 
 static METADATA_CACHE: Lazy<RwLock<HashMap<String, (YoutubeMetadata, Instant)>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
+/// 마지막 yt-dlp 강제 갱신 시각(epoch secs). 배치 실패로 여러 곡이 동시에
+/// 재시도할 때 yt-dlp를 몇 번씩 재다운로드하지 않도록 짧은 창으로 중복을 막는다.
+static LAST_YTDLP_FORCE_UPDATE: AtomicU64 = AtomicU64::new(0);
 const METADATA_CACHE_TTL: Duration = Duration::from_secs(60 * 30);
 const METADATA_TIMEOUT: Duration = Duration::from_secs(12);
 
@@ -183,15 +187,44 @@ impl YoutubeManager {
         }
     }
 
+    /// 관리형 yt-dlp를 최신본으로 받아 원자적으로 교체한다(성공 시 true).
+    ///
+    /// 안전 원칙: (1) 관리형 캐시의 바이너리만 대상(시스템/번들은 건드리지 않음),
+    /// (2) 임시 파일로 받아 완결됐을 때만 교체(반쯤 받다 실패해도 기존 것 보존),
+    /// (3) 어떤 실패에도 기존 바이너리를 유지 — 오프라인이어도 앱은 계속 동작.
+    async fn download_and_swap_yt_dlp() -> bool {
+        let managed = Self::managed_cache_dir().join(Self::managed_bin_name());
+        let url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
+        let tmp = managed.with_extension("exe.new");
+        let Ok(resp) = reqwest::get(url).await else { return false; };
+        if !resp.status().is_success() {
+            return false;
+        }
+        let Ok(bytes) = resp.bytes().await else { return false; };
+        // 온전성 최소 확인: 정상 yt-dlp.exe는 수 MB 이상이다.
+        if bytes.len() < 1_000_000 {
+            return false;
+        }
+        if let Some(parent) = tmp.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if tokio::fs::write(&tmp, &bytes).await.is_err() {
+            return false;
+        }
+        // 원자적 교체. 실행 중이면 실패할 수 있으나 그땐 기존 것을 그대로 둔다.
+        if std::fs::rename(&tmp, &managed).is_err() {
+            let _ = std::fs::remove_file(&tmp);
+            return false;
+        }
+        crate::audio_player::sys_log("[Tools] yt-dlp를 최신 버전으로 갱신했습니다");
+        true
+    }
+
     /// 관리형 yt-dlp가 오래됐으면(7일+) 백그라운드로 최신본을 받아 교체한다.
     ///
     /// yt-dlp는 유튜브가 추출을 깰 때마다 거의 주 단위로 갱신되므로, 설치 시점에
     /// 한 번 받은 뒤 방치하면 "곡 추가가 어느 날 갑자기 실패"(봇 감지 등)의 주범이
     /// 된다. 앱 시작 시 조용히 호출해 신선하게 유지한다.
-    ///
-    /// 안전 원칙: (1) 관리형 캐시의 바이너리만 갱신(시스템/번들은 건드리지 않음),
-    /// (2) 임시 파일로 받아 완결됐을 때만 교체(반쯤 받다 실패해도 기존 것 보존),
-    /// (3) 어떤 실패에도 기존 바이너리를 유지 — 오프라인이어도 앱은 계속 동작.
     pub async fn refresh_managed_yt_dlp_if_stale() {
         const MAX_AGE_SECS: u64 = 7 * 24 * 60 * 60; // 7일
 
@@ -209,27 +242,55 @@ impl YoutubeManager {
         if fresh {
             return;
         }
+        LAST_YTDLP_FORCE_UPDATE.store(Self::now_secs(), Ordering::Relaxed);
+        let _ = Self::download_and_swap_yt_dlp().await;
+    }
 
-        let url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
-        let tmp = managed.with_extension("exe.new");
-        let Ok(resp) = reqwest::get(url).await else { return; };
-        if !resp.status().is_success() {
-            return;
+    fn now_secs() -> u64 {
+        SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+    }
+
+    /// 추출 실패 직후 즉시 yt-dlp를 최신본으로 강제 교체한다(성공/최신 판단 시 true).
+    /// 배치 실패로 여러 번 연달아 호출돼도 최근 갱신 이력이 있으면 재다운로드를
+    /// 생략하고 true를 돌려, 호출 측이 "재시도만" 하도록 한다.
+    pub async fn force_update_managed_yt_dlp() -> bool {
+        // 관리형 캐시 바이너리만 강제 갱신 대상(시스템/번들은 우리가 못 바꾼다).
+        let managed = Self::managed_cache_dir().join(Self::managed_bin_name());
+        let now = Self::now_secs();
+        let last = LAST_YTDLP_FORCE_UPDATE.load(Ordering::Relaxed);
+        if last != 0 && now.saturating_sub(last) < 300 {
+            // 최근 5분 내 이미 갱신 시도 — 사실상 최신이라 보고 재시도만 하게 한다.
+            return managed.exists();
         }
-        let Ok(bytes) = resp.bytes().await else { return; };
-        // 온전성 최소 확인: 정상 yt-dlp.exe는 수 MB 이상이다.
-        if bytes.len() < 1_000_000 {
-            return;
+        LAST_YTDLP_FORCE_UPDATE.store(now, Ordering::Relaxed);
+        Self::download_and_swap_yt_dlp().await
+    }
+
+    /// yt-dlp 갱신으로 고쳐질 법한 추출 실패인지 판정한다(봇 감지·추출기 파손 등).
+    /// 영상이 실제로 없거나 비공개인 경우는 갱신해도 소용없으므로 제외한다 —
+    /// 그런 경우까지 재다운로드·재시도하면 시간만 버린다.
+    pub fn is_extractor_staleness_error(msg: &str) -> bool {
+        let m = msg.to_lowercase();
+        let permanent = m.contains("video unavailable")
+            || m.contains("private video")
+            || m.contains("members-only")
+            || m.contains("removed by the uploader")
+            || m.contains("this video is not available")
+            || m.contains("account associated with this video has been terminated");
+        if permanent {
+            return false;
         }
-        if tokio::fs::write(&tmp, &bytes).await.is_err() {
-            return;
-        }
-        // 원자적 교체. 실행 중이면 실패할 수 있으나 그땐 기존 것을 그대로 둔다.
-        if std::fs::rename(&tmp, &managed).is_err() {
-            let _ = std::fs::remove_file(&tmp);
-            return;
-        }
-        crate::audio_player::sys_log("[Tools] yt-dlp를 최신 버전으로 갱신했습니다");
+        m.contains("confirm you're not a bot")
+            || m.contains("confirm you are not a bot")
+            || m.contains("sign in to confirm")
+            || m.contains("unable to extract")
+            || m.contains("nsig extraction failed")
+            || m.contains("failed to extract any player response")
+            || m.contains("unable to download api page")
+            || m.contains("precondition check failed")
+            || m.contains("please update yt-dlp")
+            || m.contains("update to the latest version")
+            || m.contains("http error 403")
     }
 
     /// Finds the best yt-dlp executable by checking managed and system paths.
@@ -425,7 +486,36 @@ impl YoutubeManager {
         Ok(metadata)
     }
 
+    /// 오디오를 내려받되, 추출 실패(봇 감지·추출기 파손 등)면 yt-dlp를 즉시 최신본
+    /// 으로 갱신하고 **1회 재시도**한다. 유튜브가 오늘 바뀌고 yt-dlp가 오늘 고쳤을
+    /// 때, 시작 시 7일 주기 갱신을 기다리지 않고 바로 복구되게 하기 위함이다.
     pub async fn download_audio(
+        window: &WebviewWindow,
+        url: &str,
+        destination: PathBuf,
+        wait_for_full: bool,
+    ) -> Result<PathBuf, String> {
+        match Self::download_audio_once(window, url, destination.clone(), wait_for_full).await {
+            Ok(p) => Ok(p),
+            Err(e) if Self::is_extractor_staleness_error(&e) => {
+                crate::audio_player::sys_log(&format!(
+                    "[Youtube] 추출 실패로 판단 — yt-dlp 갱신 후 재시도: {}",
+                    e
+                ));
+                if Self::force_update_managed_yt_dlp().await {
+                    // 실패로 남은 부분 파일이 있으면 yt-dlp가 "이미 있음"으로
+                    // 건너뛸 수 있으니 지우고 깨끗이 재시도한다.
+                    let _ = std::fs::remove_file(&destination);
+                    Self::download_audio_once(window, url, destination, wait_for_full).await
+                } else {
+                    Err(e)
+                }
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    async fn download_audio_once(
         window: &WebviewWindow,
         url: &str,
         destination: PathBuf,
@@ -671,6 +761,45 @@ impl YoutubeManager {
                 return Err("YouTube 오디오 파일이 생성되지 않았습니다 (Timeout)".into());
             }
             Ok(destination)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn staleness_error_matches_extractor_breakage() {
+        // yt-dlp 갱신으로 고쳐지는 전형적 실패 — 재시도 대상.
+        for msg in [
+            "ERROR: [youtube] abc: Sign in to confirm you're not a bot",
+            "ERROR: unable to extract player response",
+            "nsig extraction failed: Some players may not work",
+            "Please update yt-dlp to the latest version",
+            "ERROR: unable to download API page: HTTP Error 403: Forbidden",
+        ] {
+            assert!(
+                YoutubeManager::is_extractor_staleness_error(msg),
+                "갱신으로 고쳐질 실패인데 놓침: {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn staleness_error_ignores_permanently_unavailable_videos() {
+        // 영상이 실제로 없거나 비공개 — 갱신·재시도해도 소용없으므로 제외.
+        for msg in [
+            "ERROR: [youtube] abc: Video unavailable",
+            "ERROR: [youtube] abc: Private video. Sign in if you've been granted access",
+            "ERROR: [youtube] abc: This video is not available",
+            "ERROR: Join this channel to get access to members-only content",
+            "This video has been removed by the uploader",
+        ] {
+            assert!(
+                !YoutubeManager::is_extractor_staleness_error(msg),
+                "영구 실패인데 재시도 대상으로 잘못 판정: {msg}"
+            );
         }
     }
 }
