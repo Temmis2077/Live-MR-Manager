@@ -3,11 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <title>OSW Song Info Overlay</title>
+  <!-- @import는 로드가 끝날 때까지 첫 페인트를 막아, 느린 네트워크에서 이
+       투명 오버레이가 잠깐 흰 배경으로 보이는 원인이 된다(가끔 발생하는 흰
+       배경 버그). media="print" 트릭으로 렌더링을 막지 않게 비동기 로드한다. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Noto+Sans+KR:wght@400;700;900&display=swap"
+        rel="stylesheet" media="print" onload="this.media='all'">
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Noto+Sans+KR:wght@400;700;900&display=swap');
-
     :root {
       --accent-color: #8b5cf6;
+      --accent-rgb: 139 92 246;
       --overlay-scale: 1;
       --overlay-font: 'Inter', 'Noto Sans KR', sans-serif;
       --overlay-rounding: 20px;
@@ -22,8 +28,11 @@
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
+    html, body {
+      background: transparent !important;
+    }
+
     body {
-      background: transparent;
       color: var(--text-main);
       font-family: var(--overlay-font);
       overflow: hidden;
@@ -42,19 +51,43 @@
       border: 1px solid var(--glass-border);
       padding: 16px 24px;
       border-radius: var(--overlay-rounding);
-      gap: 20px;
       box-shadow: 0 15px 50px rgba(0, 0, 0, 0.6);
-      
+
       /* Hard cap overlay width regardless of content length */
       width: min(400px, calc(100vw - 32px));
       max-width: min(400px, calc(100vw - 32px));
       min-width: 0;
-      
-      transition: 
+
+      transition:
         transform 0.62s cubic-bezier(0.18, 1.32, 0.38, 1),
         opacity 0.32s ease;
       will-change: transform, opacity;
       opacity: 0;
+    }
+
+    /* 위치/등장 애니메이션(overlay-container)과 은은한 플로팅(fx-wrapper)의
+       transform이 서로 겹치지 않도록, 콘텐츠를 별도 래퍼로 분리했다. */
+    .fx-wrapper {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      width: 100%;
+    }
+
+    @keyframes overlay-float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-6px); }
+    }
+    .overlay-container.fx-float .fx-wrapper {
+      animation: overlay-float 3.2s ease-in-out infinite;
+    }
+
+    @keyframes overlay-glow-pulse {
+      0%, 100% { box-shadow: 0 15px 50px rgba(0, 0, 0, 0.6), 0 0 0 rgb(var(--accent-rgb) / 0); }
+      50% { box-shadow: 0 15px 50px rgba(0, 0, 0, 0.6), 0 0 32px rgb(var(--accent-rgb) / 0.55); }
+    }
+    .overlay-container.fx-glow {
+      animation: overlay-glow-pulse 2.2s ease-in-out infinite;
     }
 
     /* RIGHT ALIGNED */
@@ -169,15 +202,17 @@
     }
   </style>
 </head>
-<body>
+<body style="background: transparent;">
   <div class="overlay-container" id="container">
-    <div class="thumbnail-wrapper" id="thumb-wrap">
-      <img src="" alt="" class="thumbnail" id="thumb">
-    </div>
-    <div class="info">
-      <div class="label">NOW PLAYING</div>
-      <div class="scroll-window"><div class="scroll-text" id="title">Title</div></div>
-      <div class="scroll-window"><div class="scroll-text" id="artist">Artist</div></div>
+    <div class="fx-wrapper" id="fx-wrapper">
+      <div class="thumbnail-wrapper" id="thumb-wrap">
+        <img src="" alt="" class="thumbnail" id="thumb">
+      </div>
+      <div class="info">
+        <div class="label">NOW PLAYING</div>
+        <div class="scroll-window"><div class="scroll-text" id="title">Title</div></div>
+        <div class="scroll-window"><div class="scroll-text" id="artist">Artist</div></div>
+      </div>
     </div>
   </div>
 
@@ -298,12 +333,18 @@
         document.documentElement.style.setProperty('--overlay-scale', style.scale || 1.0);
         document.documentElement.style.setProperty('--overlay-font', `"${style.font || 'Inter'}", 'Noto Sans KR', sans-serif`);
         document.documentElement.style.setProperty('--overlay-rounding', `${style.rounding !== undefined ? style.rounding : 20}px`);
-        document.documentElement.style.setProperty('--accent-color', `#${(style.color || '8b5cf6').replace('#','')}`);
+        const accentHex = (style.color || '8b5cf6').replace('#', '');
+        document.documentElement.style.setProperty('--accent-color', `#${accentHex}`);
+        document.documentElement.style.setProperty('--accent-rgb', hexToRgb(accentHex));
         const textColor = `#${(style.text_color || style.textColor || 'ffffff').replace('#', '')}`;
         const textColorRgb = hexToRgb(style.text_color || style.textColor || 'ffffff');
         document.documentElement.style.setProperty('--text-main', textColor);
         document.documentElement.style.setProperty('--text-muted', `rgba(${textColorRgb}, 0.62)`);
         document.documentElement.style.setProperty('--glass-bg', `rgba(${hexToRgb(style.bg_color || style.bgColor)}, ${style.bg_opacity ?? style.bgOpacity ?? 0.85})`);
+
+        // 특수효과 — 플로팅(fx-wrapper 이동)·글로우(컨테이너 그림자 펄스)
+        container.classList.toggle('fx-float', style.effect_float === true || style.effectFloat === true);
+        container.classList.toggle('fx-glow', style.effect_glow === true || style.effectGlow === true);
 
         // Layout / Direction
         const dir = style.animation_direction || style.animationDirection || 'right';

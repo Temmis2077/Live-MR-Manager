@@ -21,14 +21,17 @@ const OVERLAY_PRESETS = {
   glass: {
     scale: 1.0, font: 'Pretendard', color: '8b5cf6', textColor: 'ffffff',
     bgOpacity: 0.6, rounding: 20, bgColor: '0f0f14', animationDirection: 'left', fontSize: 22,
+    effectFloat: true, effectGlow: false,
   },
   minimal: {
     scale: 1.0, font: 'Inter', color: 'a78bfa', textColor: 'ffffff',
     bgOpacity: 0.1, rounding: 10, bgColor: '000000', animationDirection: 'top', fontSize: 24,
+    effectFloat: false, effectGlow: false,
   },
   stage: {
     scale: 1.2, font: 'SUITE', color: 'ec4899', textColor: 'ffffff',
     bgOpacity: 0.9, rounding: 30, bgColor: '1a0b2e', animationDirection: 'bottom', fontSize: 27,
+    effectFloat: false, effectGlow: true,
   },
 };
 
@@ -72,6 +75,8 @@ export function initOverlayListeners() {
   const overlayAnimationDirection = document.getElementById('overlay-animation-direction');
   const toggleOverlayLan = document.getElementById('toggle-overlay-lan');
   const overlayLanStatus = document.getElementById('overlay-lan-status');
+  const overlayEffectFloat = document.getElementById('overlay-effect-float');
+  const overlayEffectGlow = document.getElementById('overlay-effect-glow');
 
   const resizeOverlayPreview = () => {
     if (!overlayIframe || !overlayPreviewWrapper) return;
@@ -173,6 +178,8 @@ export function initOverlayListeners() {
     const isForceVisible = toggleOverlayForceVisible.checked;
     const animationDirection = overlayAnimationDirection.value || 'left';
     const themeMode = document.documentElement.getAttribute('data-theme') || 'dark';
+    const effectFloat = !!(overlayEffectFloat && overlayEffectFloat.checked);
+    const effectGlow = !!(overlayEffectGlow && overlayEffectGlow.checked);
 
     if (!skipSave) {
       const saved = localStorage.getItem('overlay-settings');
@@ -180,7 +187,7 @@ export function initOverlayListeners() {
       try { config = JSON.parse(saved) || {}; } catch(e) {}
 
       config[currentTarget] = {
-        scale, font, color, textColor, bgOpacity, rounding, bgColor, animationDirection, fontSize
+        scale, font, color, textColor, bgOpacity, rounding, bgColor, animationDirection, fontSize, effectFloat, effectGlow
       };
       config.isForceVisible = isForceVisible;
 
@@ -243,7 +250,9 @@ export function initOverlayListeners() {
         isForceVisible,
         animationDirection,
         themeMode,
-        fontSize
+        fontSize,
+        effectFloat,
+        effectGlow
       });
     } catch (err) {
       console.error("Failed to update overlay style:", err);
@@ -276,6 +285,9 @@ export function initOverlayListeners() {
 
     const fontSizeInput = document.getElementById('overlay-font-size');
     if (fontSizeInput) fontSizeInput.value = preset.fontSize;
+
+    if (overlayEffectFloat) overlayEffectFloat.checked = !!preset.effectFloat;
+    if (overlayEffectGlow) overlayEffectGlow.checked = !!preset.effectGlow;
 
     updateOverlaySettings();
   };
@@ -329,7 +341,9 @@ export function initOverlayListeners() {
       bgColor: '0f0f14',
       font: 'Inter',
       animationDirection: 'left',
-      fontSize: 22
+      fontSize: 22,
+      effectFloat: false,
+      effectGlow: false
     };
 
     const settings = config[currentTarget] || {};
@@ -369,6 +383,9 @@ export function initOverlayListeners() {
       setDropdownValue('overlay-animation-direction-dropdown', 'overlay-animation-direction', final.animationDirection);
     }
 
+    if (overlayEffectFloat) overlayEffectFloat.checked = !!final.effectFloat;
+    if (overlayEffectGlow) overlayEffectGlow.checked = !!final.effectGlow;
+
     updateOverlaySettings(true);
   };
 
@@ -390,7 +407,9 @@ export function initOverlayListeners() {
         rounding: 20,
         bgColor: '0f0f14',
         font: 'Inter',
-        animationDirection: 'left'
+        animationDirection: 'left',
+        effectFloat: false,
+        effectGlow: false
       };
       const targetSettings = config[target] || {};
       const final = { ...defaults, ...targetSettings };
@@ -407,7 +426,9 @@ export function initOverlayListeners() {
           rounding: Number.isFinite(final.rounding) ? final.rounding : defaults.rounding,
           isForceVisible,
           animationDirection: final.animationDirection || 'left',
-          themeMode
+          themeMode,
+          effectFloat: !!final.effectFloat,
+          effectGlow: !!final.effectGlow
         });
       } catch (err) {
         console.error(`Failed to sync ${target} overlay style:`, err);
@@ -415,7 +436,7 @@ export function initOverlayListeners() {
     }
   };
 
-  [overlayScale, overlayBgOpacity, overlayRounding, toggleOverlayForceVisible].forEach(el => {
+  [overlayScale, overlayBgOpacity, overlayRounding, toggleOverlayForceVisible, overlayEffectFloat, overlayEffectGlow].forEach(el => {
     if (!el) return;
     el.addEventListener('change', () => updateOverlaySettings());
     if (el.type === 'range') {

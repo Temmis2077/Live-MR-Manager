@@ -4,12 +4,19 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>OSW Lyrics Overlay</title>
+  <!-- @import는 로드가 끝날 때까지 첫 페인트를 막아, 느린 네트워크에서 이
+       투명 오버레이가 잠깐 흰 배경으로 보이는 원인이 된다(가끔 발생하는 흰
+       배경 버그). media="print" 트릭으로 렌더링을 막지 않게 비동기 로드한다. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Noto+Sans+KR:wght@400;700;900&family=SUITE:wght@400;700;800&display=swap"
+        rel="stylesheet" media="print" onload="this.media='all'">
+  <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css"
+        rel="stylesheet" media="print" onload="this.media='all'">
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Noto+Sans+KR:wght@400;700;900&family=SUITE:wght@400;700;800&display=swap');
-    @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
-
     :root {
       --accent-color: #8b5cf6;
+      --accent-rgb: 139 92 246;
       --overlay-scale: 1;
       --overlay-font: 'Inter', 'Noto Sans KR', sans-serif;
       --overlay-rounding: 20px;
@@ -32,8 +39,11 @@
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
+    html, body {
+      background: transparent !important;
+    }
+
     body {
-      background: transparent;
       color: var(--text-main);
       font-family: var(--overlay-font);
       overflow: hidden;
@@ -97,6 +107,44 @@
       transform: translate(-50%, -50%) scale(var(--overlay-scale));
       opacity: 1;
       animation: lyrics-pop-bottom var(--anim-duration, 0.55s) cubic-bezier(0.2, 0.9, 0.3, 1) both;
+    }
+
+    /* 글로우 효과 — .overlay-container가 이미 방향별 등장 애니메이션을 쓰고
+       있어(위 4블록), 같은 animation 속성을 단순히 더 추가하면 서로 덮어써
+       버린다. 그래서 방향×글로우 조합마다 두 애니메이션을 한 선언에 함께
+       명시한다(콤마로 병렬 실행). */
+    .overlay-container.dir-right.visible.fx-glow {
+      animation: lyrics-pop-right var(--anim-duration, 0.55s) cubic-bezier(0.2, 0.9, 0.3, 1) both,
+                 overlay-glow-pulse 2.2s ease-in-out infinite;
+    }
+    .overlay-container.dir-left.visible.fx-glow {
+      animation: lyrics-pop-left var(--anim-duration, 0.55s) cubic-bezier(0.2, 0.9, 0.3, 1) both,
+                 overlay-glow-pulse 2.2s ease-in-out infinite;
+    }
+    .overlay-container.dir-top.visible.fx-glow {
+      animation: lyrics-pop-top var(--anim-duration, 0.55s) cubic-bezier(0.2, 0.9, 0.3, 1) both,
+                 overlay-glow-pulse 2.2s ease-in-out infinite;
+    }
+    .overlay-container.dir-bottom.visible.fx-glow {
+      animation: lyrics-pop-bottom var(--anim-duration, 0.55s) cubic-bezier(0.2, 0.9, 0.3, 1) both,
+                 overlay-glow-pulse 2.2s ease-in-out infinite;
+    }
+
+    @keyframes overlay-glow-pulse {
+      0%, 100% { box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3), 0 0 0 rgb(var(--accent-rgb) / 0); }
+      50% { box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3), 0 0 28px rgb(var(--accent-rgb) / 0.55); }
+    }
+
+    /* 플로팅 효과 — 위치/등장 애니메이션(overlay-container)과 transform이
+       겹치지 않도록, 콘텐츠를 별도 래퍼로 감싸 그쪽에만 적용한다. */
+    .fx-wrapper { width: 100%; }
+
+    @keyframes overlay-float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-6px); }
+    }
+    .overlay-container.fx-float .fx-wrapper {
+      animation: overlay-float 3.2s ease-in-out infinite;
     }
 
     .lyrics-container {
@@ -208,11 +256,13 @@
 
   </style>
 </head>
-<body>
+<body style="background: transparent;">
   <div class="overlay-container" id="overlay">
-    <div class="lyrics-container" id="lyrics-area">
-      <div class="lyric-line current" id="lyric-current">&nbsp;</div>
-      <div class="lyric-line next" id="lyric-next">&nbsp;</div>
+    <div class="fx-wrapper" id="fx-wrapper">
+      <div class="lyrics-container" id="lyrics-area">
+        <div class="lyric-line current" id="lyric-current">&nbsp;</div>
+        <div class="lyric-line next" id="lyric-next">&nbsp;</div>
+      </div>
     </div>
   </div>
 
@@ -279,8 +329,13 @@
       document.documentElement.style.setProperty('--glass-bg', `rgba(${hexToRgb(bgColor)}, ${bgOpacity})`);
       document.documentElement.style.setProperty('--overlay-rounding', `${rounding}px`);
       document.documentElement.style.setProperty('--accent-color', `#${color}`);
+      document.documentElement.style.setProperty('--accent-rgb', hexToRgb(color));
       document.documentElement.style.setProperty('--text-main', `#${textColorHex}`);
       document.documentElement.style.setProperty('--text-sub', `rgba(${hexToRgb(textColorHex)}, 0.58)`);
+
+      // 특수효과 — 플로팅(fx-wrapper 이동)·글로우(컨테이너 그림자 펄스)
+      overlay.classList.toggle('fx-float', style.effect_float === true || style.effectFloat === true);
+      overlay.classList.toggle('fx-glow', style.effect_glow === true || style.effectGlow === true);
 
       let duration = '0.85s';
       if (direction === 'right' || direction === 'left') duration = '1.5s';

@@ -25,6 +25,12 @@ pub struct OverlayStyle {
     /// 가사 오버레이 전용 폰트 크기(px). 0 = 기본값(22px) 사용.
     #[serde(default)]
     pub font_size: f32,
+    /// 은은한 플로팅(위아래로 살짝 떠다니는) 효과. 대상(정보/가사)별 독립 설정.
+    #[serde(default)]
+    pub effect_float: bool,
+    /// 액센트 색 글로우 펄스 효과. 대상별 독립 설정.
+    #[serde(default)]
+    pub effect_glow: bool,
 }
 
 impl Default for OverlayStyle {
@@ -32,13 +38,15 @@ impl Default for OverlayStyle {
         Self {
             scale: 1.0,
             font: "Inter".to_string(),
-            color: "3b82f6".to_string(),
+            color: "8b5cf6".to_string(),
             text_color: "ffffff".to_string(),
             bg_color: "0f0f14".to_string(),
             bg_opacity: 0.6,
             rounding: 20.0,
             animation_direction: "left".to_string(),
             font_size: 0.0,
+            effect_float: false,
+            effect_glow: false,
         }
     }
 }
@@ -422,7 +430,7 @@ pub async fn update_overlay_state(title: String, artist: String, thumbnail: Stri
 }
 
 #[tauri::command]
-pub async fn update_overlay_style(target: String, scale: f32, font: String, color: String, text_color: String, bg_color: String, bg_opacity: f32, rounding: f32, is_force_visible: bool, animation_direction: String, theme_mode: String, font_size: Option<f32>) {
+pub async fn update_overlay_style(target: String, scale: f32, font: String, color: String, text_color: String, bg_color: String, bg_opacity: f32, rounding: f32, is_force_visible: bool, animation_direction: String, theme_mode: String, font_size: Option<f32>, effect_float: Option<bool>, effect_glow: Option<bool>) {
     let mut state = CURRENT_STATE.lock().await.clone();
     let style = OverlayStyle {
         scale,
@@ -434,6 +442,8 @@ pub async fn update_overlay_style(target: String, scale: f32, font: String, colo
         rounding,
         animation_direction,
         font_size: font_size.unwrap_or(0.0),
+        effect_float: effect_float.unwrap_or(false),
+        effect_glow: effect_glow.unwrap_or(false),
     };
     let shared_color = style.color.clone();
     let shared_text_color = style.text_color.clone();
