@@ -37,6 +37,10 @@ export async function invoke(command, args = {}) {
       return;
     case 'cancel_gpu_pack_install':
       return;
+    case 'get_model_list':
+      return [];
+    case 'download_alignment_model':
+      return;
     case 'list_model_presets':
       return [
         { key: 'mdx_vocal', label: 'MDX-Net (보컬 추출)', description: 'Kim Vocal 2 계열.' },

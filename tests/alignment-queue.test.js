@@ -25,7 +25,46 @@ vi.mock('../src/js/ui/components.js', () => ({
 
 import { invoke } from '../src/js/tauri-bridge.js';
 import { state } from '../src/js/state.js';
-import { enqueueAlignment, isAlignmentBusy, onAlignmentItemComplete } from '../src/js/alignment-queue.js';
+import { enqueueAlignment, isAlignmentBusy, onAlignmentItemComplete, collectAlignmentAnchors } from '../src/js/alignment-queue.js';
+
+describe('collectAlignmentAnchors', () => {
+  it('makes synced lines into (index, ms) anchors and skips unsynced ones', () => {
+    const segments = [
+      { text: '첫 줄', start: 3, end: 5 },      // synced → anchor at 3000ms
+      { text: '둘째 줄', start: 0, end: 0 },     // unsynced → no anchor
+      { text: '셋째 줄', start: 8.5, end: 10 },  // synced → anchor at 8500ms
+    ];
+    const { allTexts, anchors } = collectAlignmentAnchors(segments, {});
+    expect(allTexts).toEqual(['첫 줄', '둘째 줄', '셋째 줄']);
+    expect(anchors).toEqual([[0, 3000], [2, 8500]]);
+  });
+
+  it('uses vocalStart as the first-line anchor only when line 0 is unsynced', () => {
+    const segments = [
+      { text: '첫 줄', start: 0, end: 0 },
+      { text: '둘째 줄', start: 0, end: 0 },
+    ];
+    const { anchors } = collectAlignmentAnchors(segments, { vocalStartSec: 12.34 });
+    expect(anchors).toEqual([[0, 12340]]);
+  });
+
+  it('prefers a real synced line 0 over the vocalStart marker', () => {
+    const segments = [{ text: '첫 줄', start: 2, end: 4 }];
+    const { anchors } = collectAlignmentAnchors(segments, { vocalStartSec: 12.34 });
+    // 첫 줄이 이미 싱크됐으므로 보컬시작 마커 앵커는 추가되지 않는다.
+    expect(anchors).toEqual([[0, 2000]]);
+  });
+
+  it('skips empty sync-text lines when indexing anchors', () => {
+    const segments = [
+      { text: '', start: 3, end: 5 },        // empty sync text → not in allTexts
+      { text: '진짜 줄', start: 6, end: 8 },  // index 0 in allTexts
+    ];
+    const { allTexts, anchors } = collectAlignmentAnchors(segments, {});
+    expect(allTexts).toEqual(['진짜 줄']);
+    expect(anchors).toEqual([[0, 6000]]);
+  });
+});
 
 describe('mergeAlignmentResult', () => {
   it('fills only fully-unsynced segments and marks them approx', () => {

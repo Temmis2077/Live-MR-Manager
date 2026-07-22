@@ -12,7 +12,8 @@
  */
 import { invoke, listen } from './tauri-bridge.js';
 import { state } from './state.js';
-import { parseLrc, mergeAlignmentResult, getSyncText, encodeLrc } from './lrc-parser.js';
+import { parseLrc, parseMarkers, mergeAlignmentResult, getSyncText, encodeLrc } from './lrc-parser.js';
+import { showNotification } from './utils.js';
 
 let isRunning = false;
 let listenerReady = false;
@@ -181,6 +182,46 @@ async function resolveAlignmentModels() {
     return resolved;
 }
 
+/**
+ * 현재 정렬 언어(localStorage)에 필요한 정렬 모델이 설치돼 있는지 확인하고,
+ * 없으면 사용자에게 다운로드 여부를 묻고 받는다. 노래 추가·배치 정렬을 걸기
+ * 전에 호출해, "모델이 없어 대기열 항목만 조용히 실패"하는 상황을 막는다.
+ *
+ * @returns {Promise<boolean>} 정렬을 진행해도 되는지(모델 준비 완료 = true).
+ *   사용자가 다운로드를 거절했거나 실패하면 false.
+ */
+export async function ensureAlignmentModelsReady() {
+    let models = [];
+    try {
+        models = await invoke('get_model_list');
+    } catch (err) {
+        console.error('[AlignQueue] get_model_list failed:', err);
+    }
+    const { getAlignmentLanguage, missingModelsForLanguage } = await import('./alignment-model.js');
+    const missing = missingModelsForLanguage(models, getAlignmentLanguage());
+    if (missing.length === 0) return true;
+
+    const names = missing.map((m) => m.label).join(', ');
+    const ok = confirm(
+        `AI 자동 정렬에 필요한 정렬 모델이 없습니다: ${names}\n\n`
+        + '지금 다운로드할까요? (모델당 수백 MB, 시간이 걸릴 수 있습니다)'
+    );
+    if (!ok) return false;
+
+    for (const m of missing) {
+        try {
+            showNotification(`정렬 모델(${m.label}) 다운로드 중…`, 'info');
+            await invoke('download_alignment_model', { modelId: m.downloadableId });
+        } catch (err) {
+            console.error('[AlignQueue] download_alignment_model failed:', m.downloadableId, err);
+            showNotification(`정렬 모델(${m.label}) 다운로드 실패: ${err}`, 'error');
+            return false;
+        }
+    }
+    showNotification('정렬 모델 다운로드 완료.', 'success');
+    return true;
+}
+
 /** 원본 LRC에서 마커 줄([vocalstart]/[ilstart]/[ilend])만 추려 보존용으로 반환.
  *  인코딩은 공용 encodeLrc(lrc-parser.js) 사용 — 세그먼트 순서 보존. */
 function extractMarkerLines(lrcContent) {
@@ -194,6 +235,40 @@ function extractMarkerLines(lrcContent) {
         }
     });
     return out;
+}
+
+/**
+ * 정렬 입력 텍스트와 **하드 앵커**를 세그먼트에서 뽑는다.
+ *
+ * 앵커는 백엔드가 구간 분할 정렬에 쓰는 고정점 `(줄 인덱스, ms)`으로, 한 번의
+ * 밀림이 곡 전체로 전파되는 것을 막고 사용자 교정을 정렬 기준으로 삼는다.
+ * - 이미 싱크된 줄(start>0) → 그 시작 시각이 앵커.
+ * - 보컬시작 마커 → 첫 줄이 아직 싱크 안 됐을 때만 첫 줄의 시작 앵커
+ *   ("긴 인트로 동안 첫 토큰이 일찍 소비돼 처음부터 밀리는" 문제 차단).
+ *
+ * 줄 인덱스는 정렬 입력(allTexts)에서의 위치 — 백엔드가 같은 기준으로 매핑한다.
+ * @returns {{ allTexts: string[], anchors: [number, number][] }}
+ */
+export function collectAlignmentAnchors(segments, markers) {
+    const allTexts = [];
+    const anchors = [];
+    let line0Synced = false;
+    for (const s of segments || []) {
+        const t = getSyncText(s).trim();
+        if (t.length === 0) continue;
+        const idx = allTexts.length;
+        allTexts.push(t);
+        const synced = !(s.start === 0 && s.end === 0);
+        if (synced && typeof s.start === 'number' && s.start > 0) {
+            anchors.push([idx, Math.round(s.start * 1000)]);
+            if (idx === 0) line0Synced = true;
+        }
+    }
+    const vocalStartSec = markers && markers.vocalStartSec;
+    if (!line0Synced && vocalStartSec != null && vocalStartSec > 0 && allTexts.length > 0) {
+        anchors.push([0, Math.round(vocalStartSec * 1000)]);
+    }
+    return { allTexts, anchors };
 }
 
 async function processOne(item) {
@@ -211,9 +286,8 @@ async function processOne(item) {
     const segments = parseLrc(lrcContent, 0);
     // 에디터(runAiAlignment)와 동일하게 "전체" 가사를 정렬 입력으로 보낸다
     // (문맥이 온전해야 CTC 정렬 정확도가 높음) — 병합은 미싱크 줄에만 됨.
-    const allTexts = segments
-        .map((s) => getSyncText(s).trim())
-        .filter((t) => t.length > 0);
+    // 이미 싱크된 줄·보컬시작 마커는 하드 앵커로 함께 넘긴다(collectAlignmentAnchors).
+    const { allTexts, anchors } = collectAlignmentAnchors(segments, parseMarkers(lrcContent));
     const hasUnsynced = segments.some(
         (s) => s.start === 0 && s.end === 0 && getSyncText(s).trim().length > 0
     );
@@ -252,6 +326,7 @@ async function processOne(item) {
             lyrics: allTexts.join('\n'),
             modelName: model,
             language: lang,
+            anchors: anchors.length ? anchors : null,
         });
         passResults.push((result && result.lines) || []);
     }

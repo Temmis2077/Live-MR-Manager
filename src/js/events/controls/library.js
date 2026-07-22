@@ -62,10 +62,16 @@ function initSelectionMode() {
     alignBtn.onclick = async () => {
       const paths = Array.from(state.selectedSongPaths);
       if (paths.length === 0) return;
-      const { enqueueAlignment } = await import('../../alignment-queue.js');
+      const { enqueueAlignment, ensureAlignmentModelsReady } = await import('../../alignment-queue.js');
+      const { showNotification } = await import('../../utils.js');
+      // 대기열에 걸기 전에 정렬 모델을 확인·다운로드(없으면 조용히 실패하는 걸 방지).
+      const ready = await ensureAlignmentModelsReady();
+      if (!ready) {
+        showNotification('정렬 모델이 없어 정렬을 시작하지 않았습니다. 가사 싱크 탭에서 모델을 받은 뒤 다시 시도하세요.', 'info');
+        return;
+      }
       const added = enqueueAlignment(paths);
       exitSelectionMode();
-      const { showNotification } = await import('../../utils.js');
       if (added > 0) {
         showNotification(`${added}곡을 AI 정렬 대기열에 추가했습니다.`, 'success');
       } else {

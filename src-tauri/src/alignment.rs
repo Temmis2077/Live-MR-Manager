@@ -18,6 +18,9 @@ pub struct CachedAlignmentState {
     pub emission_probs: Array2<f32>,
     pub tokens_path: PathBuf,
     pub lyrics: String,
+    /// 사용자 하드 앵커 (입력 줄 인덱스, ms) — 실시간 penalty 튜닝 재정렬에서도
+    /// 같은 고정점을 유지하도록 캐시에 함께 둔다.
+    pub anchors: Vec<(usize, i64)>,
 }
 
 pub static CACHED_STATE: Mutex<Option<CachedAlignmentState>> = Mutex::new(None);
@@ -382,7 +385,8 @@ pub async fn run_forced_alignment(
     trans_penalty: Option<f32>,
     blank_penalty: Option<f32>,
     rep_penalty: Option<f32>,
-    _use_vad: Option<bool>
+    _use_vad: Option<bool>,
+    anchors: Option<Vec<(usize, i64)>>,
 ) -> Result<AlignmentResult, String> {
     // -1 sentinel: waiting for a previous alignment to finish (queued).
     let _ = handle.emit("alignment-progress", -1);
@@ -466,6 +470,8 @@ pub async fn run_forced_alignment(
         return Err("작업이 사용자에 의해 취소되었습니다.".to_string());
     }
 
+    let anchors = anchors.unwrap_or_default();
+
     // Cache the inference results
     {
         let mut cache = CACHED_STATE.lock();
@@ -473,10 +479,11 @@ pub async fn run_forced_alignment(
             emission_probs: emission_probs.clone(),
             tokens_path: tokens_path.clone(),
             lyrics: lyrics.clone(),
+            anchors: anchors.clone(),
         });
     }
 
-    Ok(perform_alignment_internal(emission_probs, &tokens_path, &lyrics, trans_penalty.unwrap_or(-0.05), blank_penalty.unwrap_or(0.0), rep_penalty.unwrap_or(0.0))?)
+    Ok(perform_alignment_internal(emission_probs, &tokens_path, &lyrics, trans_penalty.unwrap_or(-0.05), blank_penalty.unwrap_or(0.0), rep_penalty.unwrap_or(0.0), &anchors)?)
 }
 
 #[command]
@@ -492,7 +499,8 @@ pub async fn apply_alignment_tuning(penalty: f32, blank_penalty: Option<f32>, re
             &state.lyrics,
             penalty,
             blank_penalty.unwrap_or(0.0),
-            rep_penalty.unwrap_or(0.0)
+            rep_penalty.unwrap_or(0.0),
+            &state.anchors,
         )?;
         sys_log("[Alignment] Real-time tuning completed successfully.");
         Ok(result)
@@ -643,6 +651,97 @@ fn refine_with_anchors(
     }
 }
 
+/// 사용자가 확정한 하드 앵커로 토큰·프레임 축을 나눠 **구간별로 독립 정렬**한다.
+///
+/// `refine_with_anchors`가 "이미 밀렸을 수 있는 전역 경로에서 확신도로 앵커를
+/// 역산"하는 것과 달리, 여기서는 **그라운드 트루스**(수동 싱크 줄·보컬시작 마커)를
+/// 앵커로 받는다. 각 앵커는 "이 토큰 위치가 이 프레임에서 시작한다"는 고정점이라,
+/// 앵커 사이 구간에서 한 번 어긋나도 다음 앵커에서 반드시 리셋된다 — 곡 전체로
+/// 밀림이 전파되던 근본 문제를 끊는다.
+///
+/// `anchors`: (토큰 인덱스, 프레임) 쌍의 목록. 프레임·토큰 모두 **순증가**여야 하며
+/// (호출 측에서 정제), 암묵적 시작 `(0,0)`과 끝 `(n_tokens, n_frames)`을 더해
+/// 구간을 만든다. 반환은 전역 토큰 인덱스(blank는 `usize::MAX`)의 프레임별 경로.
+fn segmented_align_with_anchors(
+    aligner: &Aligner,
+    emission_probs: &Array2<f32>,
+    target_tokens: &[usize],
+    anchors: &[(usize, usize)],
+    trans_p: f32,
+    blank_p: f32,
+    rep_p: f32,
+) -> Vec<usize> {
+    let n_frames = emission_probs.nrows();
+    let n_tokens = target_tokens.len();
+    let mut bounds: Vec<(usize, usize)> = Vec::with_capacity(anchors.len() + 2);
+    bounds.push((0, 0));
+    bounds.extend_from_slice(anchors);
+    bounds.push((n_tokens, n_frames));
+
+    let mut path = vec![usize::MAX; n_frames];
+    for w in bounds.windows(2) {
+        let (t0, f0) = w[0];
+        let (t1, f1) = w[1];
+        if f1 <= f0 || t1 <= t0 {
+            // 프레임이 없거나 토큰이 없는 구간 — blank로 둔다(간주·인트로 등).
+            continue;
+        }
+        let sub_tokens = &target_tokens[t0..t1];
+        let sub = aligner.forced_align_range(emission_probs, sub_tokens, f0, f1, trans_p, blank_p, rep_p);
+        if sub.len() != f1 - f0 {
+            continue;
+        }
+        for (k, &local) in sub.iter().enumerate() {
+            path[f0 + k] = if local == usize::MAX { usize::MAX } else { local + t0 };
+        }
+    }
+    path
+}
+
+/// 프론트가 준 앵커 `(입력 줄 인덱스, ms)`를 정렬에 쓸 `(토큰 인덱스, 프레임)`으로
+/// 변환하고, 프레임·토큰이 **순증가**하도록 정제한다(모순된 수동 싱크는 버림).
+/// `orig_to_pos`: 입력 줄 인덱스 → 정제된 lyric_lines 위치.
+fn resolve_anchor_points(
+    anchors: &[(usize, i64)],
+    orig_to_pos: &HashMap<usize, usize>,
+    line_spans: &[LineTokenSpan],
+    frame_duration_ms: f32,
+    n_frames: usize,
+) -> Vec<(usize, usize)> {
+    let mut pts: Vec<(usize, usize)> = Vec::new();
+    for &(orig_idx, ms) in anchors {
+        if ms < 0 {
+            continue;
+        }
+        let Some(&pos) = orig_to_pos.get(&orig_idx) else { continue };
+        if pos >= line_spans.len() {
+            continue;
+        }
+        let tok = line_spans[pos].tok_from;
+        let frame = ((ms as f64 / frame_duration_ms as f64).round() as usize).min(n_frames.saturating_sub(1));
+        pts.push((tok, frame));
+    }
+    // 줄 순서(토큰)로 정렬한 뒤 시간이 순증가하는 앵커만 남긴다. 프레임순으로
+    // 정렬하면 모순된 수동 싱크 하나(뒷줄을 앞 시각으로) 때문에 정상 앵커들이
+    // 통째로 밀려날 수 있어서다 — 줄 순서 기준이면 순서를 어긴 그 하나만 버린다.
+    pts.sort_by_key(|&(t, _)| t);
+
+    let mut clean: Vec<(usize, usize)> = Vec::new();
+    for (tok, frame) in pts {
+        if let Some(&(pt, pf)) = clean.last() {
+            // 토큰·프레임 모두 앞 앵커보다 뒤여야 유효(순서 어긴 앵커 폐기).
+            if tok <= pt || frame <= pf {
+                continue;
+            }
+        } else if tok == 0 && frame == 0 {
+            // (0,0)은 암묵적 시작과 중복 — 명시 앵커로는 무의미.
+            continue;
+        }
+        clean.push((tok, frame));
+    }
+    clean
+}
+
 /// 노래 가능한 글자 수 — 길이 타당성의 기준이 되는 줄 "무게".
 /// 공백·문장부호를 빼고 실제 발음되는 글자만 센다(최소 1).
 fn singable_len(text: &str) -> usize {
@@ -718,27 +817,55 @@ fn perform_alignment_internal(
     lyrics: &str,
     trans_p: f32,
     blank_p: f32,
-    rep_p: f32
+    rep_p: f32,
+    anchors: &[(usize, i64)],
 ) -> Result<AlignmentResult, String> {
     let aligner = Aligner::new(tokens_path.to_str().unwrap())?;
-    let cleaned_lyrics = clean_lyrics(lyrics);
-    let lyric_lines: Vec<String> = cleaned_lyrics.lines().map(|s| s.trim().to_owned()).filter(|s| !s.is_empty()).collect();
+    let frame_duration_ms = 20.0f32;
+
+    // 입력 줄을 **줄 단위로** 정제하면서 원본 인덱스를 보존한다. 앵커는 프론트가
+    // 준 입력 줄 인덱스로 오는데, clean_lyrics가 지시어 줄([Chorus] 등)을 통째로
+    // 지워 줄 수가 줄면 인덱스가 어긋나기 때문 — orig_of_line로 다시 잇는다.
+    let mut lyric_lines: Vec<String> = Vec::new();
+    let mut orig_of_line: Vec<usize> = Vec::new();
+    for (i, raw) in lyrics.lines().enumerate() {
+        let c = clean_lyrics(raw);
+        let c = c.trim();
+        if !c.is_empty() {
+            lyric_lines.push(c.to_owned());
+            orig_of_line.push(i);
+        }
+    }
+    let cleaned_lyrics = lyric_lines.join("\n");
 
     let (target_tokens, word_spans) = aligner.tokenize(&cleaned_lyrics);
     if target_tokens.is_empty() { return Err("유효한 가사 토큰이 없습니다.".to_string()); }
 
-    let path = aligner.forced_align(&emission_probs, &target_tokens, trans_p, blank_p, rep_p);
-
-    // 확신도 높은 줄을 앵커로 잡고 그 사이 구간을 재정렬한다 — 전역 1회 정렬은
-    // 중간에 한 번 어긋나면 끝까지 밀리므로, 구간을 나눠 실수를 가둔다.
     let line_spans = line_token_spans(&lyric_lines, &word_spans);
-    let path = refine_with_anchors(
-        &aligner, &emission_probs, &target_tokens, &line_spans,
-        &path, trans_p, blank_p, rep_p,
-    )
-    .unwrap_or(path);
 
-    let frame_duration_ms = 20.0;
+    // 사용자 하드 앵커(수동 싱크·보컬시작)를 (토큰, 프레임)으로 변환·정제.
+    let orig_to_pos: HashMap<usize, usize> =
+        orig_of_line.iter().enumerate().map(|(pos, &orig)| (orig, pos)).collect();
+    let anchor_pts = resolve_anchor_points(
+        anchors, &orig_to_pos, &line_spans, frame_duration_ms, emission_probs.nrows(),
+    );
+
+    let path = if !anchor_pts.is_empty() {
+        // 앵커가 있으면 그 고정점으로 구간을 나눠 정렬한다 — 밀림이 앵커를 넘어
+        // 전파되지 않는다. 사용자가 확정한 시각이므로 확신도 재정렬보다 강하다.
+        sys_log(&format!("[Alignment] 사용자 앵커 {}개로 구간 분할 정렬", anchor_pts.len()));
+        segmented_align_with_anchors(
+            &aligner, &emission_probs, &target_tokens, &anchor_pts, trans_p, blank_p, rep_p,
+        )
+    } else {
+        // 앵커가 없으면 전역 1회 정렬 후, 확신도 높은 줄을 앵커로 그 사이만 재정렬.
+        let global = aligner.forced_align(&emission_probs, &target_tokens, trans_p, blank_p, rep_p);
+        refine_with_anchors(
+            &aligner, &emission_probs, &target_tokens, &line_spans,
+            &global, trans_p, blank_p, rep_p,
+        )
+        .unwrap_or(global)
+    };
     let timestamps = aligner.get_word_timestamps(&path, &word_spans, frame_duration_ms);
 
     let greedy_path = aligner.greedy_decode(&emission_probs);
@@ -1627,6 +1754,54 @@ mod aligner_tests {
         // 의미가 있다(같은 함수로 전체를 돌린 것과 길이가 다름).
         let full = aligner.forced_align(&e, &tokens, -0.05, 0.0, 0.0);
         assert_eq!(full.len(), 40);
+    }
+
+    #[test]
+    fn segmented_anchor_confines_tokens_to_their_segment() {
+        let vocab_path = write_test_vocab("seg");
+        let aligner = Aligner::new(vocab_path.to_str().unwrap()).unwrap();
+        std::fs::remove_file(&vocab_path).ok();
+
+        let tokens = vec![
+            *aligner.token_to_id.get("나").unwrap(),
+            *aligner.token_to_id.get("는").unwrap(),
+        ];
+        // 두 토큰 모두 어디서나 그럴듯한 emission — 오직 앵커만 위치를 가둔다.
+        let vocab = 10;
+        let mut e = Array2::<f32>::from_elem((40, vocab), -8.0);
+        for f in 0..40 {
+            e[[f, aligner.blank_id]] = -0.2;
+            e[[f, tokens[0]]] = 1.0;
+            e[[f, tokens[1]]] = 1.0;
+        }
+
+        // 앵커: 뒤 토큰(는, 글로벌 인덱스 1)이 프레임 20에서 시작.
+        let path = segmented_align_with_anchors(&aligner, &e, &tokens, &[(1usize, 20usize)], -0.05, 0.0, 0.0);
+        assert_eq!(path.len(), 40);
+        for f in 0..20 {
+            assert_ne!(path[f], 1, "앵커 이전 구간에 뒤 토큰이 새면 안 됨 (frame {})", f);
+        }
+        assert!((20..40).any(|f| path[f] == 1), "앵커 이후 구간에 뒤 토큰이 배치돼야 함");
+    }
+
+    #[test]
+    fn resolve_anchor_points_drops_out_of_order_manual_sync() {
+        // 3줄, 토큰 시작 0/4/8. 2번째 줄의 수동 싱크만 순서를 어겨(뒷줄이 앞 시각)
+        // 있을 때, 정상 앵커 2개는 살고 모순된 하나만 버려져야 한다.
+        let line_spans = vec![
+            LineTokenSpan { tok_from: 0, tok_to: 3 },
+            LineTokenSpan { tok_from: 4, tok_to: 7 },
+            LineTokenSpan { tok_from: 8, tok_to: 11 },
+        ];
+        let orig_to_pos: HashMap<usize, usize> =
+            [(0usize, 0usize), (1, 1), (2, 2)].into_iter().collect();
+
+        // line0@1000ms(frame50), line1@200ms(frame10, 모순), line2@2000ms(frame100)
+        let anchors = vec![(0usize, 1000i64), (1, 200), (2, 2000)];
+        let pts = resolve_anchor_points(&anchors, &orig_to_pos, &line_spans, 20.0, 1000);
+
+        // line1은 line0보다 이른 시각이라 폐기 → (tok0,frame50), (tok8,frame100)만.
+        assert_eq!(pts, vec![(0usize, 50usize), (8usize, 100usize)]);
     }
 
     fn mk_line(text: &str, start_ms: i64, end_ms: i64) -> LineAlignment {

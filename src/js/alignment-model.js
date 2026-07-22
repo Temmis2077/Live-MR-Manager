@@ -34,6 +34,22 @@ export function requiredLanguagesFor(lang) {
     return lang === 'rap' ? ['ko', 'en'] : [lang];
 }
 
+/** 설치 모델 목록(`get_model_list` 결과)에서, 주어진 언어로 정렬하는 데 필요한데
+ *  아직 설치되지 않은 모델들의 다운로드 스펙을 반환한다.
+ *  반환: [{ lang, downloadableId, label }] (없으면 빈 배열 = 모두 설치됨). */
+export function missingModelsForLanguage(models, lang) {
+    const missing = [];
+    for (const l of requiredLanguagesFor(lang)) {
+        if (!findModelForLanguage(models, l)) {
+            const spec = ALIGNMENT_LANGUAGES[l];
+            if (spec && spec.downloadableId) {
+                missing.push({ lang: l, downloadableId: spec.downloadableId, label: spec.label });
+            }
+        }
+    }
+    return missing;
+}
+
 /** 설치 모델 목록(`get_model_list` 결과: `display|path` 배열)에서 주어진 언어에
  *  해당하는 항목을 찾아 반환. 없으면 null. (rap 같은 듀얼 모드는 자체 모델이
  *  없으므로 null — requiredLanguagesFor로 풀어서 개별 조회할 것.) */

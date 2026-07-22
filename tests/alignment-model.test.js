@@ -13,6 +13,7 @@ import {
   setAlignmentLanguage,
   findModelForLanguage,
   requiredLanguagesFor,
+  missingModelsForLanguage,
   dominantScriptLang,
   mergeDualAlignmentLines,
   ALIGNMENT_LANGUAGES,
@@ -62,6 +63,25 @@ describe('findModelForLanguage', () => {
   it('accepts rap as a persistable language', () => {
     setAlignmentLanguage('rap');
     expect(getAlignmentLanguage()).toBe('rap');
+  });
+
+  describe('missingModelsForLanguage', () => {
+    it('returns empty when the single-language model is installed', () => {
+      expect(missingModelsForLanguage(models, 'ko')).toEqual([]);
+      expect(missingModelsForLanguage(models, 'en')).toEqual([]);
+    });
+
+    it('reports the missing model with its downloadable id', () => {
+      const missing = missingModelsForLanguage([models[0]], 'en');
+      expect(missing).toHaveLength(1);
+      expect(missing[0]).toMatchObject({ lang: 'en', downloadableId: 'wav2vec2-english-lyrics' });
+    });
+
+    it('rap requires both ko and en — reports whichever is missing', () => {
+      expect(missingModelsForLanguage(models, 'rap')).toEqual([]);
+      expect(missingModelsForLanguage([models[1]], 'rap').map((m) => m.lang)).toEqual(['ko']);
+      expect(missingModelsForLanguage([], 'rap').map((m) => m.lang)).toEqual(['ko', 'en']);
+    });
   });
 });
 

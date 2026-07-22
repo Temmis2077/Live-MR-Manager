@@ -271,6 +271,10 @@ async function confirmAdd() {
     btn.disabled = true;
     btn.textContent = '추가 중…';
 
+    // 모달을 닫은 뒤(다운로드가 오래 걸릴 수 있어) 정렬 모델을 확인·다운로드하고
+    // 대기열에 걸 대상. null이면 정렬 안 함.
+    let alignAfterAdd = null;
+
     // (b) 곡 정보 일괄/단일 적용
     const readChoice = (selId, customId) => {
         const sel = overlay.querySelector(selId);
@@ -334,15 +338,11 @@ async function confirmAdd() {
             if (song) { song.hasLyrics = true; song.has_lyrics = true; song.lyricSyncStatus = 'unsynced'; }
             const { setAlignmentLanguage } = await import('../alignment-model.js');
             setAlignmentLanguage(alignLang);
-            const { enqueueAlignment, deferAlignmentUntilSeparated } = await import('../alignment-queue.js');
-            if (doSeparate && modelId) {
-                // 정렬 엔진은 분리된 보컬 스템을 우선 쓰므로, 분리도 함께
-                // 요청했다면 분리가 끝난 뒤 정렬을 걸어야 정확하다 — 분리
-                // 종료 이벤트(backend.js)가 오면 자동으로 대기열에 등록됨.
-                deferAlignmentUntilSeparated(songs[0].path);
-            } else {
-                enqueueAlignment([songs[0].path]);
-            }
+            // 정렬 모델 확인·다운로드는 수백 MB라 시간이 걸릴 수 있어 모달을 막지
+            // 않는다. 모달을 닫은 뒤(아래 close 이후) 모델을 확인하고, 없으면
+            // 다운로드를 물어본 다음 대기열에 건다. deferSeparate면 분리 완료
+            // 후 정렬(분리된 보컬 스템 우선)이 정확하다.
+            alignAfterAdd = { path: songs[0].path, deferSeparate: !!(doSeparate && modelId) };
         }
 
         // 3. MR 분리 시작 (여러 곡이면 순서대로 대기열에 걸림)
@@ -365,6 +365,32 @@ async function confirmAdd() {
             'success'
         );
         close();
+
+        // 모달을 닫은 뒤 정렬 모델을 확인한다. 없으면 다운로드를 물어보고,
+        // 받은 다음 대기열에 건다(모달을 프리징시키지 않도록 여기서 처리).
+        // 곡 등록은 이미 끝났으므로, 이 단계의 실패가 "곡 추가 실패"로 새지
+        // 않도록 별도 try로 감싼다.
+        if (alignAfterAdd) {
+            try {
+                const { ensureAlignmentModelsReady, enqueueAlignment, deferAlignmentUntilSeparated } =
+                    await import('../alignment-queue.js');
+                const ready = await ensureAlignmentModelsReady();
+                if (!ready) {
+                    showNotification(
+                        '정렬 모델이 없어 AI 정렬은 건너뜁니다. 가사 싱크 탭에서 모델을 받은 뒤 다시 정렬할 수 있어요.',
+                        'info'
+                    );
+                } else if (alignAfterAdd.deferSeparate) {
+                    // 분리 종료 이벤트(backend.js)가 오면 자동으로 대기열에 등록됨.
+                    deferAlignmentUntilSeparated(alignAfterAdd.path);
+                } else {
+                    enqueueAlignment([alignAfterAdd.path]);
+                }
+            } catch (alignErr) {
+                console.error('[AddSong] alignment enqueue failed:', alignErr);
+                showNotification('AI 정렬 준비 중 오류가 발생했습니다. 가사 싱크 탭에서 다시 시도해 주세요.', 'error');
+            }
+        }
     } catch (err) {
         console.error('[AddSong] confirm failed:', err);
         showNotification('곡 추가에 실패했습니다: ' + err, 'error');
