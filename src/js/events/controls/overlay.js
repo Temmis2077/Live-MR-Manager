@@ -245,7 +245,7 @@ export function initOverlayListeners() {
 
     const defaults = {
       scale: 1.0,
-      color: currentTarget === 'lyrics' ? 'ffffff' : '3b82f6',
+      color: currentTarget === 'lyrics' ? 'ffffff' : '8b5cf6',
       textColor: 'ffffff',
       bgOpacity: 0.6,
       rounding: 20,
@@ -333,7 +333,7 @@ export function initOverlayListeners() {
     for (const target of targets) {
       const defaults = {
         scale: 1.0,
-        color: target === 'lyrics' ? 'ffffff' : '3b82f6',
+        color: target === 'lyrics' ? 'ffffff' : '8b5cf6',
         textColor: 'ffffff',
         bgOpacity: 0.6,
         rounding: 20,

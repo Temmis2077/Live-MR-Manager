@@ -54,7 +54,7 @@
   background: var(--accent-primary);
   color: var(--text-inverse);
   border-color: var(--accent-primary);
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+  box-shadow: 0 4px 12px rgb(var(--accent-rgb) / 0.3);
 }
 
 .val-input {

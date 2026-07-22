@@ -336,7 +336,7 @@
                   </svg>
                   <h3 id="overlay-settings-title">곡 정보 오버레이 설정</h3>
                 </div>
-                <div style="display: flex; align-items: center; gap: 10px; background: rgba(59, 130, 246, 0.05); padding: 6px 12px; border-radius: 20px; border: 1px solid rgba(59, 130, 246, 0.1);">
+                <div style="display: flex; align-items: center; gap: 10px; background: rgb(var(--accent-rgb) / 0.05); padding: 6px 12px; border-radius: 20px; border: 1px solid rgb(var(--accent-rgb) / 0.1);">
                   <span style="font-size: 0.75rem; font-weight: 700; color: var(--accent-primary); letter-spacing: -0.02em;">상시 표시 (미리보기)</span>
                   <label class="switch" style="transform: scale(0.85); transform-origin: right center;">
                     <input type="checkbox" id="toggle-overlay-force-visible">
@@ -429,12 +429,12 @@
                         <label style="font-size: 0.8rem; font-weight: 700; color: var(--text-dim);">테마 색상</label>
                         <div class="color-palette-wrapper" style="flex-direction: row; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
                           <div class="color-palette-container" id="theme-palette">
-                            <div class="color-swatch selected" data-color="#3b82f6" style="background: #3b82f6;"></div>
+                            <div class="color-swatch selected" data-color="#8b5cf6" style="background: #8b5cf6;"></div>
                             <div class="color-swatch" data-color="#10b981" style="background: #10b981;"></div>
                             <div class="color-swatch" data-color="#f59e0b" style="background: #f59e0b;"></div>
                             <div class="color-swatch" data-color="#ef4444" style="background: #ef4444;"></div>
                             <div class="color-swatch" data-color="#984343" style="background: #984343;"></div>
-                            <div class="color-swatch" data-color="#8b5cf6" style="background: #8b5cf6;"></div>
+                            <div class="color-swatch" data-color="#3b82f6" style="background: #3b82f6;"></div>
                             <div class="color-swatch" data-color="#ec4899" style="background: #ec4899;"></div>
                             <div class="color-swatch" data-color="#ef7da8" style="background: #ef7da8;"></div>
                             <div class="color-swatch" data-color="#4da8e8" style="background: #4da8e8;"></div>
@@ -443,12 +443,12 @@
                           <div style="display: flex; gap: 8px; align-items: center;">
                             <div class="hex-input-wrapper" style="width: 76px;">
                               <span class="hex-hash">#</span>
-                              <input type="text" id="overlay-color-hex" value="3b82f6" maxlength="6" class="hex-text-input">
+                              <input type="text" id="overlay-color-hex" value="8b5cf6" maxlength="6" class="hex-text-input">
                             </div>
                             <button class="btn-custom-color-picker" onclick="document.getElementById('overlay-color').click()" title="시스템 색상 선택기">
                               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19l9 2-2-9-9-9-9 9 2 9 9-2zM9 12l2 2m4-8l2 2"></path></svg>
                             </button>
-                            <input type="color" id="overlay-color" value="#3b82f6" style="display: none;">
+                            <input type="color" id="overlay-color" value="#8b5cf6" style="display: none;">
                           </div>
                         </div>
                       </div>

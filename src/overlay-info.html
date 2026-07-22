@@ -2,12 +2,12 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <title>Live MR Song Info Overlay</title>
+  <title>OSW Song Info Overlay</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Noto+Sans+KR:wght@400;700;900&display=swap');
 
     :root {
-      --accent-color: #3b82f6;
+      --accent-color: #8b5cf6;
       --overlay-scale: 1;
       --overlay-font: 'Inter', 'Noto Sans KR', sans-serif;
       --overlay-rounding: 20px;
@@ -298,7 +298,7 @@
         document.documentElement.style.setProperty('--overlay-scale', style.scale || 1.0);
         document.documentElement.style.setProperty('--overlay-font', `"${style.font || 'Inter'}", 'Noto Sans KR', sans-serif`);
         document.documentElement.style.setProperty('--overlay-rounding', `${style.rounding !== undefined ? style.rounding : 20}px`);
-        document.documentElement.style.setProperty('--accent-color', `#${(style.color || '3b82f6').replace('#','')}`);
+        document.documentElement.style.setProperty('--accent-color', `#${(style.color || '8b5cf6').replace('#','')}`);
         const textColor = `#${(style.text_color || style.textColor || 'ffffff').replace('#', '')}`;
         const textColorRgb = hexToRgb(style.text_color || style.textColor || 'ffffff');
         document.documentElement.style.setProperty('--text-main', textColor);
