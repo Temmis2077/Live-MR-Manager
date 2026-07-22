@@ -63,8 +63,25 @@ function renderModeSetting() {
   if (desc) desc.textContent = APP_MODES[cur] ? APP_MODES[cur].desc : '';
 }
 
+/**
+ * 라이브/녹음 모드 UI 노출 여부.
+ *
+ * 실제로 기능을 가르는 게 없어(악기 분리 등은 아직 없음) 버튼만 있고 동작
+ * 차이가 미미했다. 릴리즈에서 "눌러도 별로 안 바뀌는 버튼"으로 보이지 않게
+ * 첫 실행 선택 모달·설정 세그먼트를 감춘다. 로직(app-mode.js)과 body 속성
+ * 게이팅은 그대로 둬서, 실제 기능 차이가 생기면 이 플래그만 되돌리면 된다.
+ */
+const APP_MODE_UI_ENABLED = false;
+
 export function initAppModeControls() {
   applyAppModeToBody();
+
+  if (!APP_MODE_UI_ENABLED) {
+    const seg = document.getElementById('app-mode-seg');
+    const card = seg ? seg.closest('.settings-group') : null;
+    if (card) card.hidden = true;
+    return;
+  }
 
   // 설정의 세그먼트 버튼 배선.
   const wrap = document.getElementById('app-mode-seg');
