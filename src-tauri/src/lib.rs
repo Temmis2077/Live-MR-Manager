@@ -31,6 +31,7 @@ mod spreadsheet;
 mod rescue;
 mod overlay_server;
 mod updater;
+mod migration;
 
 fn load_env_files() {
     let manifest_env = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(".env");
@@ -66,6 +67,10 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_deep_link::init())
         .setup(|app| {
+            // 구 식별자 데이터를 새 식별자로 가져오기 — DB를 열거나 새 폴더를
+            // 만들기 전에 가장 먼저 실행해야 파일 잠금·이름 충돌이 없다.
+            crate::migration::maybe_migrate_legacy_data(app.handle());
+
             crate::meloming::oauth::sync_credentials_from_env();
             if let Some(window) = app.get_webview_window("main") {
                 *crate::state::MAIN_WINDOW.lock() = Some(window);

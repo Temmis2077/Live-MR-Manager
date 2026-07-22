@@ -104,7 +104,7 @@ pub static DB: Lazy<Arc<Mutex<Connection>>> = Lazy::new(|| {
                             .map(PathBuf::from)
                             .unwrap_or_else(|_| PathBuf::from("data"))
                     });
-                path.push("com.autumncolor77.live-mr-manager");
+                path.push("com.osw.desktop");
                 path
             }
         }

@@ -105,7 +105,7 @@ export const PRIVACY_SECTIONS: LegalSection[] = [
     list: [
       "OAuth PKCE 쿠키(웹): 최대 10분, 로그인 완료 또는 만료 시 삭제",
       "OAuth 세션 쿠키(웹): 최대 7일, 로그아웃·만료 시 삭제",
-      "OAuth 토큰·채널 설정(앱): 사용자가 로그아웃·삭제하거나 앱을 제거할 때까지 로컬 PC에 저장(%LOCALAPPDATA%\\com.autumncolor77.live-mr-manager\\)",
+      "OAuth 토큰·채널 설정(앱): 사용자가 로그아웃·삭제하거나 앱을 제거할 때까지 로컬 PC에 저장(%LOCALAPPDATA%\\com.osw.desktop\\)",
       "동기화된 곡 메타(앱): 로컬 SQLite(library.db)에 저장, 사용자가 삭제·앱 제거 시까지",
       "Companion 웹 접속 로그: Vercel 호스팅 정책에 따름(별도 회원 DB 미저장)",
     ],
@@ -154,7 +154,7 @@ export const PRIVACY_SECTIONS: LegalSection[] = [
     paragraphs: [
       "개인정보 열람·정정·삭제·처리 정지 등을 요청하실 수 있습니다. GitHub Issues로 문의해 주세요.",
       "멜로밍 연동 해제: 데스크톱 앱에서 「멜로밍 로그아웃」, Companion 웹에서 로그아웃을 사용할 수 있습니다.",
-      "로컬 데이터 삭제: Windows에서 %LOCALAPPDATA%\\com.autumncolor77.live-mr-manager\\ 폴더를 삭제하면 앱 로컬 데이터(라이브러리·토큰·캐시 등)가 제거됩니다.",
+      "로컬 데이터 삭제: Windows에서 %LOCALAPPDATA%\\com.osw.desktop\\ 폴더를 삭제하면 앱 로컬 데이터(라이브러리·토큰·캐시 등)가 제거됩니다.",
     ],
   },
   {

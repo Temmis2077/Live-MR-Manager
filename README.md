@@ -130,8 +130,8 @@ cd src-tauri && cargo test --lib   # Rust 테스트
 **Windows PowerShell 참고**
 - `npm` 미인식 시 터미널 재시작 또는 `npm.cmd`
 - 실행 정책 오류 시 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
-- 캐시/데이터: `%LOCALAPPDATA%\com.autumncolor77.live-mr-manager\`, 관리형 도구: `%LOCALAPPDATA%\LiveMRManager\tools\`
-  (내부 식별자·데이터 폴더명은 기존 사용자 데이터 보존을 위해 유지합니다.)
+- 캐시/데이터: `%LOCALAPPDATA%\com.osw.desktop\`, 관리형 도구: `%LOCALAPPDATA%\LiveMRManager\tools\`
+  (구 버전 데이터는 `com.autumncolor77.live-mr-manager\`에 있었고, 첫 실행 시 새 위치로 가져올지 물어봅니다. 관리형 도구 폴더는 식별자와 무관해 그대로 유지됩니다.)
 
 ## 📄 라이선스·크레딧
 - 기반: [AutumnColor77/Live-MR-Manager](https://github.com/AutumnColor77/Live-MR-Manager) — 초기 핵심 설계·구현 저작권은 원 개발자.
