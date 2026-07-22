@@ -124,6 +124,13 @@ pub fn run() {
                 }
             });
 
+            // yt-dlp는 유튜브 변경에 맞춰 주 단위로 갱신된다 — 오래된 바이너리는
+            // "곡 추가가 갑자기 실패"의 주범이라, 시작 시 조용히 최신본으로 유지한다.
+            // (실패해도 기존 바이너리로 계속 동작하므로 시작을 막지 않는다.)
+            tauri::async_runtime::spawn(async {
+                crate::youtube::YoutubeManager::refresh_managed_yt_dlp_if_stale().await;
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

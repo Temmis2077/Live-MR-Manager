@@ -183,6 +183,55 @@ impl YoutubeManager {
         }
     }
 
+    /// 관리형 yt-dlp가 오래됐으면(7일+) 백그라운드로 최신본을 받아 교체한다.
+    ///
+    /// yt-dlp는 유튜브가 추출을 깰 때마다 거의 주 단위로 갱신되므로, 설치 시점에
+    /// 한 번 받은 뒤 방치하면 "곡 추가가 어느 날 갑자기 실패"(봇 감지 등)의 주범이
+    /// 된다. 앱 시작 시 조용히 호출해 신선하게 유지한다.
+    ///
+    /// 안전 원칙: (1) 관리형 캐시의 바이너리만 갱신(시스템/번들은 건드리지 않음),
+    /// (2) 임시 파일로 받아 완결됐을 때만 교체(반쯤 받다 실패해도 기존 것 보존),
+    /// (3) 어떤 실패에도 기존 바이너리를 유지 — 오프라인이어도 앱은 계속 동작.
+    pub async fn refresh_managed_yt_dlp_if_stale() {
+        const MAX_AGE_SECS: u64 = 7 * 24 * 60 * 60; // 7일
+
+        // 없으면 최초 다운로드까지 겸한다(이 경우 방금 받은 것이라 갱신 불필요).
+        let Some(path) = Self::ensure_managed_yt_dlp().await else { return; };
+        let managed = Self::managed_cache_dir().join(Self::managed_bin_name());
+        if path != managed {
+            return; // 시스템/번들 바이너리는 갱신 대상 아님
+        }
+
+        let fresh = std::fs::metadata(&managed)
+            .and_then(|m| m.modified())
+            .map(|t| t.elapsed().map(|e| e.as_secs()).unwrap_or(0) < MAX_AGE_SECS)
+            .unwrap_or(true); // mtime을 못 읽으면(이상 상황) 굳이 갱신하지 않음
+        if fresh {
+            return;
+        }
+
+        let url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
+        let tmp = managed.with_extension("exe.new");
+        let Ok(resp) = reqwest::get(url).await else { return; };
+        if !resp.status().is_success() {
+            return;
+        }
+        let Ok(bytes) = resp.bytes().await else { return; };
+        // 온전성 최소 확인: 정상 yt-dlp.exe는 수 MB 이상이다.
+        if bytes.len() < 1_000_000 {
+            return;
+        }
+        if tokio::fs::write(&tmp, &bytes).await.is_err() {
+            return;
+        }
+        // 원자적 교체. 실행 중이면 실패할 수 있으나 그땐 기존 것을 그대로 둔다.
+        if std::fs::rename(&tmp, &managed).is_err() {
+            let _ = std::fs::remove_file(&tmp);
+            return;
+        }
+        crate::audio_player::sys_log("[Tools] yt-dlp를 최신 버전으로 갱신했습니다");
+    }
+
     /// Finds the best yt-dlp executable by checking managed and system paths.
     async fn find_yt_dlp() -> String {
         // 1. Use managed binary first for stability.
