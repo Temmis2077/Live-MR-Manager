@@ -31,7 +31,7 @@ def extract_user_announcement(tag: str) -> str:
             return body
 
     return (
-        f"**Live MR Manager {tag}** 업데이트가 나왔습니다.\n\n"
+        f"**OSW {tag}** 업데이트가 나왔습니다.\n\n"
         f"Windows 설치 파일은 GitHub Releases에서 받을 수 있습니다.\n"
         f"자세한 변경 사항은 저장소의 RELEASE_NOTES.md를 참고해 주세요.\n\n"
         f"궁금한 점은 **#질문-답변**에 남겨 주세요."
@@ -44,14 +44,14 @@ def build_payload(tag: str, description: str) -> dict:
         description = description[: DISCORD_DESC_LIMIT - 1].rstrip() + "\n\n…"
 
     return {
-        "username": "Live MR Manager",
+        "username": "OSW (Open Stem Wave)",
         "allowed_mentions": {"parse": []},
         "embeds": [
             {
                 "title": f"업데이트 안내 · {tag}",
                 "url": release_url,
                 "description": description,
-                "color": 0xF59E0B,
+                "color": 0x8B5CF6,
                 "fields": [
                     {
                         "name": "다운로드",

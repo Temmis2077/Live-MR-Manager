@@ -42,15 +42,17 @@ jobs:
           MELOMING_USE_COMPANION_EXCHANGE: "true"
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: "Live MR Manager (Beta) ${{ github.ref_name }} - AI Vocal Remover & Live Backing Track Manager with Lyrics Sync."
+          releaseName: "OSW ${{ github.ref_name }} — Open Stem Wave"
           releaseBody: |
-            🎙️ Live MR Manager(Beta) ${{ github.ref_name }} 릴리즈
+            🌊 OSW(Open Stem Wave) ${{ github.ref_name }}
 
-            AI 기반 오디오 분리 및 정밀 제어를 지원하는 Live MR Manager(Beta)의 최신 릴리즈입니다.
+            곡을 스템(보컬·MR)으로 열어 노래하고, 가사를 AI로 싱크하고, OBS로 방송에 얹는
+            개방형 스템 분리 미니 DAW입니다.
 
-            **Windows용 NSIS 설치 파일**을 다운로드하세요.
+            **Windows용 NSIS 설치 파일**을 다운로드하세요. 처음 실행하면 이전 버전
+            (Live MR Manager) 데이터를 가져올지 물어봅니다.
 
-            상세 변경 사항: [RELEASE_NOTES.md](https://github.com/AutumnColor77/Live-MR-Manager/blob/main/RELEASE_NOTES.md)
+            상세 변경 사항: [RELEASE_NOTES.md](https://github.com/Temmis2077/Live-MR-Manager-Mod/blob/main/RELEASE_NOTES.md)
           releaseDraft: true
-          prerelease: false
+          prerelease: true
           args: "--verbose ${{ matrix.bundleArgs }}"

@@ -1,7 +1,7 @@
 {
   "name": "osw",
   "private": true,
-  "version": "0.6.0-beta.6",
+  "version": "1.0.0-beta.1",
   "type": "module",
   "scripts": {
     "tauri": "tauri",
