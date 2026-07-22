@@ -163,6 +163,11 @@ async function initApp() {
   } catch (err) {}
 
   try {
+    const { initAppModeControls } = await import('./js/events/app-mode-ui.js');
+    initAppModeControls();
+  } catch (err) {}
+
+  try {
     const { initGpuPackControls } = await import('./js/gpu-pack.js');
     initGpuPackControls();
     await refreshGpuPackStatus();

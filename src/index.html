@@ -599,6 +599,30 @@
               <button type="button" class="settings-subtab-btn" data-scat="about">정보</button>
             </nav>
           <div class="settings-container">
+            <!-- 앱 모드 (기본 / 스튜디오) — 첫 실행 선택을 나중에 바꾸는 곳 -->
+            <section class="settings-group" data-scat="general">
+              <div class="group-header">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 2v20M2 12h20"></path>
+                  <circle cx="12" cy="12" r="9"></circle>
+                </svg>
+                <h3>앱 모드</h3>
+              </div>
+              <div class="ai-model-card" style="flex-direction: column; align-items: stretch; gap: 12px;">
+                <div class="ai-info-left">
+                  <h2 class="ai-title-large">기본 · 스튜디오</h2>
+                  <div class="ai-model-desc" id="app-mode-desc"></div>
+                </div>
+                <div class="ai-actions-right" style="justify-content: flex-start;">
+                  <div class="app-mode-seg" id="app-mode-seg" role="group" aria-label="앱 모드 선택">
+                    <button type="button" class="app-mode-seg-btn" data-mode="basic">🎤 기본</button>
+                    <button type="button" class="app-mode-seg-btn" data-mode="studio">🎛️ 스튜디오</button>
+                  </div>
+                </div>
+              </div>
+            </section>
+
             <section class="settings-group">
               <div class="group-header">
                 <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"
