@@ -5,14 +5,33 @@
 //! 미융합 그래프라 커널 실행 오버헤드에 묶여 CPU보다도 느리다. TensorRT가
 //! 그래프를 융합하면 **청크당 14.1초 → 0.83초(약 17배)** 로 떨어진다(실측).
 //!
-//! 다만 TensorRT+cuDNN DLL은 합쳐서 ~2GB라 설치본에 넣을 수 없다. 그래서 AI
-//! 모델(1.2GB)을 GitHub 릴리즈에서 받아 쓰는 기존 방식 그대로, 원하는 사용자만
-//! 내려받아 `%LOCALAPPDATA%\LiveMRManager\tools\gpu\`에 두는 구조로 한다.
+//! 다만 TensorRT+cuDNN DLL은 전부 합쳐 ~3.8GB(압축 ~2.6GB)라 설치본에 넣을 수
+//! 없다. 그래서 GitHub 릴리즈에 분할 zip으로 올려두고, 앱 안에서 버튼 하나로
+//! 내려받아 `%LOCALAPPDATA%\LiveMRManager\tools\gpu\`에 풀어 넣는다(`install_gpu_pack`).
 //! 팩이 없으면 기존 경로(CPU/DirectML)로 그대로 동작한다.
+//!
+//! NVIDIA 런타임 재배포 근거: TensorRT SLA §8.2 / cuDNN SLA / CUDA EULA Attachment A가
+//! 런타임 .dll 재배포를 허용한다. 조건 중 하나가 고지 문구이므로, 설치 시 팩
+//! 폴더에 NOTICE 파일을 함께 쓴다(`write_attribution_notice`).
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::ffmpeg_tools::tools_cache_dir;
+
+/// 팩 파트(분할 zip)와 검증 정보를 담은 매니페스트의 위치.
+///
+/// 팩 원본은 ~3.8GB(압축 시 ~2.6GB)라 GitHub 릴리즈 에셋 1개(2GB 한도)에 담기지
+/// 않는다. 그래서 1.8GB 미만 zip 여러 파트로 쪼개 올리고, 이 매니페스트가 파트
+/// 목록·크기·sha256을 알려준다. 앱 릴리즈와 분리된 고정 태그(gpu-pack-v1)에 두어
+/// 앱 재배포 없이 팩만 교체할 수 있게 한다.
+const GPU_PACK_MANIFEST_URL: &str =
+    "https://github.com/Temmis2077/Live-MR-Manager-Mod/releases/download/gpu-pack-v1/manifest.json";
+
+/// 설치가 진행 중인지(동시 설치 방지).
+static INSTALLING: AtomicBool = AtomicBool::new(false);
+/// 사용자가 설치 취소를 요청했는지.
+static INSTALL_CANCEL: AtomicBool = AtomicBool::new(false);
 
 /// GPU 가속 팩 DLL이 놓이는 디렉터리.
 pub fn gpu_pack_dir() -> PathBuf {
@@ -118,6 +137,314 @@ pub fn register_dll_search_path() {
     }
 }
 
+/// NVIDIA 재배포 조건(고지)을 충족하기 위한 NOTICE 파일을 팩 폴더에 쓴다.
+fn write_attribution_notice(dir: &Path) {
+    let notice = "\
+This directory contains NVIDIA runtime libraries redistributed with Live MR Manager.
+
+This software contains source code provided by NVIDIA Corporation.
+
+The included NVIDIA runtime files (TensorRT, cuDNN, cuBLAS, and CUDA runtime .dll files)
+are redistributed under:
+  - NVIDIA TensorRT Software License Agreement (SLA), Section 8.2
+  - NVIDIA cuDNN Software License Agreement
+  - NVIDIA CUDA Toolkit End User License Agreement, Attachment A
+
+These files are provided solely for use by Live MR Manager and may not be
+distributed in isolation.
+";
+    let _ = std::fs::write(dir.join("NVIDIA-NOTICE.txt"), notice);
+}
+
+/// 설치 진행 상황(프론트로 emit).
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct InstallProgress {
+    /// "download" | "extract" | "verify" | "done" | "error" | "cancelled"
+    phase: String,
+    /// 전체 진행률 0..100 (다운로드 단계 기준).
+    percent: f32,
+    received_bytes: u64,
+    total_bytes: u64,
+    part_index: u32,
+    part_count: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct GpuPackManifest {
+    parts: Vec<GpuPackPart>,
+    /// 설치 후 존재해야 하는 DLL 목록(검증용). 비면 required_dlls()로 대체.
+    #[serde(default)]
+    dlls: Vec<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct GpuPackPart {
+    url: String,
+    #[serde(default)]
+    size: Option<u64>,
+    #[serde(default)]
+    sha256: Option<String>,
+}
+
+fn emit_progress(app: &tauri::AppHandle, p: InstallProgress) {
+    use tauri::Emitter;
+    let _ = app.emit("gpu-pack-install-progress", p);
+}
+
+/// 진행 중인 설치를 취소 요청한다(다음 청크 경계에서 중단).
+#[tauri::command]
+pub fn cancel_gpu_pack_install() {
+    INSTALL_CANCEL.store(true, Ordering::SeqCst);
+}
+
+/// GPU 팩을 GitHub 릴리즈에서 내려받아 설치한다.
+///
+/// 매니페스트를 읽어 각 파트(분할 zip)를 임시 파일로 스트리밍 다운로드하고,
+/// sha256을 검증한 뒤 팩 폴더에 풀어 넣는다. 3.8GB를 메모리에 담지 않도록
+/// **파트마다 임시 파일에 흘려 쓰고**, 압축해제 후 즉시 지운다.
+#[tauri::command]
+pub async fn install_gpu_pack(app: tauri::AppHandle) -> Result<(), String> {
+    if INSTALLING.swap(true, Ordering::SeqCst) {
+        return Err("이미 GPU 팩 설치가 진행 중입니다.".to_string());
+    }
+    INSTALL_CANCEL.store(false, Ordering::SeqCst);
+
+    let result = install_gpu_pack_inner(&app).await;
+
+    INSTALLING.store(false, Ordering::SeqCst);
+    match &result {
+        Ok(()) => emit_progress(
+            &app,
+            InstallProgress {
+                phase: "done".into(),
+                percent: 100.0,
+                received_bytes: 0,
+                total_bytes: 0,
+                part_index: 0,
+                part_count: 0,
+                message: None,
+            },
+        ),
+        Err(e) => {
+            let phase = if INSTALL_CANCEL.load(Ordering::SeqCst) { "cancelled" } else { "error" };
+            emit_progress(
+                &app,
+                InstallProgress {
+                    phase: phase.into(),
+                    percent: 0.0,
+                    received_bytes: 0,
+                    total_bytes: 0,
+                    part_index: 0,
+                    part_count: 0,
+                    message: Some(e.clone()),
+                },
+            );
+        }
+    }
+    result
+}
+
+async fn install_gpu_pack_inner(app: &tauri::AppHandle) -> Result<(), String> {
+    use futures::StreamExt;
+    use sha2::{Digest, Sha256};
+    use std::io::Write;
+
+    let dir = gpu_pack_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| format!("폴더 생성 실패: {e}"))?;
+    let tmp_dir = dir.join(".download");
+    std::fs::create_dir_all(&tmp_dir).map_err(|e| format!("임시 폴더 생성 실패: {e}"))?;
+
+    let client = reqwest::Client::builder()
+        .user_agent("LiveMRManager")
+        .build()
+        .map_err(|e| format!("HTTP 클라이언트 생성 실패: {e}"))?;
+
+    // 1) 매니페스트.
+    let manifest: GpuPackManifest = client
+        .get(GPU_PACK_MANIFEST_URL)
+        .send()
+        .await
+        .map_err(|e| format!("매니페스트 요청 실패: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("매니페스트 응답 오류: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("매니페스트 파싱 실패: {e}"))?;
+
+    if manifest.parts.is_empty() {
+        return Err("매니페스트에 파트가 없습니다.".to_string());
+    }
+
+    let part_count = manifest.parts.len() as u32;
+    // 전체 크기: 매니페스트에 size가 있으면 그 합, 없으면 파트별 Content-Length로 대체.
+    let mut total_bytes: u64 = manifest.parts.iter().filter_map(|p| p.size).sum();
+    let mut done_bytes: u64 = 0;
+
+    for (idx, part) in manifest.parts.iter().enumerate() {
+        if INSTALL_CANCEL.load(Ordering::SeqCst) {
+            let _ = std::fs::remove_dir_all(&tmp_dir);
+            return Err("사용자가 취소했습니다.".to_string());
+        }
+
+        let part_path = tmp_dir.join(format!("part_{idx}.zip"));
+        let resp = client
+            .get(&part.url)
+            .send()
+            .await
+            .map_err(|e| format!("파트 {} 다운로드 실패: {e}", idx + 1))?
+            .error_for_status()
+            .map_err(|e| format!("파트 {} 응답 오류: {e}", idx + 1))?;
+
+        if total_bytes == 0 {
+            // size 미제공 시 Content-Length 합으로 대략 추정.
+            total_bytes = resp.content_length().unwrap_or(0) * part_count as u64;
+        }
+
+        let mut file =
+            std::fs::File::create(&part_path).map_err(|e| format!("임시 파일 생성 실패: {e}"))?;
+        let mut hasher = Sha256::new();
+        let mut stream = resp.bytes_stream();
+
+        while let Some(item) = stream.next().await {
+            if INSTALL_CANCEL.load(Ordering::SeqCst) {
+                drop(file);
+                let _ = std::fs::remove_dir_all(&tmp_dir);
+                return Err("사용자가 취소했습니다.".to_string());
+            }
+            let chunk = item.map_err(|e| format!("다운로드 중 오류: {e}"))?;
+            file.write_all(&chunk).map_err(|e| format!("쓰기 오류: {e}"))?;
+            hasher.update(&chunk);
+            done_bytes += chunk.len() as u64;
+
+            let percent = if total_bytes > 0 {
+                (done_bytes as f64 / total_bytes as f64 * 100.0).min(100.0) as f32
+            } else {
+                0.0
+            };
+            emit_progress(
+                app,
+                InstallProgress {
+                    phase: "download".into(),
+                    percent,
+                    received_bytes: done_bytes,
+                    total_bytes,
+                    part_index: idx as u32,
+                    part_count,
+                    message: None,
+                },
+            );
+        }
+        file.flush().map_err(|e| format!("flush 오류: {e}"))?;
+        drop(file);
+
+        // 2) sha256 검증(매니페스트에 있을 때만).
+        if let Some(expected) = &part.sha256 {
+            let got = hex_lower(&hasher.finalize());
+            if !got.eq_ignore_ascii_case(expected) {
+                let _ = std::fs::remove_dir_all(&tmp_dir);
+                return Err(format!(
+                    "파트 {} 무결성 검증 실패(sha256 불일치). 다시 시도해 주세요.",
+                    idx + 1
+                ));
+            }
+        }
+
+        // 3) 압축해제(블로킹 → 별도 스레드).
+        emit_progress(
+            app,
+            InstallProgress {
+                phase: "extract".into(),
+                percent: if total_bytes > 0 {
+                    (done_bytes as f64 / total_bytes as f64 * 100.0).min(100.0) as f32
+                } else {
+                    0.0
+                },
+                received_bytes: done_bytes,
+                total_bytes,
+                part_index: idx as u32,
+                part_count,
+                message: None,
+            },
+        );
+        let dir_clone = dir.clone();
+        let part_path_clone = part_path.clone();
+        tokio::task::spawn_blocking(move || extract_zip_into(&part_path_clone, &dir_clone))
+            .await
+            .map_err(|e| format!("압축해제 작업 실패: {e}"))??;
+
+        let _ = std::fs::remove_file(&part_path);
+    }
+
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+
+    // 4) 최종 검증: 필요한 DLL이 모두 있는지.
+    emit_progress(
+        app,
+        InstallProgress {
+            phase: "verify".into(),
+            percent: 100.0,
+            received_bytes: total_bytes,
+            total_bytes,
+            part_index: part_count,
+            part_count,
+            message: None,
+        },
+    );
+    let required: Vec<String> = if manifest.dlls.is_empty() {
+        required_dlls().iter().map(|s| s.to_string()).collect()
+    } else {
+        manifest.dlls.clone()
+    };
+    let missing: Vec<String> = required
+        .iter()
+        .filter(|f| !dir.join(f).exists())
+        .cloned()
+        .collect();
+    if !missing.is_empty() {
+        return Err(format!("설치 후 누락된 파일: {}", missing.join(", ")));
+    }
+
+    write_attribution_notice(&dir);
+
+    // 새로 설치된 DLL을 이번 프로세스에서 바로 쓸 수 있게 적재.
+    register_dll_search_path();
+    Ok(())
+}
+
+fn hex_lower(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        s.push_str(&format!("{b:02x}"));
+    }
+    s
+}
+
+/// zip 파일을 대상 폴더에 푼다(경로 탈출 방지). DLL은 평면으로 두므로 파일명만 사용.
+fn extract_zip_into(zip_path: &Path, dest: &Path) -> Result<(), String> {
+    let file = std::fs::File::open(zip_path).map_err(|e| format!("zip 열기 실패: {e}"))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("zip 파싱 실패: {e}"))?;
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).map_err(|e| format!("zip 항목 오류: {e}"))?;
+        if !entry.is_file() {
+            continue;
+        }
+        // 경로 탈출(zip slip) 방지: 파일명만 취한다.
+        let raw = entry.name().replace('\\', "/");
+        let base = match raw.rsplit('/').next() {
+            Some(b) if !b.is_empty() => b,
+            _ => continue,
+        };
+        let out_path = dest.join(base);
+        let mut out =
+            std::fs::File::create(&out_path).map_err(|e| format!("파일 생성 실패: {e}"))?;
+        std::io::copy(&mut entry, &mut out).map_err(|e| format!("압축해제 쓰기 실패: {e}"))?;
+    }
+    Ok(())
+}
+
 /// 팩 상태 요약 (설정 화면 표시용).
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -125,6 +452,8 @@ pub struct GpuPackStatus {
     pub installed: bool,
     pub dir: String,
     pub missing: Vec<String>,
+    /// 설치가 진행 중인지(UI 버튼 상태 복원용).
+    pub installing: bool,
 }
 
 #[tauri::command]
@@ -133,6 +462,7 @@ pub fn get_gpu_pack_status() -> GpuPackStatus {
         installed: is_installed(),
         dir: gpu_pack_dir().to_string_lossy().to_string(),
         missing: missing_dlls(),
+        installing: INSTALLING.load(Ordering::SeqCst),
     }
 }
 

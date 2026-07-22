@@ -158,6 +158,8 @@ async function initApp() {
   } catch (err) {}
 
   try {
+    const { initGpuPackControls } = await import('./js/gpu-pack.js');
+    initGpuPackControls();
     await refreshGpuPackStatus();
     elements.btnOpenGpuPack?.addEventListener("click", async () => {
       try {

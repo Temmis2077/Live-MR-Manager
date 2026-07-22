@@ -167,6 +167,8 @@ pub fn run() {
             system::open_lyrics_window,
             gpu_pack::get_gpu_pack_status,
             gpu_pack::open_gpu_pack_dir,
+            gpu_pack::install_gpu_pack,
+            gpu_pack::cancel_gpu_pack_install,
             dereverb::get_dereverb_status,
             dereverb::set_dereverb_enabled,
             dereverb::open_dereverb_dir,

@@ -901,14 +901,23 @@
                   <h2 class="ai-title-large" style="margin: 0 0 8px;">GPU 가속 팩 (선택)</h2>
                   <div class="ai-model-desc">
                     NVIDIA GPU에서 <strong>MR 분리 속도를 곡당 20~30분 → 약 30초</strong>로 줄입니다
-                    (RTX 2070 실측). 용량이 약 2GB라 설치본에 넣지 않고, 원하는 분들만 따로
-                    받아 쓰는 구조입니다. 없어도 앱은 기존대로 동작합니다.
+                    (RTX 2070 실측). 용량이 약 4GB라 설치본에 넣지 않고, 아래
+                    <strong>다운로드</strong> 버튼으로 원하는 분만 받는 구조입니다. 없어도 앱은
+                    기존대로 동작합니다.
                     <br>NVIDIA GPU 전용이며, 처음 분리할 때 GPU에 맞춰 엔진을 빌드하느라
                     2~3분 걸립니다(이후 캐시되어 바로 시작).
                   </div>
+                  <div id="gpu-pack-progress" hidden style="margin-top: 12px;">
+                    <div style="height: 6px; background: var(--surface-2, rgba(255,255,255,0.08)); border-radius: 3px; overflow: hidden;">
+                      <div id="gpu-pack-progress-bar" style="height: 100%; width: 0%; background: var(--accent, #6c8cff); transition: width 0.2s;"></div>
+                    </div>
+                    <div id="gpu-pack-progress-text" style="margin-top: 6px; font-size: 0.78rem; color: var(--text-muted);"></div>
+                  </div>
                   <div id="gpu-pack-detail" style="margin-top: 8px; font-size: 0.78rem; color: var(--text-muted); word-break: break-all;"></div>
                 </div>
-                <div class="ai-actions-right" style="justify-content: flex-start;">
+                <div class="ai-actions-right" style="justify-content: flex-start; gap: 8px;">
+                  <button id="btn-install-gpu-pack" class="btn-ai-action">다운로드</button>
+                  <button id="btn-cancel-gpu-pack" class="btn-ai-action secondary" hidden>취소</button>
                   <button id="btn-open-gpu-pack" class="btn-ai-action secondary">폴더 열기</button>
                 </div>
               </div>

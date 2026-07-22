@@ -30,8 +30,12 @@ export async function invoke(command, args = {}) {
     case 'get_gpu_recommendation':
       return { recommendation: "Browser Mock", gpu: "None" };
     case 'get_gpu_pack_status':
-      return { installed: false, dir: 'C:\\Users\\<user>\\AppData\\Local\\LiveMRManager\\tools\\gpu', missing: ['nvinfer_10.dll', 'cudnn64_9.dll'] };
+      return { installed: false, dir: 'C:\\Users\\<user>\\AppData\\Local\\LiveMRManager\\tools\\gpu', missing: ['nvinfer_10.dll', 'cudnn64_9.dll'], installing: false };
     case 'open_gpu_pack_dir':
+      return;
+    case 'install_gpu_pack':
+      return;
+    case 'cancel_gpu_pack_install':
       return;
     case 'list_model_presets':
       return [

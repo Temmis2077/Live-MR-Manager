@@ -35,16 +35,32 @@ NVIDIA GPU 전용이며, 없어도 앱은 기존대로 동작한다.
 
 ## 구조
 
-DLL 약 2GB라 설치본에 넣을 수 없다. AI 모델(1.2GB)을 GitHub 릴리즈에서 받아 쓰는
-기존 방식과 동일하게, 원하는 사용자만 받아서 아래 위치에 둔다:
+DLL이 전부 합쳐 약 3.8GB(압축 ~2.6GB)라 설치본에 넣을 수 없다. GitHub 릴리즈에
+분할 zip으로 올려두고, 앱 설정 화면의 **다운로드** 버튼으로 받아 아래 위치에 푼다:
 
 ```
 %LOCALAPPDATA%\LiveMRManager\tools\gpu\      ← DLL
 %LOCALAPPDATA%\LiveMRManager\tools\trt_cache\ ← 빌드된 엔진 캐시
 ```
 
-`gpu_pack::is_installed()`가 필수 DLL을 확인하고, 있을 때만 프로바이더 체인 맨 앞에
-TensorRT를 넣는다. 없으면 기존 경로(DirectML/CUDA/CPU)로 그대로 간다.
+`gpu_pack::install_gpu_pack()`이 매니페스트(파트 목록·sha256)를 읽어 각 파트를
+스트리밍 다운로드→검증→압축해제한다. `gpu_pack::is_installed()`가 필수 DLL을
+확인하고, 있을 때만 프로바이더 체인 맨 앞에 TensorRT를 넣는다. 없으면 기존
+경로(DirectML/CUDA/CPU)로 그대로 간다.
+
+### 팩 만들기·업로드 (관리자용)
+
+설치된 팩을 릴리즈용 파트로 묶으려면:
+
+```
+python scripts/pack_gpu_pack.py \
+  --src "%LOCALAPPDATA%/LiveMRManager/tools/gpu" \
+  --out dist/gpu-pack \
+  --base-url https://github.com/Temmis2077/Live-MR-Manager-Mod/releases/download/gpu-pack-v1
+```
+
+생성된 `part_*.zip`과 `manifest.json`을 `gpu-pack-v1` 태그에 업로드한다.
+매니페스트 URL은 `gpu_pack.rs`의 `GPU_PACK_MANIFEST_URL`과 일치해야 한다.
 
 ### 필수 DLL
 
@@ -69,9 +85,20 @@ TensorRT 엔진은 **GPU 아키텍처별로 다르다**(RTX 2070 = `sm75`, 969MB
 약 150초 걸리고, 캐시가 맞으면 세션 로드가 12~17초로 줄어든다. 사용자가 GPU를
 바꾸면 자동으로 다시 빌드된다.
 
-## 미해결 — 배포 전 결정 필요
+## NVIDIA 런타임 재배포 근거
 
-**NVIDIA DLL 재배포 라이선스.** cuDNN/TensorRT 재배포에는 NVIDIA의 조건이 붙는다.
-GitHub 릴리즈에 직접 올려 배포할지, 아니면 사용자가 NVIDIA에서 직접 받도록
-안내만 할지 확인이 필요하다. 현재 앱은 **폴더 열기 + 상태 표시**까지만 제공하고
-자동 다운로드는 넣지 않았다.
+NVIDIA 표준 SLA/EULA가 런타임 `.dll` 재배포를 **허용**한다:
+
+- **TensorRT SLA §8.2** — 런타임 `.so`/`.dll`은 배포 가능(단독 배포는 금지, 앱에 부속).
+- **cuDNN SLA** — 동일한 런타임 배포 조항.
+- **CUDA EULA Attachment A** — `cudart`, `cublas`, `cublasLt`, `cufft` 등을 재배포 목록에 명시.
+
+조건: (1) 앱이 실질적 부가 기능을 제공할 것, (2) 배포 부분은 앱만 접근할 것,
+(3) 고지 문구 포함, (4) 단독 배포 금지. 이 앱은 (1)(2)(4)를 이미 충족하며, (3)은
+설치 시 팩 폴더에 `NVIDIA-NOTICE.txt`를 함께 쓰는 것으로 충족한다
+(`gpu_pack::write_attribution_notice`).
+
+> 참고: 더 가벼운 대안으로 **TensorRT-RTX**(런타임 199MB, cuDNN/cuBLAS 불필요)가 있다.
+> 다만 pyke가 배포하는 prebuilt ORT의 `nv_tensorrt_rtx` 프로바이더가 풀 TensorRT
+> (`nvinfer_10.dll`)에 링크돼 있어, 이를 쓰려면 ORT를 `--use_nv_tensorrt_rtx`로
+> 커스텀 빌드해야 한다(별도 트랙, ToDo 참조).

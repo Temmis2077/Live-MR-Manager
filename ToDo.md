@@ -72,7 +72,8 @@
 - [x] 자체 업데이트 알림 — 원본이 아닌 이 레포의 릴리즈를 보도록 전환(베타 → 다음 베타로 이어짐)
 - [x] Draft PR #1 — 가사 싱크·AI 정렬 기능 일괄 정리 (이 레포 `main`에 병합됨)
 - [ ] 완성도 확인된 기능을 업스트림에 제안
-- [ ] GPU 가속 팩 배포 방식 확정 — cuDNN/TensorRT 재배포 라이선스 검토 필요(현재는 수동 설치 안내)
+- [x] **GPU 가속 팩 앱 내 자동 다운로드(B)** — 분할 zip 매니페스트 방식(파트별 스트리밍·sha256·압축해제·진행률·취소). NVIDIA 재배포는 표준 SLA/EULA로 허용됨을 확인(고지는 `NVIDIA-NOTICE.txt`). 파트 생성은 `scripts/pack_gpu_pack.py`. 실제 릴리즈 에셋(gpu-pack-v1) 업로드는 관리자 수동 단계.
+- [ ] **TensorRT-RTX로 ORT 커스텀 빌드(A′)** — 배포 4GB→199MB, cuDNN/cuBLAS 제거, JIT 5초. `ort`엔 `NVRTX` EP·`nvrtx` 피처가 이미 있으나, pyke prebuilt ORT의 `nv_tensorrt_rtx` 프로바이더가 풀 TensorRT(`nvinfer_10.dll`)에 링크돼 있어 `tensorrt_rtx_1_5.dll`(199MB 휠)과 불일치. ORT를 `--use_nv_tensorrt_rtx`로 소스 빌드해야 함. 성공 시 B의 다운로드 소스만 교체.
 
 ## 🧪 6. 장기 구상
 

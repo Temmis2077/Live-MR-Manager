@@ -50,6 +50,11 @@ export const elements = {
   gpuPackStatus: null,
   gpuPackDetail: null,
   btnOpenGpuPack: null,
+  btnInstallGpuPack: null,
+  btnCancelGpuPack: null,
+  gpuPackProgress: null,
+  gpuPackProgressBar: null,
+  gpuPackProgressText: null,
   btnDownloadModel: null,
   btnDeleteModel: null,
   btnStartTrack: null,
@@ -156,6 +161,11 @@ export function initDomReferences() {
   elements.gpuPackStatus = document.getElementById("gpu-pack-status");
   elements.gpuPackDetail = document.getElementById("gpu-pack-detail");
   elements.btnOpenGpuPack = document.getElementById("btn-open-gpu-pack");
+  elements.btnInstallGpuPack = document.getElementById("btn-install-gpu-pack");
+  elements.btnCancelGpuPack = document.getElementById("btn-cancel-gpu-pack");
+  elements.gpuPackProgress = document.getElementById("gpu-pack-progress");
+  elements.gpuPackProgressBar = document.getElementById("gpu-pack-progress-bar");
+  elements.gpuPackProgressText = document.getElementById("gpu-pack-progress-text");
   elements.btnDownloadModel = document.getElementById("btn-download-model");
   elements.btnDeleteModel = document.getElementById("btn-delete-model");
   elements.btnStartTrack = document.getElementById("btn-start-track");

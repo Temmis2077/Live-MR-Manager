@@ -779,7 +779,8 @@ export async function refreshGpuPackStatus() {
   try {
     const s = await invoke("get_gpu_pack_status");
     const installed = !!s.installed;
-    elements.gpuPackStatus.textContent = installed ? "설치됨" : "미설치";
+    const installing = !!s.installing;
+    elements.gpuPackStatus.textContent = installing ? "설치 중…" : (installed ? "설치됨" : "미설치");
     elements.gpuPackStatus.className = "ai-status-badge " + (installed ? "status-online" : "status-offline");
     if (elements.gpuPackDetail) {
       elements.gpuPackDetail.textContent = installed
@@ -787,6 +788,17 @@ export async function refreshGpuPackStatus() {
         : (s.missing && s.missing.length
             ? `빠진 파일 ${s.missing.length}개 (${s.missing.slice(0, 3).join(", ")}${s.missing.length > 3 ? " 외" : ""}) — 위치: ${s.dir}`
             : s.dir);
+    }
+    // 설치되어 있으면 다운로드 버튼을 "재설치"로, 아니면 "다운로드"로.
+    if (elements.btnInstallGpuPack && !installing) {
+      elements.btnInstallGpuPack.textContent = installed ? "재설치" : "다운로드";
+      elements.btnInstallGpuPack.hidden = false;
+    }
+    // 다른 창에서 설치가 진행 중인 상태로 재진입한 경우 진행 UI 복원.
+    if (installing) {
+      if (elements.gpuPackProgress) elements.gpuPackProgress.hidden = false;
+      if (elements.btnInstallGpuPack) elements.btnInstallGpuPack.hidden = true;
+      if (elements.btnCancelGpuPack) elements.btnCancelGpuPack.hidden = false;
     }
   } catch (err) {
     elements.gpuPackStatus.textContent = "확인 실패";

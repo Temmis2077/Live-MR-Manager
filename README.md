@@ -113,8 +113,9 @@ MDX/Kim Vocal 2 + DirectML은 곡당 18.5초였습니다.
 이 수정으로 GPU 팩이 없어도 **CPU 경로가 청크당 39초 → 14.1초**(Level3 + 정직한 폴백)로 빨라졌고,
 NVIDIA GPU + 팩이 있으면 **25배 이상** 빨라집니다.
 
-> ⚠️ GPU 가속 팩(cuDNN/TensorRT DLL ~2GB)은 NVIDIA 재배포 라이선스 검토가 필요해, 현재는
-> 앱이 **상태 표시·폴더 열기**까지 제공하고 수동 설치를 안내합니다(자동 배포는 추후).
+> GPU 가속 팩(cuDNN/TensorRT DLL, 압축 ~2.6GB)은 앱 설정에서 **다운로드 버튼 한 번**으로
+> 받아 설치합니다. NVIDIA 런타임 `.dll`은 표준 SLA/EULA(TensorRT §8.2, cuDNN, CUDA Attachment A)가
+> 재배포를 허용하며, 조건(고지)은 설치 시 `NVIDIA-NOTICE.txt`로 충족합니다.
 
 ---
 
