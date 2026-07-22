@@ -7,6 +7,49 @@ import { getLineVisibility, setLineVisibility } from '../../lrc-parser.js';
 const OVERLAY_LAN_PREF_KEY = 'overlay-use-lan-address';
 let cachedLanAddress = null;
 
+/**
+ * 오버레이 기본 스타일 3종 — 기존 조절값(크기·폰트·색·투명도·둥글기·방향)을
+ * 한 번에 세팅한다. 새 CSS 변수는 만들지 않고 이미 있는 커스터마이징 축만
+ * 조합해서 서로 다른 룩을 만든다(글래스=OBS 오버레이 표준형, 미니멀=박스 없이
+ * 텍스트만 두는 최근 가사 영상 트렌드, 스테이지=굵고 선명한 클래식 노래방
+ * 캡션). 적용 후에도 아래 세부 컨트롤로 얼마든지 더 다듬을 수 있다.
+ */
+/* 슬라이더 step(scale·투명도는 0.1 단위)에 정확히 맞춘 값만 쓴다 — 안 맞는
+   값(예: 0.85, 1.15)은 브라우저가 프로그램적 할당에도 가까운 스텝으로
+   조용히 스냅해, 프리셋이 실제로 뭘 저장할지 브라우저 구현에 기대게 된다. */
+const OVERLAY_PRESETS = {
+  glass: {
+    scale: 1.0, font: 'Pretendard', color: '8b5cf6', textColor: 'ffffff',
+    bgOpacity: 0.6, rounding: 20, bgColor: '0f0f14', animationDirection: 'left', fontSize: 22,
+  },
+  minimal: {
+    scale: 1.0, font: 'Inter', color: 'a78bfa', textColor: 'ffffff',
+    bgOpacity: 0.1, rounding: 10, bgColor: '000000', animationDirection: 'top', fontSize: 24,
+  },
+  stage: {
+    scale: 1.2, font: 'SUITE', color: 'ec4899', textColor: 'ffffff',
+    bgOpacity: 0.9, rounding: 30, bgColor: '1a0b2e', animationDirection: 'bottom', fontSize: 27,
+  },
+};
+
+/** 커스텀 드롭다운(선택 텍스트 + option-item.selected + 숨은 input)을 값으로 맞춘다. */
+function setDropdownValue(dropdownId, hiddenInputId, value) {
+  const hidden = document.getElementById(hiddenInputId);
+  if (hidden) hidden.value = value;
+  const dropdown = document.getElementById(dropdownId);
+  if (!dropdown) return;
+  const selectedText = dropdown.querySelector('.selected-text');
+  const options = dropdown.querySelectorAll('.option-item');
+  options.forEach((opt) => {
+    if (opt.dataset.value === value) {
+      opt.classList.add('selected');
+      if (selectedText) selectedText.textContent = opt.textContent;
+    } else {
+      opt.classList.remove('selected');
+    }
+  });
+}
+
 export function initOverlayListeners() {
   const overlayScale = document.getElementById('overlay-scale');
   const overlayScaleVal = document.getElementById('overlay-scale-val');
@@ -207,6 +250,40 @@ export function initOverlayListeners() {
     }
   };
 
+  /** 프리셋 버튼 클릭 시 폼 값을 한 번에 세팅하고 저장·미리보기까지 반영한다. */
+  const applyPreset = (name) => {
+    const preset = OVERLAY_PRESETS[name];
+    if (!preset) return;
+
+    if (overlayScale) overlayScale.value = preset.scale;
+    if (overlayFont) overlayFont.value = preset.font;
+    setDropdownValue('overlay-font-dropdown', 'overlay-font', preset.font);
+
+    if (overlayColor) overlayColor.value = `#${preset.color}`;
+    if (updateThemePalette) updateThemePalette(`#${preset.color}`);
+
+    if (overlayTextColor) overlayTextColor.value = `#${preset.textColor}`;
+    if (updateTextPalette) updateTextPalette(`#${preset.textColor}`);
+
+    if (overlayBgColor) overlayBgColor.value = `#${preset.bgColor}`;
+    if (updateBgPalette) updateBgPalette(`#${preset.bgColor}`);
+
+    if (overlayBgOpacity) overlayBgOpacity.value = preset.bgOpacity;
+    if (overlayRounding) overlayRounding.value = preset.rounding;
+
+    if (overlayAnimationDirection) overlayAnimationDirection.value = preset.animationDirection;
+    setDropdownValue('overlay-animation-direction-dropdown', 'overlay-animation-direction', preset.animationDirection);
+
+    const fontSizeInput = document.getElementById('overlay-font-size');
+    if (fontSizeInput) fontSizeInput.value = preset.fontSize;
+
+    updateOverlaySettings();
+  };
+
+  document.querySelectorAll('.overlay-preset-btn').forEach((btn) => {
+    btn.addEventListener('click', () => applyPreset(btn.dataset.preset));
+  });
+
   const previewTabs = document.querySelectorAll('.preview-tab');
   previewTabs.forEach(tab => {
     tab.onclick = async () => {
@@ -285,37 +362,11 @@ export function initOverlayListeners() {
     if (config.isForceVisible !== undefined) toggleOverlayForceVisible.checked = config.isForceVisible;
 
     if (overlayFont) {
-      overlayFont.value = final.font;
-      const dropdown = document.getElementById('overlay-font-dropdown');
-      if (dropdown) {
-        const selectedText = dropdown.querySelector('.selected-text');
-        const options = dropdown.querySelectorAll('.option-item');
-        options.forEach(opt => {
-          if (opt.dataset.value === final.font) {
-            opt.classList.add('selected');
-            if (selectedText) selectedText.textContent = opt.textContent;
-          } else {
-            opt.classList.remove('selected');
-          }
-        });
-      }
+      setDropdownValue('overlay-font-dropdown', 'overlay-font', final.font);
     }
 
     if (overlayAnimationDirection) {
-      overlayAnimationDirection.value = final.animationDirection;
-      const dropdown = document.getElementById('overlay-animation-direction-dropdown');
-      if (dropdown) {
-        const selectedText = dropdown.querySelector('.selected-text');
-        const options = dropdown.querySelectorAll('.option-item');
-        options.forEach(opt => {
-          if (opt.dataset.value === final.animationDirection) {
-            opt.classList.add('selected');
-            if (selectedText) selectedText.textContent = opt.textContent;
-          } else {
-            opt.classList.remove('selected');
-          }
-        });
-      }
+      setDropdownValue('overlay-animation-direction-dropdown', 'overlay-animation-direction', final.animationDirection);
     }
 
     updateOverlaySettings(true);

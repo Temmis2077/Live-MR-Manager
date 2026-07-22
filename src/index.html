@@ -351,7 +351,25 @@
                 <div class="ai-info-left" style="width: 100%;">
                   <div class="ai-title-large">오버레이 디자인 커스텀</div>
                   <div class="ai-model-desc">설정 변경 내용이 미리보기에 바로 반영됩니다.</div>
-                  
+
+                  <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 18px;">
+                    <label style="font-size: 0.8rem; font-weight: 700; color: var(--text-dim);">기본 스타일 (한 번에 적용, 이후 아래서 세부 조정 가능)</label>
+                    <div class="overlay-preset-row" id="overlay-preset-row">
+                      <button type="button" class="overlay-preset-btn" data-preset="glass">
+                        <span class="overlay-preset-name">글래스</span>
+                        <span class="overlay-preset-desc">투명 유리 카드 · 방송 기본형</span>
+                      </button>
+                      <button type="button" class="overlay-preset-btn" data-preset="minimal">
+                        <span class="overlay-preset-name">미니멀</span>
+                        <span class="overlay-preset-desc">박스 없이 텍스트만 · 담백하게</span>
+                      </button>
+                      <button type="button" class="overlay-preset-btn" data-preset="stage">
+                        <span class="overlay-preset-name">스테이지</span>
+                        <span class="overlay-preset-desc">굵고 선명하게 · 노래방 감성</span>
+                      </button>
+                    </div>
+                  </div>
+
                   <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-top: 20px;">
                     <!-- 좌측: 크기 및 투명도, 둥글기 -->
                     <div style="display: flex; flex-direction: column; gap: 24px;">
