@@ -589,6 +589,14 @@
 
         <!-- 설정 페이지 -->
         <div class="tab-content" id="settings-page" style="display: none; padding: 0 30px 30px 30px;">
+            <!-- 설정 하위 카테고리 탭 — 한 화면에 다 몰아넣지 않고 분류해서 보여준다. -->
+            <nav class="settings-subtabs" id="settings-subtabs" role="tablist">
+              <button type="button" class="settings-subtab-btn active" data-scat="general">일반</button>
+              <button type="button" class="settings-subtab-btn" data-scat="media">미디어 · 출력</button>
+              <button type="button" class="settings-subtab-btn" data-scat="ai">AI 엔진</button>
+              <button type="button" class="settings-subtab-btn" data-scat="library">라이브러리</button>
+              <button type="button" class="settings-subtab-btn" data-scat="about">정보</button>
+            </nav>
           <div class="settings-container">
             <section class="settings-group">
               <div class="group-header">
@@ -799,7 +807,7 @@
                   <line x1="1" y1="9" x2="4" y2="9"></line>
                   <line x1="1" y1="15" x2="4" y2="15"></line>
                 </svg>
-                <h3>AI 분리 엔진</h3>
+                <h3>미디어 · 출력</h3>
               </div>
 
               <!-- 방송 보호 모드 -->
@@ -873,6 +881,18 @@
                   <button id="btn-change-cache-dir" class="btn-ai-action secondary">폴더 변경</button>
                   <button id="btn-reset-cache-dir" class="btn-ai-action secondary" style="display: none;">기본 위치로 초기화</button>
                 </div>
+              </div>
+            </section>
+
+            <!-- ── AI 엔진 (분리 모델·GPU·디리버브) ── -->
+            <section class="settings-group">
+              <div class="group-header">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
+                  <rect x="9" y="9" width="6" height="6"></rect>
+                </svg>
+                <h3>AI 분리 엔진</h3>
               </div>
 
               <!-- CUDA 설치 권장 알림 (기본 숨김) -->

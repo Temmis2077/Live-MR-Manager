@@ -158,6 +158,11 @@ async function initApp() {
   } catch (err) {}
 
   try {
+    const { initSettingsTabs } = await import('./js/events/settings-tabs.js');
+    initSettingsTabs();
+  } catch (err) {}
+
+  try {
     const { initGpuPackControls } = await import('./js/gpu-pack.js');
     initGpuPackControls();
     await refreshGpuPackStatus();

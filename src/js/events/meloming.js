@@ -24,9 +24,12 @@ function hideMelomingUi() {
   if (account) account.hidden = true;
 
   // 설정 탭의 "멜로밍 노래책" 그룹 전체(헤더 포함)를 숨긴다.
+  // 하위 카테고리 탭(settings-tabs.js)이 hidden 속성을 토글하므로, 여기서는
+  // .meloming-hidden(!important) 클래스로 고정 숨김 처리해 탭 전환에도 다시
+  // 뜨지 않게 한다.
   const pull = document.getElementById('btn-meloming-pull');
   const group = pull ? pull.closest('.settings-group') : null;
-  if (group) group.hidden = true;
+  if (group) group.classList.add('meloming-hidden');
 }
 
 const PLACEHOLDER_AVATAR = './assets/images/app-icon.png';
