@@ -69,6 +69,19 @@
   display: block;
 }
 
+/* Ο.Σ.Ω 로고 락업(OSW의 그리스 문자 표기). Ω=옴(오디오)·Σ=합(스템 합성)의
+   의미를 담고, 고전적 세리프 + 브랜드 보라로 행성 로고와 톤을 맞춘다. */
+.logo-text.logo-greek {
+  font-family: 'Georgia', 'Times New Roman', serif;
+  font-size: 1.85rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  background: linear-gradient(135deg, #8b45d6, #a874e0);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
 /* OSW = Open Stem Wave. 약자 아래 풀네임을 작게 병기해 발견성을 보완한다. */
 .logo-subtext {
   font-family: 'SUITE', sans-serif;
