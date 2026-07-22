@@ -49,6 +49,14 @@ fn focus_main_window(app: &tauri::AppHandle) {
 
 pub fn run() {
     load_env_files();
+
+    // 구 식별자 데이터를 새 식별자로 가져오기 — Tauri 창·이벤트 루프가 생기기
+    // 전에 실행해야 한다. setup() 안에서 네이티브 모달을 띄우면 그 모달이
+    // 메시지 루프를 펌핑하면서 이미 생성된 WebView2가 리소스 요청을 처리하고,
+    // 아직 manage() 안 된 AppPaths를 state()로 접근해 패닉·abort로 이어진다.
+    // 여기(빌더 생성 전)선 창이 없어 모달이 안전하고, DB·새 폴더 생성보다도 앞선다.
+    crate::migration::maybe_migrate_legacy_data();
+
     let mut builder = tauri::Builder::default();
 
     #[cfg(desktop)]
@@ -67,10 +75,6 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_deep_link::init())
         .setup(|app| {
-            // 구 식별자 데이터를 새 식별자로 가져오기 — DB를 열거나 새 폴더를
-            // 만들기 전에 가장 먼저 실행해야 파일 잠금·이름 충돌이 없다.
-            crate::migration::maybe_migrate_legacy_data(app.handle());
-
             crate::meloming::oauth::sync_credentials_from_env();
             if let Some(window) = app.get_webview_window("main") {
                 *crate::state::MAIN_WINDOW.lock() = Some(window);

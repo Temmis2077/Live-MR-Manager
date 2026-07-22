@@ -13,34 +13,38 @@
 //! 무관한 별도 경로라 건드리지 않는다.
 
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Manager};
 
 const OLD_IDENTIFIER: &str = "com.autumncolor77.live-mr-manager";
+const NEW_IDENTIFIER: &str = "com.osw.desktop";
 /// 결정을 한 번만 묻기 위한 마커(새 루트에 기록).
 const MARKER: &str = ".migration_checked";
 /// 옮기지 않는 최상위 항목(임시 파일·마커 자신).
 const SKIP: &[&str] = &["temp", MARKER];
 
-fn legacy_dir(new_dir: &Path) -> Option<PathBuf> {
-    // 같은 부모(%LOCALAPPDATA%) 아래 식별자 폴더명만 다르다.
-    Some(new_dir.parent()?.join(OLD_IDENTIFIER))
+/// 앱 데이터 루트(`%LOCALAPPDATA%\<식별자>\`). Tauri의 app_local_data_dir과 동일한
+/// 규칙이지만 AppHandle 없이 계산한다 — 마이그레이션은 Tauri 창·이벤트 루프가
+/// 생기기 전에 실행돼야 하기 때문(그때는 handle을 쓸 수 없다).
+fn local_data_dir(identifier: &str) -> Option<PathBuf> {
+    let base = std::env::var_os("LOCALAPPDATA").map(PathBuf::from)?;
+    Some(base.join(identifier))
 }
 
 /// 첫 실행 시 구 데이터를 감지해 가져올지 묻고, 예이면 새 위치로 옮긴다.
-pub fn maybe_migrate_legacy_data(handle: &AppHandle) {
-    let Ok(new_dir) = handle.path().app_local_data_dir() else { return; };
+/// Tauri 빌더를 만들기 전에 호출한다(창이 없어야 모달이 안전하다).
+pub fn maybe_migrate_legacy_data() {
+    let Some(new_dir) = local_data_dir(NEW_IDENTIFIER) else { return; };
     // 이미 한 번 물어봤으면 다시 하지 않는다.
     if new_dir.join(MARKER).exists() {
         return;
     }
-    let Some(old_dir) = legacy_dir(&new_dir) else { return; };
+    let Some(old_dir) = local_data_dir(OLD_IDENTIFIER) else { return; };
 
     let has_legacy = old_dir.join("library.db").exists();
-    // 새 폴더에 이미 라이브러리가 있으면(이미 새 버전을 쓰던 경우) 건드리지 않는다.
-    let new_has_data = new_dir.join("library.db").exists();
-
-    if !has_legacy || new_has_data {
-        // 물어볼 것이 없다 — 마커만 남겨 다음부터 건너뛴다.
+    if !has_legacy {
+        // 가져올 구 데이터가 없다 — 마커만 남겨 다음부터 건너뛴다.
+        // (마커가 없는 동안 새 폴더에 생긴 파일은 결정 전 산출물이라 신뢰하지
+        //  않으므로, "새 폴더에 library.db가 있으면 스킵" 같은 판정은 두지 않는다.
+        //  마커가 곧 결정 기록이다.)
         let _ = std::fs::create_dir_all(&new_dir);
         let _ = std::fs::write(new_dir.join(MARKER), b"skip");
         return;
@@ -77,8 +81,13 @@ pub fn maybe_migrate_legacy_data(handle: &AppHandle) {
     );
 }
 
-/// 구 루트의 최상위 항목을 rename으로 옮긴다(같은 볼륨이라 즉시). 대상이 이미
-/// 있으면(새 데이터 보존) 건너뛰고, rename 실패 시 복사+삭제로 폴백한다.
+/// 구 루트의 최상위 항목을 rename으로 옮긴다(같은 볼륨이라 즉시). rename 실패 시
+/// 복사+삭제로 폴백한다.
+///
+/// 대상이 이미 있으면 지우고 덮어쓴다 — 이 함수는 마커가 없을 때(= 아직 결정
+/// 전)만 호출되고, 그 사이 새 폴더에 생긴 파일은 사용자가 만든 데이터가 아니라
+/// 결정 전 산출물(예: 이전 크래시가 만든 빈 library.db)이기 때문. 정상 첫 실행
+/// 에선 창·DB보다 먼저 돌므로 대상이 비어 이 분기가 필요 없다.
 fn move_legacy_entries(old_dir: &Path, new_dir: &Path) -> usize {
     let mut moved = 0usize;
     let Ok(entries) = std::fs::read_dir(old_dir) else { return 0; };
@@ -90,7 +99,11 @@ fn move_legacy_entries(old_dir: &Path, new_dir: &Path) -> usize {
         let src = entry.path();
         let dest = new_dir.join(&name);
         if dest.exists() {
-            continue; // 새 위치에 이미 있으면 덮어쓰지 않는다.
+            let _ = if dest.is_dir() {
+                std::fs::remove_dir_all(&dest)
+            } else {
+                std::fs::remove_file(&dest)
+            };
         }
         if std::fs::rename(&src, &dest).is_ok() {
             moved += 1;
@@ -135,41 +148,39 @@ mod tests {
     }
 
     #[test]
-    fn legacy_dir_is_sibling_with_old_identifier() {
-        let new_dir = Path::new("C:/Users/x/AppData/Local/com.osw.desktop");
-        let old = legacy_dir(new_dir).unwrap();
-        assert!(old.ends_with(OLD_IDENTIFIER));
-        assert_eq!(old.parent(), new_dir.parent());
+    fn local_data_dir_joins_identifier_under_localappdata() {
+        // LOCALAPPDATA가 있으면 그 아래 식별자 폴더를 돌려준다.
+        std::env::set_var("LOCALAPPDATA", "C:/Users/x/AppData/Local");
+        let d = local_data_dir(NEW_IDENTIFIER).unwrap();
+        assert!(d.ends_with(NEW_IDENTIFIER));
+        assert_eq!(d.parent().unwrap(), Path::new("C:/Users/x/AppData/Local"));
     }
 
     #[test]
-    fn move_preserves_data_skips_temp_and_existing() {
+    fn move_overwrites_stray_dest_but_skips_temp_and_marker() {
         let base = unique_tmp("move");
         let old = base.join("old");
         let new = base.join("new");
-        // 구 데이터 구성: library.db, models/model.onnx, temp/junk, 마커
+        // 구 데이터: library.db, models/model.onnx, temp/junk, 마커
         std::fs::create_dir_all(old.join("models")).unwrap();
         std::fs::create_dir_all(old.join("temp")).unwrap();
-        std::fs::write(old.join("library.db"), b"DBDATA").unwrap();
+        std::fs::write(old.join("library.db"), b"REAL_DB").unwrap();
         std::fs::write(old.join("models/model.onnx"), b"MODEL").unwrap();
         std::fs::write(old.join("temp/junk"), b"junk").unwrap();
         std::fs::write(old.join(MARKER), b"x").unwrap();
-        // 새 위치엔 이미 library.json이 있어(보존 대상) 덮어쓰면 안 됨
+        // 새 위치엔 크래시가 남긴 빈 library.db가 있다 — 진짜 데이터로 덮어써야 함.
         std::fs::create_dir_all(&new).unwrap();
-        std::fs::write(new.join("library.json"), b"KEEP").unwrap();
-        std::fs::write(old.join("library.json"), b"OLD_SHOULD_NOT_WIN").unwrap();
+        std::fs::write(new.join("library.db"), b"EMPTY_STRAY").unwrap();
 
         let moved = move_legacy_entries(&old, &new);
 
-        // 라이브러리·모델은 새 위치로 이동
-        assert_eq!(std::fs::read(new.join("library.db")).unwrap(), b"DBDATA");
+        // 구 진짜 데이터가 크래시 산출물을 덮어썼다.
+        assert_eq!(std::fs::read(new.join("library.db")).unwrap(), b"REAL_DB");
         assert_eq!(std::fs::read(new.join("models/model.onnx")).unwrap(), b"MODEL");
         assert!(!old.join("library.db").exists(), "이동 후 구 위치엔 없어야");
         // temp·마커는 이동 안 함
         assert!(!new.join("temp").exists(), "temp는 옮기지 않는다");
         assert!(!new.join(MARKER).exists(), "마커는 옮기지 않는다");
-        // 새 위치에 이미 있던 파일은 보존(덮어쓰기 금지)
-        assert_eq!(std::fs::read(new.join("library.json")).unwrap(), b"KEEP");
         assert!(moved >= 2);
 
         let _ = std::fs::remove_dir_all(&base);
