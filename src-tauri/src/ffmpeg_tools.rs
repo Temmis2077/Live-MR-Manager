@@ -79,6 +79,14 @@ pub fn find_ffmpeg_executable() -> Option<PathBuf> {
     find_system_ffmpeg()
 }
 
+/// ffmpeg 정적 빌드 zip 소스(순서대로 시도). 단일 호스트 장애에 대비해
+/// GitHub 호스팅인 BtbN 빌드를 폴백으로 둬, gyan.dev가 죽어도 설치가 되게 한다.
+/// 두 빌드 모두 zip 안에 `.../bin/ffmpeg.exe` 구조라 추출 로직이 공용이다.
+const FFMPEG_ZIP_URLS: &[&str] = &[
+    "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip",
+    "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip",
+];
+
 pub async fn ensure_managed_ffmpeg() -> Option<PathBuf> {
     let target = managed_ffmpeg_path();
     if target.is_file() {
@@ -88,8 +96,18 @@ pub async fn ensure_managed_ffmpeg() -> Option<PathBuf> {
         let _ = std::fs::create_dir_all(parent);
     }
 
-    let zip_url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip";
-    let response = reqwest::get(zip_url).await.ok()?;
+    for url in FFMPEG_ZIP_URLS {
+        if let Some(p) = try_extract_ffmpeg_from_zip(url, &target).await {
+            return Some(p);
+        }
+    }
+    None
+}
+
+/// 주어진 URL의 zip에서 ffmpeg 실행 파일만 추출해 `target`에 쓴다(성공 시 경로).
+/// 다운로드·압축해제 어느 단계에서 실패해도 None을 돌려 다음 소스로 넘어간다.
+async fn try_extract_ffmpeg_from_zip(url: &str, target: &Path) -> Option<PathBuf> {
+    let response = reqwest::get(url).await.ok()?;
     if !response.status().is_success() {
         return None;
     }
@@ -111,11 +129,12 @@ pub async fn ensure_managed_ffmpeg() -> Option<PathBuf> {
             if std::io::Read::read_to_end(&mut entry, &mut content).is_err() {
                 continue;
             }
-            if std::fs::write(&target, &content).is_err() {
+            if std::fs::write(target, &content).is_err() {
                 continue;
             }
             if target.is_file() {
-                return Some(target);
+                crate::audio_player::sys_log(&format!("[Tools] ffmpeg 설치 완료 (소스: {})", url));
+                return Some(target.to_path_buf());
             }
         }
     }
