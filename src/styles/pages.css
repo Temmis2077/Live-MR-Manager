@@ -356,9 +356,11 @@ html[data-theme="sky"] .task-progress-container {
   border-color: color-mix(in srgb, var(--accent-primary) 45%, transparent);
 }
 
-/* 멜로밍 UI는 인증 키 확보 전까지 완전히 감춘다 — 하위 탭 전환에도 다시 뜨지
-   않도록 !important로 고정(서브탭 JS는 hidden 속성만 토글). */
-.settings-group.meloming-hidden {
+/* 멜로밍 UI는 인증 키 확보 전까지 프론트에서 완전히 감춘다. .nav-item·
+   .meloming-account 등은 display:flex라 hidden 속성이 안 먹으므로, 범용
+   !important 클래스로 확실히 숨긴다(사이드탭·헤더·설정 그룹 공용). 하위 설정
+   탭 전환(hidden 토글)에도 다시 뜨지 않는다. */
+.meloming-hidden {
   display: none !important;
 }
 
