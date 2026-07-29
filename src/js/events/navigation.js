@@ -78,6 +78,15 @@ export function switchTab(tabId) {
   updateBroadcastTasksControlVisibility();
 
   if (elements.settingsPage) elements.settingsPage.style.display = tabId === "settings" ? "block" : "none";
+
+  // 라이브(공연 리모컨) — 보일 때만 갱신 루프를 돌린다.
+  if (elements.livePage) {
+    const isLive = tabId === "live";
+    elements.livePage.style.display = isLive ? "flex" : "none";
+    import('../live-screen.js')
+      .then((m) => (isLive ? m.showLiveScreen() : m.hideLiveScreen()))
+      .catch((err) => console.error('[Live] screen module failed:', err));
+  }
   if (elements.tasksPage) elements.tasksPage.style.display = tabId === "tasks" ? "block" : "none";
   if (elements.overlayPage) elements.overlayPage.style.display = tabId === "overlay" ? "block" : "none";
 
@@ -185,6 +194,7 @@ export async function openAlignmentForTrack(path, options = {}) {
 function getTabTitle(tabId) {
   const titles = {
     library: "라이브러리",
+    live: "라이브",
     youtube: "유튜브",
     local: "내 파일",
     meloming: "멜로밍",
@@ -199,6 +209,7 @@ function getTabTitle(tabId) {
 function getTabSubtitle(tabId) {
   const subtitles = {
     library: "라이브러리의 모든 곡을 관리하고 재생합니다.",
+    live: "공연·방송 중 쓰는 리모컨 화면입니다. 키·빠르기·볼륨을 크게 조작하세요.",
     youtube: "유튜브 링크를 통해 곡을 검색하고 가져옵니다.",
     local: "화면 어디든 음원 파일을 드래그 앤 드롭하여 추가할 수 있습니다.",
     meloming: "멜로밍 노래책과 연동된 곡만 모아서 확인합니다.",

@@ -1,0 +1,599 @@
+/* 라이브 화면 — 공연/방송 중 쓰는 리모컨 뷰.
+   claude.ai/design 시안(OSW UI)의 '라이브' 화면을 앱에 옮긴 것.
+   시안은 1440×900 고정이지만 여기서는 창 크기에 따라 늘어나도록 유동 배치한다.
+   색은 전부 앱 테마 변수를 쓰므로 라이트 테마에서도 그대로 동작한다. */
+
+.live-page {
+  display: none;
+  height: 100%;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* 라이브는 자체 상단 바를 가진 전체 화면이라, 앱 공용 헤더와 스크롤 영역
+   여백을 걷어내 시안처럼 화면을 꽉 채운다. (하단 도크는 그대로 둔다 —
+   키·빠르기 슬라이더가 거기 있고, 이 화면의 조절 버튼이 그 값을 움직인다.) */
+.viewport[data-view="live"] .top-bar {
+  display: none;
+}
+
+.viewport[data-view="live"] .scroll-area {
+  padding: 0;
+  overflow: hidden;
+}
+
+/* ── 상단 바 ─────────────────────────────────────────────── */
+.live-topbar {
+  flex: none;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 0 20px;
+  background: var(--sidebar-bg);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.live-topbar-left,
+.live-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.live-mode-label {
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+
+.live-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 9px;
+  background: var(--surface-1);
+  border: 1px solid var(--glass-border);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.live-chip.is-button {
+  cursor: pointer;
+  transition: background 0.18s, border-color 0.18s;
+}
+
+.live-chip.is-button:hover {
+  background: var(--surface-2);
+  border-color: rgb(var(--accent-rgb) / 0.4);
+}
+
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--text-dim);
+}
+
+.live-dot.on { background: #22c55e; }
+
+.live-chip-value {
+  font-weight: 700;
+  color: var(--text-main);
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 가사 화면(오버레이) 켜짐/꺼짐 토글 */
+.live-ov-toggle.on {
+  background: rgb(var(--accent-rgb) / 0.14);
+  border-color: rgb(var(--accent-rgb) / 0.4);
+}
+
+.live-ov-toggle.on .live-dot { background: var(--accent-secondary); }
+.live-ov-toggle.on .live-ov-text { color: var(--accent-secondary); }
+
+.live-ov-text {
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+/* ── 본문 2단 ────────────────────────────────────────────── */
+.live-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.live-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 28px 30px 24px;
+  overflow-y: auto;
+}
+
+/* ── 지금 재생 중 ─────────────────────────────────────────── */
+.live-now {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+}
+
+.live-art {
+  width: 124px;
+  height: 124px;
+  flex: none;
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--surface-1);
+  border: 1px solid var(--glass-border);
+}
+
+.live-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.live-now-info { min-width: 0; }
+
+.live-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.live-badge {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 26px;
+  padding: 0 11px;
+  border-radius: 7px;
+  background: var(--surface-2);
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.live-badge.playing {
+  background: rgba(239, 68, 68, 0.14);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  color: #fca5a5;
+}
+
+.live-badge.playing .live-badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ef4444;
+}
+
+.live-title {
+  font-size: 2.5rem;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-artist {
+  font-size: 1.1rem;
+  color: var(--text-muted);
+  font-weight: 500;
+  margin-top: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── 파형 ────────────────────────────────────────────────── */
+.live-wave {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 104px;
+  padding: 0 2px;
+  cursor: pointer;
+}
+
+.live-wave-bar {
+  flex: 1;
+  min-width: 0;
+  border-radius: 2px;
+  background: var(--surface-3);
+  transition: background 0.12s linear;
+}
+
+.live-wave-bar.played { background: var(--accent-secondary); }
+
+.live-time {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.live-pos {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--accent-secondary);
+}
+
+.live-dur {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+/* ── 트랜스포트 ──────────────────────────────────────────── */
+.live-transport {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+}
+
+.live-tp-btn {
+  width: 58px;
+  height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--surface-2);
+  border: 1px solid var(--glass-border);
+  color: var(--text-main);
+  font-size: 1.05rem;
+  cursor: pointer;
+  transition: background 0.18s, transform 0.12s;
+}
+
+.live-tp-btn:hover { background: var(--surface-3); }
+.live-tp-btn:active { transform: scale(0.95); }
+
+.live-tp-play {
+  width: 98px;
+  height: 98px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: none;
+  background: var(--accent-gradient);
+  box-shadow: 0 12px 36px rgb(var(--accent-rgb) / 0.42);
+  color: #fff;
+  font-size: 1.9rem;
+  cursor: pointer;
+  transition: transform 0.12s;
+}
+
+.live-tp-play:active { transform: scale(0.96); }
+
+/* ── 조절 카드(키·빠르기·가이드 보컬) ─────────────────────── */
+.live-steppers {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.live-card {
+  padding: 16px;
+  border-radius: 14px;
+  background: var(--surface-1);
+  border: 1px solid var(--glass-border);
+  min-width: 0;
+}
+
+.live-card-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.live-card-hint {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  margin-top: 3px;
+}
+
+.live-stepper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.live-step-btn {
+  width: 48px;
+  height: 48px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--glass-border);
+  color: var(--text-main);
+  font-size: 1.35rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.18s, transform 0.12s;
+}
+
+.live-step-btn:hover { background: var(--surface-3); }
+.live-step-btn:active { transform: scale(0.94); }
+
+.live-step-val {
+  font-size: 1.9rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-main);
+  cursor: pointer;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+}
+
+/* 기본값이 아닐 때만 액센트로 — 지금 뭘 바꿔놨는지 한눈에 보이게 */
+.live-step-val.changed { color: var(--accent-secondary); }
+
+/* ── 볼륨 카드 ───────────────────────────────────────────── */
+.live-volumes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.live-vol-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 11px;
+  gap: 8px;
+}
+
+.live-vol-name {
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.live-vol-val {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: var(--accent-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.live-vol-track {
+  height: 12px;
+  border-radius: 6px;
+  background: var(--surface-3);
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.live-vol-fill {
+  height: 100%;
+  border-radius: 6px;
+  background: var(--accent-gradient);
+  transition: width 0.1s linear;
+}
+
+/* ── 오른쪽 대기열 ───────────────────────────────────────── */
+.live-queue {
+  width: 372px;
+  flex: none;
+  border-left: 1px solid var(--glass-border);
+  background: var(--sidebar-bg);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.live-queue-head {
+  padding: 20px 20px 12px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.live-queue-title {
+  font-size: 1.02rem;
+  font-weight: 800;
+}
+
+.live-queue-count {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.live-queue-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.live-q-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 13px;
+  border-radius: 13px;
+  cursor: pointer;
+  background: var(--surface-1);
+  border: 1px solid transparent;
+  transition: background 0.18s, border-color 0.18s;
+}
+
+.live-q-item:hover {
+  background: var(--surface-2);
+  border-color: rgb(var(--accent-rgb) / 0.3);
+}
+
+.live-q-item.current {
+  background: rgb(var(--accent-rgb) / 0.12);
+  border-color: rgb(var(--accent-rgb) / 0.4);
+}
+
+.live-q-num {
+  width: 26px;
+  flex: none;
+  text-align: center;
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.live-q-item.current .live-q-num { color: var(--accent-secondary); }
+
+.live-q-body { flex: 1; min-width: 0; }
+
+.live-q-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.live-q-sub {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.live-q-badge {
+  flex: none;
+  padding: 5px 9px;
+  border-radius: 6px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  background: var(--surface-3);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.live-q-badge.ready {
+  background: rgb(var(--accent-rgb) / 0.16);
+  color: var(--accent-secondary);
+}
+
+.live-q-empty {
+  padding: 26px 14px;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+
+.live-queue-foot {
+  flex: none;
+  padding: 14px;
+  border-top: 1px solid var(--glass-border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 분리 진행 배너 — 실제 대기열이 있을 때만 표시 */
+.live-sep {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 12px 13px;
+  border-radius: 12px;
+  background: rgb(var(--accent-rgb) / 0.09);
+  border: 1px solid rgb(var(--accent-rgb) / 0.28);
+}
+
+.live-sep-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--accent-secondary);
+}
+
+.live-sep-body { flex: 1; min-width: 0; }
+
+.live-sep-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.live-sep-sub {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.live-sep-pct {
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: var(--accent-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.live-add-btn {
+  height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 12px;
+  background: var(--accent-gradient);
+  color: #fff;
+  font-size: 0.95rem;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgb(var(--accent-rgb) / 0.3);
+  transition: transform 0.12s;
+}
+
+.live-add-btn:active { transform: scale(0.98); }
+
+/* 좁은 창에서는 대기열을 접어 본문에 자리를 준다 */
+@media (max-width: 1180px) {
+  .live-queue { width: 300px; }
+  .live-title { font-size: 2rem; }
+  .live-art { width: 100px; height: 100px; }
+}
+
+@media (max-width: 980px) {
+  .live-queue { display: none; }
+}

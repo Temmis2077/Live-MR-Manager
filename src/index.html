@@ -71,6 +71,16 @@
 
     <div class="nav-group">
       <label class="nav-label">미디어</label>
+      <div class="nav-item" id="nav-live" title="공연·방송 중 쓰는 리모컨 화면 — 키·빠르기·볼륨을 크게 조작합니다.">
+        <i>
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path>
+            <path d="M19 10v1a7 7 0 0 1-14 0v-1"></path>
+            <line x1="12" y1="18" x2="12" y2="22"></line>
+          </svg>
+        </i>
+        <span>라이브</span>
+      </div>
       <div class="nav-item active" id="nav-library">
         <i>
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -313,6 +323,126 @@
           </div>
         </div>
 
+        <!-- 라이브 (공연 리모컨) — claude.ai/design 시안의 '라이브' 화면 -->
+        <div class="tab-content live-page" id="live-page" style="display: none;">
+          <div class="live-topbar">
+            <div class="live-topbar-left">
+              <span class="live-mode-label">라이브</span>
+            </div>
+            <div class="live-topbar-right">
+              <div class="live-chip is-button" id="live-device" title="소리를 내보낼 장치를 바꿉니다 (재생 중에도 즉시 전환)">
+                <span class="live-dot on"></span>
+                <span>소리 보내는 곳</span>
+                <span class="live-chip-value" id="live-device-name">기본 장치</span>
+              </div>
+              <div class="live-chip is-button live-ov-toggle" id="live-ov-toggle" title="OBS 가사 오버레이를 항상 보이게 할지 켜고 끕니다">
+                <span class="live-dot"></span>
+                <span class="live-ov-text" id="live-ov-text">가사 화면 꺼짐</span>
+              </div>
+              <div class="live-chip is-button" id="live-open-overlay">오버레이 설정</div>
+            </div>
+          </div>
+
+          <div class="live-body">
+            <div class="live-main">
+              <div class="live-now">
+                <div class="live-art">
+                  <img id="live-art-img" alt="" src="./assets/images/app-icon.png">
+                </div>
+                <div class="live-now-info">
+                  <div class="live-badges" id="live-badges"></div>
+                  <div class="live-title" id="live-title">재생 중인 곡 없음</div>
+                  <div class="live-artist" id="live-artist">라이브러리에서 곡을 골라 주세요</div>
+                </div>
+              </div>
+
+              <div>
+                <div class="live-wave" id="live-wave" title="클릭하면 그 위치로 이동합니다"></div>
+                <div class="live-time">
+                  <span class="live-pos" id="live-pos">0:00</span>
+                  <span class="live-dur" id="live-dur">0:00</span>
+                </div>
+              </div>
+
+              <div class="live-transport">
+                <button type="button" class="live-tp-btn" id="live-prev" title="이전 곡">◀◀</button>
+                <button type="button" class="live-tp-play" id="live-play" title="재생 / 일시정지">▶</button>
+                <button type="button" class="live-tp-btn" id="live-next" title="다음 곡">▶▶</button>
+              </div>
+
+              <div class="live-steppers">
+                <div class="live-card">
+                  <div class="live-card-title">노래 키</div>
+                  <div class="live-card-hint">내 목에 맞게 높낮이 조절</div>
+                  <div class="live-stepper">
+                    <button type="button" class="live-step-btn" id="live-key-down">−</button>
+                    <div class="live-step-val" id="live-key-val" title="클릭하면 0으로 되돌립니다">0</div>
+                    <button type="button" class="live-step-btn" id="live-key-up">＋</button>
+                  </div>
+                </div>
+                <div class="live-card">
+                  <div class="live-card-title">노래 빠르기</div>
+                  <div class="live-card-hint">원래 속도는 100</div>
+                  <div class="live-stepper">
+                    <button type="button" class="live-step-btn" id="live-tempo-down">−</button>
+                    <div class="live-step-val" id="live-tempo-val" title="클릭하면 100으로 되돌립니다">100</div>
+                    <button type="button" class="live-step-btn" id="live-tempo-up">＋</button>
+                  </div>
+                </div>
+                <div class="live-card">
+                  <div class="live-card-title">가이드 보컬</div>
+                  <div class="live-card-hint">원곡 보컬을 얼마나 섞을지</div>
+                  <div class="live-stepper">
+                    <button type="button" class="live-step-btn" id="live-guide-down">−</button>
+                    <div class="live-step-val" id="live-guide-val" title="클릭하면 0으로 되돌립니다">0</div>
+                    <button type="button" class="live-step-btn" id="live-guide-up">＋</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="live-volumes">
+                <div class="live-card">
+                  <div class="live-vol-head">
+                    <div class="live-vol-name">반주(MR) 소리</div>
+                    <div class="live-vol-val" id="live-mr-val">100</div>
+                  </div>
+                  <div class="live-vol-track" id="live-mr-track">
+                    <div class="live-vol-fill" id="live-mr-fill" style="width: 100%"></div>
+                  </div>
+                </div>
+                <div class="live-card">
+                  <div class="live-vol-head">
+                    <div class="live-vol-name">내 귀에 들리는 소리</div>
+                    <div class="live-vol-val" id="live-mon-val">100</div>
+                  </div>
+                  <div class="live-vol-track" id="live-mon-track">
+                    <div class="live-vol-fill" id="live-mon-fill" style="width: 100%"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <aside class="live-queue">
+              <div class="live-queue-head">
+                <div class="live-queue-title">다음 곡</div>
+                <div class="live-queue-count" id="live-queue-count">0곡</div>
+              </div>
+              <div class="live-queue-list" id="live-queue-list"></div>
+              <div class="live-queue-foot">
+                <div class="live-sep" id="live-sep" style="display: none;">
+                  <div class="live-sep-dot"></div>
+                  <div class="live-sep-body">
+                    <div class="live-sep-title" id="live-sep-title">보컬 지우는 중</div>
+                    <div class="live-sep-sub" id="live-sep-sub"></div>
+                  </div>
+                  <div class="live-sep-pct" id="live-sep-pct">0%</div>
+                </div>
+                <button type="button" class="live-add-btn" id="live-add-song">＋ 노래 추가</button>
+              </div>
+            </aside>
+          </div>
+        </div>
+
         <!-- Overlay Preview Tab -->
         <section id="overlay-tab" class="tab-content" style="display: none;">
           <div class="overlay-tab-container">
@@ -320,10 +450,20 @@
               <div class="preview-tab active" data-preview-mode="playing">현재 곡 정보</div>
               <div class="preview-tab" data-preview-mode="lyrics">가사 미리보기</div>
             </div>
-            <div class="overlay-preview-wrapper">
-              <iframe id="overlay-iframe" src="overlay-info.html"
-                style="width: 100%; height: 100%; border: none; background: transparent;"></iframe>
-            </div>
+            <div class="overlay-preview-wrapper" style="background: transparent;">
+                          <iframe id="overlay-iframe"
+                            style="width: 100%; height: 100%; border: none; background: transparent;"
+                            allowtransparency="true"
+                            color-scheme="dark"></iframe>
+                        </div>
+                        <script>
+                          (function() {
+                            var iframe = document.getElementById('overlay-iframe');
+                            if (iframe) {
+                              iframe.src = 'overlay-info.html?preview=true&cb=' + Date.now();
+                            }
+                          })();
+                        </script>
 
             <div class="settings-group">
               <div class="group-header" style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
@@ -334,7 +474,7 @@
                       d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1Z">
                     </path>
                   </svg>
-                  <h3 id="overlay-settings-title">곡 정보 오버레이 설정</h3>
+                  <h3 id="overlay-settings-title">오버레이 설정</h3>
                 </div>
                 <div style="display: flex; align-items: center; gap: 10px; background: rgb(var(--accent-rgb) / 0.05); padding: 6px 12px; border-radius: 20px; border: 1px solid rgb(var(--accent-rgb) / 0.1);">
                   <span style="font-size: 0.75rem; font-weight: 700; color: var(--accent-primary); letter-spacing: -0.02em;">상시 표시 (미리보기)</span>
@@ -617,10 +757,12 @@
                   <div style="display: flex; align-items: center; gap: 8px; color: var(--accent-primary); font-size: 0.8rem; font-weight: 700; margin-bottom: 6px;">
                     <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
                     OBS 브라우저 소스 설정 가이드
-                  </div>
-                  <div style="font-size: 0.75rem; color: var(--text-muted); line-height: 1.5; padding-left: 22px;">
-                    • 곡 정보: <span style="color: var(--text-main); font-weight: 700;">1760 × 520</span> 권장<br>
-                    • 가사: <span style="color: var(--text-main); font-weight: 700;">1200 × 300</span> 권장<br>
+                                      </div>
+                                      <div style="font-size: 0.75rem; color: var(--text-muted); line-height: 1.5; padding-left: 22px;">
+                                        • 곡 정보: <span style="color: var(--text-main); font-weight: 700;">640 × 200</span> 권장 (비율 16:5)<br>
+                                        • 가사: <span style="color: var(--text-main); font-weight: 700;">640 × 220</span> 권장 (비율 32:11)<br>
+                                        • 오버레이는 소스 크기에 맞춰 <strong>자동으로</strong> 조절됩니다 — 위 크기는 참고값일 뿐, <strong>비율만 비슷하게</strong> 자유롭게 늘리거나 줄여도 자연스럽게 맞춰집니다.<br>
+                                        • OBS에서 <strong>너비만 입력</strong>하고 높이는 자동 계산되게 하려면, 브라우저 소스 속성에서 원하는 너비만 입력 후 높이를 0으로 두면 비율에 맞게 자동 조절됩니다.<br>
                     • 다른 PC에서 접속이 안 되면 Windows 방화벽에서 <span style="color: var(--text-main); font-weight: 700;">14201, 14202</span> 포트(TCP) 인바운드를 허용해주세요.
                   </div>
                 </div>

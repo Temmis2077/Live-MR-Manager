@@ -98,6 +98,7 @@ export const elements = {
   
   // Settings & Tasks
   settingsPage: null,
+  livePage: null,
   tasksPage: null,
   overlayPage: null,
   activeTasksList: null,
@@ -211,6 +212,7 @@ export function initDomReferences() {
 
   // Settings & Tasks
   elements.settingsPage = document.getElementById("settings-page");
+  elements.livePage = document.getElementById("live-page");
   elements.tasksPage = document.getElementById("tasks-page");
   elements.overlayPage = document.getElementById("overlay-tab");
   elements.activeTasksList = document.getElementById("separation-tasks-list");
