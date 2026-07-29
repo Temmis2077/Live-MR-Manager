@@ -170,6 +170,7 @@ function tick() {
   const mrFill = $('live-mr-fill');
   if (mrVal) mrVal.textContent = String(Math.round(mr));
   if (mrFill) mrFill.style.width = `${mr}%`;
+  $('live-mr-track')?.setAttribute('aria-valuenow', String(Math.round(mr)));
 
   const mon = parseFloat($('master-volume-slider')?.value ?? '100') || 0;
   const monVal = $('live-mon-val');
@@ -177,6 +178,10 @@ function tick() {
   if (monVal) monVal.textContent = String(Math.round(mon));
   // 마스터 볼륨은 0~120이라 막대는 120 기준으로 채운다
   if (monFill) monFill.style.width = `${Math.min(100, (mon / 120) * 100)}%`;
+  $('live-mon-track')?.setAttribute('aria-valuenow', String(Math.round(mon)));
+
+  // 재생 위치도 스크린리더가 읽을 수 있게 퍼센트로 알린다.
+  $('live-wave')?.setAttribute('aria-valuenow', String(Math.round(ratio * 100)));
 }
 
 /** 오른쪽 '다음 곡' 목록 — 지금 라이브러리 필터가 적용된 순서를 그대로 쓴다. */
@@ -272,15 +277,29 @@ export function initLiveScreen() {
   });
 
   // 파형 클릭 → 그 위치로 이동
-  $('live-wave')?.addEventListener('click', async (e) => {
-    const wrap = $('live-wave');
+  const seekToRatio = async (r) => {
     const dur = state.trackDurationMs || 0;
-    if (!wrap || dur <= 0) return;
-    const rect = wrap.getBoundingClientRect();
-    const r = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    if (dur <= 0) return;
+    const clamped = Math.max(0, Math.min(1, r));
     const { seekTo } = await import('./audio.js');
-    state.currentProgressMs = r * dur;
-    seekTo(Math.floor(r * dur));
+    state.currentProgressMs = clamped * dur;
+    seekTo(Math.floor(clamped * dur));
+    tick();
+  };
+
+  $('live-wave')?.addEventListener('click', (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    seekToRatio((e.clientX - rect.left) / rect.width);
+  });
+
+  // 키보드로도 이동 — 마우스 없이 핵심 조작이 가능해야 한다(기준서 7).
+  $('live-wave')?.addEventListener('keydown', (e) => {
+    const dur = state.trackDurationMs || 0;
+    if (dur <= 0) return;
+    const step = 5000 / dur; // 5초
+    if (e.key === 'ArrowRight') { e.preventDefault(); seekToRatio((state.currentProgressMs / dur) + step); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); seekToRatio((state.currentProgressMs / dur) - step); }
+    else if (e.key === 'Home') { e.preventDefault(); seekToRatio(0); }
   });
 
   // ── 키 / 빠르기 / 가이드 보컬 (도크 슬라이더를 그대로 움직인다)
@@ -302,22 +321,38 @@ export function initLiveScreen() {
     return Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
   };
 
-  $('live-mr-track')?.addEventListener('click', async (e) => {
-    const pct = Math.round(barRatio(e.currentTarget, e) * 100);
-    localStorage.setItem(MR_FADER_KEY, String(pct));
+  const applyMr = async (pct) => {
+    const v = Math.max(0, Math.min(100, Math.round(pct)));
+    localStorage.setItem(MR_FADER_KEY, String(v));
     try {
-      await invoke('set_track_fader', { track: 'inst', percent: pct });
+      await invoke('set_track_fader', { track: 'inst', percent: v });
     } catch (err) {
       console.error('[Live] set_track_fader failed:', err);
     }
     tick();
+  };
+
+  $('live-mr-track')?.addEventListener('click', (e) => {
+    applyMr(barRatio(e.currentTarget, e) * 100);
+  });
+  $('live-mr-track')?.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight') { e.preventDefault(); applyMr(readMrFader() + 5); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); applyMr(readMrFader() - 5); }
   });
 
-  $('live-mon-track')?.addEventListener('click', (e) => {
-    // 마스터 볼륨은 0~120 범위라 막대 100%가 120에 대응한다.
-    const pct = Math.round(barRatio(e.currentTarget, e) * 120);
-    driveSlider('master-volume-slider', pct);
+  // 마스터 볼륨은 0~120 범위라 막대 100%가 120에 대응한다.
+  const applyMon = (v) => {
+    driveSlider('master-volume-slider', Math.max(0, Math.min(120, Math.round(v))));
     tick();
+  };
+  const curMon = () => parseFloat($('master-volume-slider')?.value ?? '100') || 0;
+
+  $('live-mon-track')?.addEventListener('click', (e) => {
+    applyMon(barRatio(e.currentTarget, e) * 120);
+  });
+  $('live-mon-track')?.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight') { e.preventDefault(); applyMon(curMon() + 5); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); applyMon(curMon() - 5); }
   });
 
   // ── 상단 바
@@ -361,6 +396,8 @@ function syncOverlayChip() {
   if (!chip || !text) return;
   const on = !!$('toggle-overlay-force-visible')?.checked;
   chip.classList.toggle('on', on);
+  chip.setAttribute('aria-pressed', on ? 'true' : 'false');
+  // 색만이 아니라 문구로도 상태를 알린다(기준서 3 · 7).
   text.textContent = on ? '가사 화면 켜짐' : '가사 화면 꺼짐';
 }
 

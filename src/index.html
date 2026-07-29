@@ -330,16 +330,17 @@
               <span class="live-mode-label">라이브</span>
             </div>
             <div class="live-topbar-right">
-              <div class="live-chip is-button" id="live-device" title="소리를 내보낼 장치를 바꿉니다 (재생 중에도 즉시 전환)">
+              <button type="button" class="live-chip is-button" id="live-device" title="소리를 내보낼 장치를 바꿉니다 (재생 중에도 즉시 전환)">
                 <span class="live-dot on"></span>
                 <span>소리 보내는 곳</span>
                 <span class="live-chip-value" id="live-device-name">기본 장치</span>
-              </div>
-              <div class="live-chip is-button live-ov-toggle" id="live-ov-toggle" title="OBS 가사 오버레이를 항상 보이게 할지 켜고 끕니다">
+              </button>
+              <button type="button" class="live-chip is-button live-ov-toggle" id="live-ov-toggle"
+                      aria-pressed="false" title="OBS 가사 오버레이를 항상 보이게 할지 켜고 끕니다">
                 <span class="live-dot"></span>
                 <span class="live-ov-text" id="live-ov-text">가사 화면 꺼짐</span>
-              </div>
-              <div class="live-chip is-button" id="live-open-overlay">오버레이 설정</div>
+              </button>
+              <button type="button" class="live-chip is-button" id="live-open-overlay">오버레이 설정</button>
             </div>
           </div>
 
@@ -357,7 +358,9 @@
               </div>
 
               <div>
-                <div class="live-wave" id="live-wave" title="클릭하면 그 위치로 이동합니다"></div>
+                <div class="live-wave" id="live-wave" role="slider" tabindex="0"
+                     aria-label="재생 위치" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"
+                     title="클릭하면 그 위치로 이동 · ←→ 키로 5초씩 이동"></div>
                 <div class="live-time">
                   <span class="live-pos" id="live-pos">0:00</span>
                   <span class="live-dur" id="live-dur">0:00</span>
@@ -375,27 +378,27 @@
                   <div class="live-card-title">노래 키</div>
                   <div class="live-card-hint">내 목에 맞게 높낮이 조절</div>
                   <div class="live-stepper">
-                    <button type="button" class="live-step-btn" id="live-key-down">−</button>
-                    <div class="live-step-val" id="live-key-val" title="클릭하면 0으로 되돌립니다">0</div>
-                    <button type="button" class="live-step-btn" id="live-key-up">＋</button>
+                    <button type="button" class="live-step-btn" id="live-key-down" aria-label="노래 키 한 음 내리기">−</button>
+                    <button type="button" class="live-step-val" id="live-key-val" aria-label="노래 키 기본값(0)으로 되돌리기" title="클릭하면 0으로 되돌립니다">0</button>
+                    <button type="button" class="live-step-btn" id="live-key-up" aria-label="노래 키 한 음 올리기">＋</button>
                   </div>
                 </div>
                 <div class="live-card">
                   <div class="live-card-title">노래 빠르기</div>
                   <div class="live-card-hint">원래 속도는 100</div>
                   <div class="live-stepper">
-                    <button type="button" class="live-step-btn" id="live-tempo-down">−</button>
-                    <div class="live-step-val" id="live-tempo-val" title="클릭하면 100으로 되돌립니다">100</div>
-                    <button type="button" class="live-step-btn" id="live-tempo-up">＋</button>
+                    <button type="button" class="live-step-btn" id="live-tempo-down" aria-label="노래 빠르기 낮추기">−</button>
+                    <button type="button" class="live-step-val" id="live-tempo-val" aria-label="노래 빠르기 기본값(100)으로 되돌리기" title="클릭하면 100으로 되돌립니다">100</button>
+                    <button type="button" class="live-step-btn" id="live-tempo-up" aria-label="노래 빠르기 올리기">＋</button>
                   </div>
                 </div>
                 <div class="live-card">
                   <div class="live-card-title">가이드 보컬</div>
                   <div class="live-card-hint">원곡 보컬을 얼마나 섞을지</div>
                   <div class="live-stepper">
-                    <button type="button" class="live-step-btn" id="live-guide-down">−</button>
-                    <div class="live-step-val" id="live-guide-val" title="클릭하면 0으로 되돌립니다">0</div>
-                    <button type="button" class="live-step-btn" id="live-guide-up">＋</button>
+                    <button type="button" class="live-step-btn" id="live-guide-down" aria-label="가이드 보컬 줄이기">−</button>
+                    <button type="button" class="live-step-val" id="live-guide-val" aria-label="가이드 보컬 끄기(0)" title="클릭하면 0으로 되돌립니다">0</button>
+                    <button type="button" class="live-step-btn" id="live-guide-up" aria-label="가이드 보컬 늘리기">＋</button>
                   </div>
                 </div>
               </div>
@@ -406,7 +409,9 @@
                     <div class="live-vol-name">반주(MR) 소리</div>
                     <div class="live-vol-val" id="live-mr-val">100</div>
                   </div>
-                  <div class="live-vol-track" id="live-mr-track">
+                  <div class="live-vol-track" id="live-mr-track" role="slider" tabindex="0"
+                       aria-label="반주(MR) 소리" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100"
+                       title="클릭한 위치로 설정 · ←→ 키로 5씩 조절">
                     <div class="live-vol-fill" id="live-mr-fill" style="width: 100%"></div>
                   </div>
                 </div>
@@ -415,7 +420,9 @@
                     <div class="live-vol-name">내 귀에 들리는 소리</div>
                     <div class="live-vol-val" id="live-mon-val">100</div>
                   </div>
-                  <div class="live-vol-track" id="live-mon-track">
+                  <div class="live-vol-track" id="live-mon-track" role="slider" tabindex="0"
+                       aria-label="내 귀에 들리는 소리" aria-valuemin="0" aria-valuemax="120" aria-valuenow="100"
+                       title="클릭한 위치로 설정 · ←→ 키로 5씩 조절">
                     <div class="live-vol-fill" id="live-mon-fill" style="width: 100%"></div>
                   </div>
                 </div>

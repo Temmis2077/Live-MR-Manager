@@ -64,6 +64,12 @@
   white-space: nowrap;
 }
 
+/* 상단 칩은 <button>이라 브라우저 기본 스타일을 지우고 시작한다. */
+.live-chip {
+  font-family: inherit;
+  color: var(--text-muted);
+}
+
 .live-chip.is-button {
   cursor: pointer;
   transition: background 0.18s, border-color 0.18s;
@@ -345,6 +351,10 @@
 .live-step-btn:active { transform: scale(0.94); }
 
 .live-step-val {
+  font-family: inherit;
+  background: transparent;
+  border: none;
+  padding: 0;
   font-size: 1.9rem;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
@@ -586,6 +596,28 @@
 }
 
 .live-add-btn:active { transform: scale(0.98); }
+
+/* ── 접근성 ──────────────────────────────────────────────
+   기준서: focus ring을 제거하지 않는다 / 색상만으로 상태를 구분하지 않는다.
+   어두운 배경에서도 보이도록 액센트 링을 명시한다. */
+.live-page button:focus-visible,
+.live-page [role="slider"]:focus-visible {
+  outline: 2px solid var(--accent-secondary);
+  outline-offset: 2px;
+}
+
+/* 기준서: prefers-reduced-motion에서는 이동·반복 효과를 줄인다. */
+@media (prefers-reduced-motion: reduce) {
+  .live-page * {
+    transition-duration: 0.01ms !important;
+  }
+  .live-tp-btn:active,
+  .live-tp-play:active,
+  .live-step-btn:active,
+  .live-add-btn:active {
+    transform: none;
+  }
+}
 
 /* 좁은 창에서는 대기열을 접어 본문에 자리를 준다 */
 @media (max-width: 1180px) {
