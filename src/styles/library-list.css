@@ -1,120 +1,250 @@
-/* Premium List Mode (72px) - Inherits layout from .song-grid in library-common.css */
+/* 표(리스트) 모드 — 많은 곡을 한눈에 비교·관리하는 화면.
+   claude.ai/design 시안의 '음원 관리' 표 구성을 옮긴 것으로, 열 폭은 헤더
+   (.library-list-header)와 행(.song-card.list-row)이 같은 값을 공유해야 한다.
+   변경할 때는 두 규칙을 함께 수정한다. */
+
+:root {
+  /* 곡·가수 / 스템 / 길이 / 키·BPM / 추가일 / 상태 / 더보기 */
+  --lib-table-cols: minmax(220px, 1fr) 168px 62px 92px 74px 104px 34px;
+}
+
 body .song-grid.list-mode {
   display: flex !important;
   flex-direction: column !important;
+  gap: 0 !important;
 }
 
+/* ── 열 헤더 ─────────────────────────────────────────────── */
+.library-list-header {
+  display: grid;
+  grid-template-columns: 52px var(--lib-table-cols);
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px;
+  height: 34px;
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--bg-color);
+  border-bottom: 1px solid var(--glass-border);
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: var(--text-dim);
+  letter-spacing: 0.06em;
+}
+
+/* 첫 칸(52px)은 행의 썸네일 자리와 맞추기 위한 빈 칸 */
+.library-list-header::before {
+  content: "";
+}
+
+.library-list-header [data-sort] {
+  cursor: pointer;
+  transition: color 0.18s;
+}
+
+.library-list-header [data-sort]:hover {
+  color: var(--text-main);
+}
+
+.library-list-header [data-sort]:focus-visible {
+  outline: 2px solid var(--accent-secondary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.library-list-header .col-duration,
+.library-list-header .col-keybpm,
+.library-list-header .col-added {
+  text-align: right;
+}
+
+.library-list-header .col-status {
+  text-align: center;
+}
+
+/* ── 행 ──────────────────────────────────────────────────── */
 body .song-grid.list-mode .song-card.list-row {
   display: grid !important;
-  grid-template-columns: 120px minmax(200px, 1.3fr) 180px 1.7fr 120px !important; /* Adjusted for better fluid balance */
+  grid-template-columns: 52px var(--lib-table-cols) !important;
   align-items: center !important;
   width: 100% !important;
-  height: 72px !important;
-  min-height: 72px !important;
-  padding: 0 !important;
-  padding-right: 12px !important;
+  height: 52px !important;
+  min-height: 52px !important;
+  padding: 0 14px !important;
   gap: 12px !important;
   margin: 0 !important;
-  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  border-radius: 0 !important;
+  border-width: 0 0 1px 0 !important;
+  border-color: color-mix(in srgb, var(--glass-border) 60%, transparent) !important;
+  background: transparent !important;
 }
 
-/* Column 1: Thumbnail */
+body .song-grid.list-mode .song-card.list-row:hover {
+  background: var(--surface-1) !important;
+  border-color: color-mix(in srgb, var(--glass-border) 60%, transparent) !important;
+}
+
+body .song-grid.list-mode .song-card.list-row.active,
+body .song-grid.list-mode .song-card.list-row.selected {
+  background: rgb(var(--accent-rgb) / 0.1) !important;
+  box-shadow: inset 2px 0 0 0 var(--accent-primary) !important;
+}
+
+/* 썸네일 — 표에서는 작은 정사각형 */
 body .song-grid.list-mode .song-card.list-row .thumbnail {
-  width: 120px !important;
-  height: 100% !important;
-  border-radius: 12px 0 0 12px !important;
+  width: 38px !important;
+  height: 38px !important;
+  border-radius: 7px !important;
   position: relative !important;
   overflow: hidden !important;
   margin: 0 !important;
+  flex: none !important;
 }
 
-/* Column 2: Info (Title/Artist) */
+/* 곡 · 가수 */
 body .song-grid.list-mode .song-card.list-row .col-info {
   display: flex !important;
   flex-direction: column !important;
   justify-content: center !important;
   min-width: 0 !important;
-  padding-left: 10px !important;
 }
 
 body .song-grid.list-mode .song-card.list-row .song-name {
-  font-size: 1.05rem !important;
+  font-size: 0.86rem !important;
   font-weight: 700 !important;
   color: var(--text-main) !important;
   white-space: nowrap !important;
   overflow: hidden !important;
   text-overflow: ellipsis !important;
-  margin-bottom: 4px !important;
+  margin-bottom: 2px !important;
 }
 
 body .song-grid.list-mode .song-card.list-row .song-artist-badge {
-  font-size: 0.75rem !important;
+  font-size: 0.72rem !important;
   color: var(--text-muted) !important;
   background: transparent !important;
   padding: 0 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
 }
 
-/* Column 3: MR Badge Slot */
-body .song-grid.list-mode .song-card.list-row .col-mr {
+/* 스템 상태 — 있는 스템만 표시(보컬/반주). 글자+수치로도 구분된다. */
+body .song-grid.list-mode .song-card.list-row .col-stems {
   display: flex !important;
-  justify-content: center !important;
   align-items: center !important;
+  gap: 4px !important;
+  min-width: 0 !important;
+}
+
+.stem-dot {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.6rem;
+  font-weight: 800;
+  background: var(--surface-2);
+  color: var(--text-dim);
+  border: 1px solid var(--glass-border);
+}
+
+.stem-dot.done {
+  background: rgb(var(--accent-rgb) / 0.18);
+  color: var(--accent-secondary);
+  border-color: rgb(var(--accent-rgb) / 0.35);
+}
+
+.stem-dot.running {
+  background: rgba(245, 158, 11, 0.16);
+  color: #fcd34d;
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
+.stem-count {
+  font-size: 0.66rem;
+  color: var(--text-dim);
+  margin-left: 4px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 숫자 열 — 오른쪽 정렬 + 고정폭 숫자로 자리 흔들림 방지 */
+body .song-grid.list-mode .song-card.list-row .col-duration,
+body .song-grid.list-mode .song-card.list-row .col-keybpm,
+body .song-grid.list-mode .song-card.list-row .col-added {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  font-size: 0.74rem !important;
+  color: var(--text-muted) !important;
+  font-variant-numeric: tabular-nums !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+}
+
+body .song-grid.list-mode .song-card.list-row .col-added {
+  color: var(--text-dim) !important;
+}
+
+/* 상태 배지 */
+body .song-grid.list-mode .song-card.list-row .col-status {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-width: 0 !important;
 }
 
 body .song-grid.list-mode .song-card.list-row .status-badge {
   position: static !important;
-  padding: 4px 10px !important;
-  height: 22px !important;
+  padding: 3px 9px !important;
+  height: 20px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-size: 0.62rem !important;
+  font-weight: 800 !important;
+  white-space: nowrap !important;
+  box-shadow: none !important;
+  animation: none !important;
+}
+
+/* '원곡만' — 아직 분리하지 않은 상태는 조용하게 */
+.status-badge.none {
+  background: var(--surface-2) !important;
+  color: var(--text-dim) !important;
+  border: 1px solid var(--glass-border) !important;
+}
+
+body .song-grid.list-mode .song-card.list-row .col-more {
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
-  font-size: 0.65rem !important;
-  font-weight: 900 !important;
+  color: var(--text-dim) !important;
+  font-size: 0.9rem !important;
+  cursor: pointer !important;
 }
 
-/* Column 4: Genre/Category + MR */
-body .song-grid.list-mode .song-card.list-row .col-genre {
-  display: flex !important;
-  flex-direction: row !important;
-  align-items: center !important;
-  justify-content: flex-start !important;
-  gap: 8px !important;
-  min-width: 0 !important;
+/* 표는 정보 밀도가 높아 좁은 창에서 뒤쪽 열부터 접는다
+   (기준서 7: 1280px급에서 핵심이 가려지거나 가로 스크롤이 생기지 않게) */
+@media (max-width: 1320px) {
+  :root { --lib-table-cols: minmax(200px, 1fr) 168px 62px 92px 104px 34px; }
+  .library-list-header .col-added,
+  body .song-grid.list-mode .song-card.list-row .col-added { display: none !important; }
 }
 
-body .song-grid.list-mode .song-card.list-row .status-badge-wrapper {
-  flex: 0 0 50px !important;
-  display: flex !important;
-  justify-content: center !important;
+@media (max-width: 1120px) {
+  :root { --lib-table-cols: minmax(180px, 1fr) 168px 62px 104px 34px; }
+  .library-list-header .col-keybpm,
+  body .song-grid.list-mode .song-card.list-row .col-keybpm { display: none !important; }
 }
 
-/* Column 5: Tags */
-body .song-grid.list-mode .song-card.list-row .col-tags {
-  display: flex !important;
-  align-items: center !important;
-  overflow: hidden !important;
-}
-
-body .song-grid.list-mode .song-card.list-row .tag-container {
-  display: flex !important;
-  gap: 6px !important;
-  mask-image: linear-gradient(to right, black 80%, transparent 100%) !important;
-  overflow: hidden !important;
-}
-
-body .song-grid.list-mode .song-card.list-row .tag-no-info,
-body .song-grid.list-mode .song-card.list-row .tag-container.no-info {
-  font-size: 0.7rem !important;
-  font-style: italic !important;
-  opacity: 0.4 !important;
-}
-
-/* Column 6: Duration */
-body .song-grid.list-mode .song-card.list-row .col-duration {
-  display: flex !important;
-  justify-content: flex-end !important;
-  align-items: center !important;
-  font-family: 'JetBrains Mono', monospace !important;
-  font-size: 0.85rem !important;
-  color: var(--text-muted) !important;
+@media (max-width: 940px) {
+  :root { --lib-table-cols: minmax(160px, 1fr) 62px 104px 34px; }
+  .library-list-header .col-stems,
+  body .song-grid.list-mode .song-card.list-row .col-stems { display: none !important; }
 }

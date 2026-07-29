@@ -21,6 +21,78 @@ export function getSongCategory(song) {
 /** Meloming pull/push로 연동된 곡인지 판별 */
 export { isMelomingLinkedSong };
 
+/** 추가일 표기 — 표에서 열 폭을 넘기지 않게 MM.DD로 짧게. */
+function formatAddedDate(ts) {
+  if (!ts) return '-';
+  // 백엔드는 초 단위로 줄 수도 있어(10자리) ms로 보정한다.
+  const ms = Number(ts) < 1e12 ? Number(ts) * 1000 : Number(ts);
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return '-';
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${mm}.${dd}`;
+}
+
+/** 곡이 MR 분리를 마쳤는지 — 백엔드 필드가 여러 이름으로 올 수 있어 모두 본다. */
+function isSeparated(song) {
+  return !!(song.isSeparated || song.is_separated || song.isMr || song.is_mr || song.mr_path);
+}
+
+/**
+ * 스템 상태 칸 — 시안은 8스템(악기별)이지만 현재 앱의 분리는 보컬/반주 2스템이라
+ * 실제 있는 만큼만 보여준다. 없는 스템을 채워 있는 척하지 않는다.
+ * 색만으로 구분하지 않도록 각 칸에 글자(보/반)와 "n/2" 텍스트를 함께 둔다.
+ */
+function stemCellHtml(song) {
+  const done = isSeparated(song);
+  const task = (state.activeTasks || {})[song.path];
+  const running = !!(task && task.status !== 'Finished');
+  const cls = done ? 'done' : (running ? 'running' : 'none');
+  const dots = [
+    { ch: '보', label: '보컬' },
+    { ch: '반', label: '반주(MR)' },
+  ].map((s) => `<span class="stem-dot ${cls}" title="${s.label} 스템 ${done ? '있음' : (running ? '분리 중' : '없음')}">${s.ch}</span>`).join('');
+  return `${dots}<span class="stem-count">${done ? '2/2' : (running ? '분리 중' : '0/2')}</span>`;
+}
+
+/** 표 모드 헤더 — 열 라벨. 정렬 가능한 열은 클릭으로 정렬을 바꾼다.
+ *  그리드 **안쪽** 첫 요소로 넣는다 — 그리드의 좌우 패딩을 그대로 받아
+ *  헤더와 행의 열 폭이 자동으로 일치한다(밖에 두면 패딩만큼 어긋난다). */
+export function renderListHeader() {
+  const grid = elements.songGrid;
+  if (!grid || state.viewMode !== 'list') return;
+
+  const header = document.createElement('div');
+  header.id = 'library-list-header';
+  header.className = 'library-list-header';
+  header.innerHTML = `
+    <div class="col col-info" data-sort="title" role="button" tabindex="0" title="제목순으로 정렬">곡 · 가수</div>
+    <div class="col col-stems">스템 상태</div>
+    <div class="col col-duration">길이</div>
+    <div class="col col-keybpm">키 / BPM</div>
+    <div class="col col-added" data-sort="dateNew" role="button" tabindex="0" title="추가일순으로 정렬">추가일</div>
+    <div class="col col-status">상태</div>
+    <div class="col col-more"></div>
+  `;
+  grid.appendChild(header);
+
+  // 헤더 클릭 정렬 — 기존 정렬 드롭다운(lib-sort-select)을 그대로 움직여
+  // 정렬 로직·표시가 한 곳에서만 관리되게 한다.
+  header.querySelectorAll('[data-sort]').forEach((el) => {
+    const apply = () => {
+      const sel = document.getElementById('lib-sort-select');
+      if (!sel) return;
+      sel.value = el.dataset.sort;
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      renderLibrary();
+    };
+    el.addEventListener('click', apply);
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); apply(); }
+    });
+  });
+}
+
 export function getFilteredSongs() {
   const filtered = filterSongLibrary(state.songLibrary, {
     query: elements.libSearchInput?.value || "",
@@ -36,12 +108,12 @@ export function getFilteredSongs() {
 
 export function renderLibrary() {
   if (!elements.songGrid) return;
-  
+
   const filtered = getFilteredSongs();
   updateLibraryCount(filtered.length);
-  
+
   elements.songGrid.innerHTML = "";
-  
+
   if (filtered.length === 0) {
     const emptyMessage = (state.activeView === "meloming")
       ? "멜로밍 연동 곡이 없습니다. 설정에서 노래책을 가져오거나 보내 보세요."
@@ -55,6 +127,9 @@ export function renderLibrary() {
 
   const count = filtered.length;
   invoke('remote_js_log', { msg: `[Library] Rendering ${count} cards.` }).catch(() => {});
+
+  // 표 모드에서는 곡 행 앞에 열 헤더를 먼저 넣는다(곡이 있을 때만).
+  renderListHeader();
 
   filtered.forEach(song => {
     addSongCard(song, song.originalIndex);
@@ -121,38 +196,19 @@ export function addSongCard(song, index) {
       </div>
       `;
     })() : isList ? (() => {
-      const activeTask = (state.activeTasks || {})[song.path];
-      let badgeHtml = "";
-      if (activeTask && activeTask.status !== "Finished") {
-        const status = (activeTask.status || "").toLowerCase();
-        const isWaiting = status.includes("queued") || status.includes("pending") || status.includes("starting") || status.includes("preparing");
-        badgeHtml = `<span class="status-badge ${isWaiting ? 'pending' : 'processing'}">${isWaiting ? '대기중' : '분리중'}</span>`;
-      } else if (song.isSeparated || song.is_separated || song.isMr || song.is_mr || song.mr_path) {
-        badgeHtml = `<span class="status-badge mr">MR</span>`;
-      }
-
-      const category = getSongCategory(song);
-
+      // 표(리스트) 모드 — 많은 곡을 한눈에 비교·관리하는 용도.
+      // 열 구성은 renderListHeader()의 헤더와 CSS 그리드를 공유한다.
       return `
         <div class="col col-info">
           <div class="song-name" title="${song.title || ''}">${song.title || '제목 정보 없음'}</div>
-          <div class="song-artist-badge ${!song.artist ? 'no-info' : ''}">${song.artist || '가수 정보 없음'}</div>
+          <div class="song-artist-badge ${!song.artist ? 'no-info' : ''}">${song.artist || '가수 정보 없음'}${song.genre ? ` · ${song.genre}` : ''}</div>
         </div>
-        <div class="col col-genre">
-          <div class="status-badge-wrapper">${badgeHtml}</div>
-          ${category ? `<span class="category-badge">${category}</span>` : ''}
-          <span class="genre-badge ${!song.genre ? 'no-info' : ''}">${(song.genre || '미분류').toUpperCase()}</span>
-        </div>
-        <div class="col col-tags">
-          <div class="tag-container ${!song.tags || song.tags.length === 0 ? 'no-info' : ''}">
-            ${song.tags && song.tags.length > 0
-              ? song.tags.map(t => `<span class="tag-badge">${t}</span>`).join('')
-              : '<span class="tag-no-info">태그 없음</span>'}
-          </div>
-        </div>
-        <div class="col col-duration">
-          <span class="duration-text">${song.duration || '--:--'}</span>
-        </div>
+        <div class="col col-stems">${stemCellHtml(song)}</div>
+        <div class="col col-duration"><span class="duration-text">${song.duration || '--:--'}</span></div>
+        <div class="col col-keybpm">${song.songKey || song.song_key || '-'} / ${song.bpm || '-'}</div>
+        <div class="col col-added">${formatAddedDate(song.dateAdded ?? song.date_added)}</div>
+        <div class="col col-status"><div class="status-badge-wrapper"></div></div>
+        <div class="col col-more" title="더보기">⋯</div>
       `;
     })() : (() => {
       const category = getSongCategory(song);
@@ -238,10 +294,27 @@ export function addSongCard(song, index) {
 
   card.addEventListener("contextmenu", (e) => {
     e.preventDefault();
-    e.stopPropagation(); 
+    e.stopPropagation();
     invoke('remote_js_log', { msg: `[Card] contextmenu triggered for path: ${song.path}` }).catch(() => {});
     showSongContextMenu(e, song, index);
   });
+
+  // 표 모드의 ⋯ 버튼 — 재생하지 않고 우클릭과 같은 메뉴를 연다.
+  const moreBtn = card.querySelector('.col-more');
+  if (moreBtn) {
+    moreBtn.setAttribute('role', 'button');
+    moreBtn.setAttribute('tabindex', '0');
+    moreBtn.setAttribute('aria-label', `${song.title || '이 곡'} 관리 메뉴 열기`);
+    const openMenu = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      showSongContextMenu(e, song, index);
+    };
+    moreBtn.addEventListener('click', openMenu);
+    moreBtn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') openMenu(e);
+    });
+  }
 
   elements.songGrid.appendChild(card);
 }

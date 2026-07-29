@@ -730,6 +730,12 @@ export function updateCardStatusBadge(path, card = null) {
       })
       .catch(() => {});
     return;
+  } else if (mode === "list") {
+    // 표 모드에는 '상태' 열이 있어 빈 칸으로 두면 미완성처럼 보인다.
+    // 아직 분리하지 않은 곡은 조용한 톤으로 사실만 알린다.
+    // (그리드·버튼 모드는 배지를 장식처럼 모든 카드에 반복하지 않도록 그대로 비운다.)
+    badge.classList.add("none");
+    badge.textContent = "원곡만";
   } else {
     return; // No badge to show
   }
