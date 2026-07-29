@@ -19,9 +19,8 @@ body .song-grid.grid-mode .song-card {
   height: auto !important;
 }
 
-body .song-grid.grid-mode .song-card:hover {
-  transform: translateY(-8px) scale(1.03) !important;
-}
+/* 그리드 모드에서도 hover로 카드를 들어올리지 않는다(기준서 2·4).
+   공통 규칙(.song-card:hover)의 border·background 전환을 그대로 사용한다. */
 
 /* Thumbnail with Overlay Badge */
 body .song-grid.grid-mode .song-card .thumbnail {
