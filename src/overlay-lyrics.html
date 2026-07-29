@@ -2,12 +2,15 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>OSW Lyrics Overlay</title>
-  <!-- @import는 로드가 끝날 때까지 첫 페인트를 막아, 느린 네트워크에서 이
-       투명 오버레이가 잠깐 흰 배경으로 보이는 원인이 된다(가끔 발생하는 흰
-       배경 버그). media="print" 트릭으로 렌더링을 막지 않게 비동기 로드한다. -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OSW Lyrics Overlay</title>
+    <!-- @import는 로드가 끝날 때까지 첫 페인트를 막아, 느린 네트워크에서 이
+         투명 오버레이가 잠깐 흰 배경으로 보이는 원인이 된다(가끔 발생하는 흰
+         배경 버그). media="print" 트릭으로 렌더링을 막지 않게 비동기 로드한다.
+         color-scheme: dark only는 브라우저가 기본 스타일시트를 어둡게 적용해
+         페이지 로드 직전의 흰색 깜빡임도 방지한다. -->
+    <meta name="color-scheme" content="dark only">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Noto+Sans+KR:wght@400;700;900&family=SUITE:wght@400;700;800&display=swap"
         rel="stylesheet" media="print" onload="this.media='all'">
@@ -25,8 +28,9 @@
       --text-main: #ffffff;
       --text-sub: rgba(255, 255, 255, 0.5);
       --text-shadow: rgba(0, 0, 0, 0.3);
-      --enter-gap-x: 120px;
-      --enter-gap-y: 80px;
+      /* 등장 애니메이션 이동 거리 — 뷰포트(=OBS 소스 크기) 비례. */
+      --enter-gap-x: 10vw;
+      --enter-gap-y: 20vh;
       /* 가사 폰트 크기 — 설정에서 조정 가능(update_overlay_style font_size).
          줄 높이는 폰트 크기에 비례해 따라가므로 크기를 키워도 잘리지 않음. */
       --lyric-font-size: 22px;
@@ -40,15 +44,19 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
     html, body {
-      background: transparent !important;
-    }
+          background: transparent !important;
+          color-scheme: dark;
+        }
 
+    /* OBS 브라우저 소스에 설정된 크기를 그대로 채운다(카드는 아래에서 %/vw/vh
+       단위로 배치돼 있어, 소스를 어떤 크기로 잡아도 비율만 비슷하면 맞춰진다).
+       독립/미리보기 창에서 보는 고정 크기는 스크립트에서 별도로 지정한다. */
     body {
       color: var(--text-main);
       font-family: var(--overlay-font);
       overflow: hidden;
-      width: 1200px;
-      height: 300px;
+      width: 100vw;
+      height: 100vh;
       position: relative;
     }
 
@@ -107,45 +115,27 @@
       transform: translate(-50%, -50%) scale(var(--overlay-scale));
       opacity: 1;
       animation: lyrics-pop-bottom var(--anim-duration, 0.55s) cubic-bezier(0.2, 0.9, 0.3, 1) both;
-    }
+          }
 
-    /* 글로우 효과 — .overlay-container가 이미 방향별 등장 애니메이션을 쓰고
-       있어(위 4블록), 같은 animation 속성을 단순히 더 추가하면 서로 덮어써
-       버린다. 그래서 방향×글로우 조합마다 두 애니메이션을 한 선언에 함께
-       명시한다(콤마로 병렬 실행). */
-    .overlay-container.dir-right.visible.fx-glow {
-      animation: lyrics-pop-right var(--anim-duration, 0.55s) cubic-bezier(0.2, 0.9, 0.3, 1) both,
-                 overlay-glow-pulse 2.2s ease-in-out infinite;
-    }
-    .overlay-container.dir-left.visible.fx-glow {
-      animation: lyrics-pop-left var(--anim-duration, 0.55s) cubic-bezier(0.2, 0.9, 0.3, 1) both,
-                 overlay-glow-pulse 2.2s ease-in-out infinite;
-    }
-    .overlay-container.dir-top.visible.fx-glow {
-      animation: lyrics-pop-top var(--anim-duration, 0.55s) cubic-bezier(0.2, 0.9, 0.3, 1) both,
-                 overlay-glow-pulse 2.2s ease-in-out infinite;
-    }
-    .overlay-container.dir-bottom.visible.fx-glow {
-      animation: lyrics-pop-bottom var(--anim-duration, 0.55s) cubic-bezier(0.2, 0.9, 0.3, 1) both,
-                 overlay-glow-pulse 2.2s ease-in-out infinite;
-    }
+          /* 플로팅 효과 — 현재 가사 줄(.lyric-line.current)만 살짝 떠다닌다.
+             다음 줄은 그대로 유지. */
+          @keyframes text-float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-6px); }
+          }
+          .overlay-container.fx-float .lyric-line.current {
+            animation: text-float 3.2s ease-in-out infinite;
+          }
 
-    @keyframes overlay-glow-pulse {
-      0%, 100% { box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3), 0 0 0 rgb(var(--accent-rgb) / 0); }
-      50% { box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3), 0 0 28px rgb(var(--accent-rgb) / 0.55); }
-    }
-
-    /* 플로팅 효과 — 위치/등장 애니메이션(overlay-container)과 transform이
-       겹치지 않도록, 콘텐츠를 별도 래퍼로 감싸 그쪽에만 적용한다. */
-    .fx-wrapper { width: 100%; }
-
-    @keyframes overlay-float {
-      0%, 100% { transform: translateY(0); }
-      50% { transform: translateY(-6px); }
-    }
-    .overlay-container.fx-float .fx-wrapper {
-      animation: overlay-float 3.2s ease-in-out infinite;
-    }
+          /* 글로우 효과 — 박스 그림자 대신 현재 가사 줄에만 text-shadow 펄스.
+             방향별 등장 애니메이션과 충돌하지 않도록 별도 요소에 적용한다. */
+          @keyframes text-glow-pulse {
+            0%, 100% { text-shadow: 0 2px 4px var(--text-shadow); }
+            50% { text-shadow: 0 0 24px rgb(var(--accent-rgb) / 0.7), 0 0 48px rgb(var(--accent-rgb) / 0.3); }
+          }
+          .overlay-container.fx-glow .lyric-line.current {
+            animation: text-glow-pulse 2.2s ease-in-out infinite;
+          }
 
     .lyrics-container {
       display: none;
@@ -271,6 +261,18 @@
     const urlParams = new URLSearchParams(window.location.search);
     const isPreview = urlParams.get('preview') === 'true';
     document.documentElement.setAttribute('data-theme', 'dark');
+
+    // 권장 OBS 브라우저 소스 크기 — 카드(최소 400px 폭, ~130px 높이) + 여백을
+    // 감안한 실측 스냅 크기(예전 1200×300은 실제 카드보다 훨씬 커서 빈 공간이
+    // 한참 남았다). 독립 탭/앱 내 설정 미리보기에서 볼 때만 이 고정 크기로
+    // 맞추고, 실제 OBS 소스에서는 위 body{width:100vw;height:100vh}가 소스에
+    // 설정된 크기를 그대로 따른다(비율만 비슷하면 자연스럽게 맞춰짐).
+    const PREVIEW_STAGE_WIDTH = 640;
+    const PREVIEW_STAGE_HEIGHT = 220;
+    if (isPreview) {
+      document.body.style.width = `${PREVIEW_STAGE_WIDTH}px`;
+      document.body.style.height = `${PREVIEW_STAGE_HEIGHT}px`;
+    }
 
     const { hexToRgb, connectWS } = window.OverlayShared;
 

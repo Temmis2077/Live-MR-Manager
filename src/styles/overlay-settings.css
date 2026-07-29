@@ -1,5 +1,11 @@
 /* Overlay settings: color palette and preview tabs (moved from index.html inline styles) */
 
+/* overlay-preview-wrapper는 OBS 미리보기 iframe을 감싸는 래퍼.
+   흰 배경 깜빡임 방지를 위해 transparent로 둔다. */
+.overlay-preview-wrapper {
+  background: transparent;
+}
+
 .color-palette-wrapper { display: flex; flex-direction: column; }
 .color-palette-container { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .color-swatch {

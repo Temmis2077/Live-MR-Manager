@@ -2,11 +2,14 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <title>OSW Song Info Overlay</title>
-  <!-- @import는 로드가 끝날 때까지 첫 페인트를 막아, 느린 네트워크에서 이
-       투명 오버레이가 잠깐 흰 배경으로 보이는 원인이 된다(가끔 발생하는 흰
-       배경 버그). media="print" 트릭으로 렌더링을 막지 않게 비동기 로드한다. -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
+    <title>OSW Song Info Overlay</title>
+    <!-- @import는 로드가 끝날 때까지 첫 페인트를 막아, 느린 네트워크에서 이
+         투명 오버레이가 잠깐 흰 배경으로 보이는 원인이 된다(가끔 발생하는 흰
+         배경 버그). media="print" 트릭으로 렌더링을 막지 않게 비동기 로드한다.
+         color-scheme: dark only는 브라우저가 기본 스타일시트를 어둡게 적용해
+         페이지 로드 직전의 흰색 깜빡임도 방지한다. -->
+    <meta name="color-scheme" content="dark only">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Noto+Sans+KR:wght@400;700;900&display=swap"
         rel="stylesheet" media="print" onload="this.media='all'">
@@ -22,22 +25,30 @@
       --text-main: #ffffff;
       --text-muted: rgba(255, 255, 255, 0.6);
       --thumb-fallback: #222;
-      --enter-gap-x: 120px;
-      --enter-gap-y: 80px;
+      /* 등장 애니메이션 이동 거리 — 뷰포트(=OBS 소스 크기) 비례라, 소스를
+         어떤 크기로 잡아도(비율만 비슷하면) 같은 느낌으로 슬라이드된다. */
+      --enter-gap-x: 10vw;
+      --enter-gap-y: 20vh;
     }
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
     html, body {
-      background: transparent !important;
-    }
+          background: transparent !important;
+          color-scheme: dark;
+        }
 
+    /* 본체가 OBS 브라우저 소스에 설정된 크기를 그대로 채운다 — 예전엔 body가
+       1200×300 고정이라, 소스를 그보다 크게 잡으면 카드 주위에 빈 여백이
+       한참 남고, 작게 잡으면 잘렸다. 100vw/100vh로 두면 소스 크기가 곧
+       캔버스 크기가 되고, 안의 카드는 %/vw/vh 단위로 배치돼 있어(아래) 어떤
+       크기든 비율만 맞으면 자연스럽게 맞춰진다. */
     body {
       color: var(--text-main);
       font-family: var(--overlay-font);
       overflow: hidden;
-      width: 1200px;
-      height: 300px;
+      width: 100vw;
+      height: 100vh;
       position: relative;
     }
 
@@ -65,34 +76,37 @@
       opacity: 0;
     }
 
-    /* 위치/등장 애니메이션(overlay-container)과 은은한 플로팅(fx-wrapper)의
-       transform이 서로 겹치지 않도록, 콘텐츠를 별도 래퍼로 분리했다. */
-    .fx-wrapper {
-      display: flex;
-      align-items: center;
-      gap: 20px;
-      width: 100%;
-    }
+    /* 플로팅 — 텍스트 영역(.info)만 위아래로 살짝 떠다닌다. 썸네일은 그대로
+           유지되어 시각적 중심을 해치지 않는다. */
+        .fx-wrapper {
+          display: flex;
+          align-items: center;
+          gap: 20px;
+          width: 100%;
+        }
 
-    @keyframes overlay-float {
-      0%, 100% { transform: translateY(0); }
-      50% { transform: translateY(-6px); }
-    }
-    .overlay-container.fx-float .fx-wrapper {
-      animation: overlay-float 3.2s ease-in-out infinite;
-    }
+        @keyframes text-float {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-6px); }
+        }
+        .overlay-container.fx-float .info {
+          animation: text-float 3.2s ease-in-out infinite;
+        }
 
-    @keyframes overlay-glow-pulse {
-      0%, 100% { box-shadow: 0 15px 50px rgba(0, 0, 0, 0.6), 0 0 0 rgb(var(--accent-rgb) / 0); }
-      50% { box-shadow: 0 15px 50px rgba(0, 0, 0, 0.6), 0 0 32px rgb(var(--accent-rgb) / 0.55); }
-    }
-    .overlay-container.fx-glow {
-      animation: overlay-glow-pulse 2.2s ease-in-out infinite;
-    }
+        /* 글로우 — 박스 그림자 대신 텍스트에만 액센트 색 text-shadow 펄스 */
+        @keyframes text-glow-pulse {
+          0%, 100% { text-shadow: 0 0 0 transparent; }
+          50% { text-shadow: 0 0 24px rgb(var(--accent-rgb) / 0.7), 0 0 48px rgb(var(--accent-rgb) / 0.3); }
+        }
+        .overlay-container.fx-glow .label,
+        .overlay-container.fx-glow #title {
+          animation: text-glow-pulse 2.2s ease-in-out infinite;
+        }
 
-    /* RIGHT ALIGNED */
+    /* RIGHT ALIGNED — 고정 px가 아니라 %로 둬서 소스 크기가 달라져도 캔버스
+       가장자리로부터 같은 비율만큼 떨어진 위치를 유지한다. */
     .overlay-container.dir-right {
-      right: 400px;
+      right: 6%;
       top: 50%;
       transform-origin: right center;
       transform: translate(calc(100% + var(--enter-gap-x)), -50%) scale(0.93);
@@ -104,7 +118,7 @@
 
     /* LEFT ALIGNED */
     .overlay-container.dir-left {
-      left: 400px;
+      left: 6%;
       top: 50%;
       transform-origin: left center;
       transform: translate(calc(-100% - var(--enter-gap-x)), -50%) scale(0.93);
@@ -235,10 +249,14 @@
     const DEFAULT_THUMB_URL = `${window.location.origin}/assets/images/app-icon.png`;
     let lastTrackSignature = "";
     let pendingTrackShowTimer = null;
-    const STAGE_WIDTH = 1200;
-    const PREVIEW_STAGE_WIDTH = 1760;
-    const PREVIEW_STAGE_HEIGHT = 520;
-    const MARQUEE_BUMP = Math.round(STAGE_WIDTH * 0.08); // 1200px 기준 범핑
+    // 권장 OBS 브라우저 소스 크기 — 카드(최대 400px 폭, ~112px 높이) + 여백을
+    // 감안한 실측 스냅 크기(예전 1760×520은 실제 카드보다 훨씬 커서 빈 공간이
+    // 한참 남았다). 소스를 이보다 크거나 작게 잡아도 %/vw/vh 배치라 비율만
+    // 비슷하면 자연스럽게 맞춰진다. 정보 오버레이 미리보기(iframe)도 같은
+    // 크기를 써서, 앱 안 설정 화면 미리보기가 실제 OBS 출력과 일치한다.
+    const PREVIEW_STAGE_WIDTH = 640;
+    const PREVIEW_STAGE_HEIGHT = 200;
+    const MARQUEE_BUMP = Math.round((window.innerWidth || PREVIEW_STAGE_WIDTH) * 0.08);
     const isPreviewMode = window.location.search.includes('preview=true');
     
     function applyMarquee(elId, text, attempt = 0) {

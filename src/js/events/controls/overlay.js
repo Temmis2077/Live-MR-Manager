@@ -6,6 +6,11 @@ import { getLineVisibility, setLineVisibility } from '../../lrc-parser.js';
 
 const OVERLAY_LAN_PREF_KEY = 'overlay-use-lan-address';
 let cachedLanAddress = null;
+// 설정 미리보기 iframe에 캐시 무효화 쿼리를 붙인다 — WebView의 HTTP 캐시가
+// overlay-info.html/overlay-lyrics.html의 이전 버전을 계속 재사용해, 파일을
+// 고쳐도 인앱 미리보기가 갱신되지 않던 문제 대응(세션마다 새 값이라 매 실행
+// 첫 로드는 항상 디스크의 최신 파일을 가져온다).
+const OVERLAY_CACHE_BUST = Date.now();
 
 /**
  * 오버레이 기본 스타일 3종 — 기존 조절값(크기·폰트·색·투명도·둥글기·방향)을
@@ -82,8 +87,10 @@ export function initOverlayListeners() {
     if (!overlayIframe || !overlayPreviewWrapper) return;
     const activeTab = document.querySelector('.preview-tab.active');
     const mode = activeTab && activeTab.dataset.previewMode === 'lyrics' ? 'lyrics' : 'info';
-    const baseWidth = mode === 'lyrics' ? 1200 : 1760;
-    const baseHeight = mode === 'lyrics' ? 300 : 520;
+    // overlay-info.html/overlay-lyrics.html의 PREVIEW_STAGE_WIDTH/HEIGHT와
+    // 반드시 같은 값을 써야 미리보기 스케일 계산이 실제 렌더 크기와 맞는다.
+    const baseWidth = 640;
+    const baseHeight = mode === 'lyrics' ? 220 : 200;
     const wrapperWidth = Math.max(1, overlayPreviewWrapper.clientWidth - 28);
     const wrapperHeight = Math.max(1, overlayPreviewWrapper.clientHeight - 28);
     const scale = Math.min(wrapperWidth / baseWidth, wrapperHeight / baseHeight, 1);
@@ -182,17 +189,24 @@ export function initOverlayListeners() {
     const effectGlow = !!(overlayEffectGlow && overlayEffectGlow.checked);
 
     if (!skipSave) {
-      const saved = localStorage.getItem('overlay-settings');
-      let config = {};
-      try { config = JSON.parse(saved) || {}; } catch(e) {}
+          const saved = localStorage.getItem('overlay-settings');
+          let config = {};
+          try { config = JSON.parse(saved) || {}; } catch(e) {}
 
-      config[currentTarget] = {
-        scale, font, color, textColor, bgOpacity, rounding, bgColor, animationDirection, fontSize, effectFloat, effectGlow
-      };
-      config.isForceVisible = isForceVisible;
+          // 이전 형식(info/lyrics 분리 저장) 마이그레이션: 분리된 키가 있으면 info 값을 우선 통합
+          if (config.info || config.lyrics) {
+            const migrated = config.info || config.lyrics || {};
+            config = { ...migrated, isForceVisible: config.isForceVisible };
+          }
 
-      localStorage.setItem('overlay-settings', JSON.stringify(config));
-    }
+          // 통합 설정 — info/lyrics 탭 구분 없이 하나의 값만 저장
+          Object.assign(config, {
+            scale, font, color, textColor, bgOpacity, rounding, bgColor, animationDirection, fontSize, effectFloat, effectGlow
+          });
+          config.isForceVisible = isForceVisible;
+
+          localStorage.setItem('overlay-settings', JSON.stringify(config));
+        }
 
     const useLan = !!(toggleOverlayLan && toggleOverlayLan.checked);
     const host = (useLan && cachedLanAddress) ? cachedLanAddress : 'localhost';
@@ -233,31 +247,36 @@ export function initOverlayListeners() {
 
     if (!overlayIframe.src.includes('preview=true')) {
       const mode = activeTab && activeTab.dataset.previewMode === 'lyrics' ? 'lyrics' : 'info';
-      overlayIframe.src = mode === 'lyrics' ? `overlay-lyrics.html?preview=true` : `overlay-info.html?preview=true`;
+      overlayIframe.src = mode === 'lyrics'
+        ? `overlay-lyrics.html?preview=true&cb=${OVERLAY_CACHE_BUST}`
+        : `overlay-info.html?preview=true&cb=${OVERLAY_CACHE_BUST}`;
     }
     resizeOverlayPreview();
 
-    try {
-      await updateOverlayStyle({
-        target: currentTarget,
-        scale: parseFloat(scale),
-        font,
-        color,
-        textColor,
-        bgColor,
-        bgOpacity,
-        rounding,
-        isForceVisible,
-        animationDirection,
-        themeMode,
-        fontSize,
-        effectFloat,
-        effectGlow
-      });
-    } catch (err) {
-      console.error("Failed to update overlay style:", err);
-    }
-  };
+        // 통합 설정 — info/lyrics 양쪽에 동일한 스타일을 보낸다
+        try {
+          for (const target of ['info', 'lyrics']) {
+            await updateOverlayStyle({
+              target,
+              scale: parseFloat(scale),
+              font,
+              color,
+              textColor,
+              bgColor,
+              bgOpacity,
+              rounding,
+              isForceVisible,
+              animationDirection,
+              themeMode,
+              fontSize,
+              effectFloat,
+              effectGlow
+            });
+          }
+        } catch (err) {
+          console.error("Failed to update overlay style:", err);
+        }
+      };
 
   /** 프리셋 버튼 클릭 시 폼 값을 한 번에 세팅하고 저장·미리보기까지 반영한다. */
   const applyPreset = (name) => {
@@ -298,56 +317,64 @@ export function initOverlayListeners() {
 
   const previewTabs = document.querySelectorAll('.preview-tab');
   previewTabs.forEach(tab => {
-    tab.onclick = async () => {
-      previewTabs.forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
+      tab.onclick = async () => {
+        previewTabs.forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
 
-      const mode = tab.dataset.previewMode;
-      const settingsTitle = document.getElementById('overlay-settings-title');
-      if (settingsTitle) {
-        settingsTitle.textContent = mode === 'lyrics' ? '가사 오버레이 설정' : '곡 정보 오버레이 설정';
-      }
+        const mode = tab.dataset.previewMode;
+        const settingsTitle = document.getElementById('overlay-settings-title');
+        if (settingsTitle) {
+          // 통합 설정이므로 탭과 관계없이 동일한 "오버레이 설정" 표시
+          settingsTitle.textContent = '오버레이 설정';
+        }
 
-      loadOverlaySettings();
+        // 가사 폰트 크기 행 표시/숨김
+        const fontSizeRow = document.getElementById('overlay-font-size-row');
+        if (fontSizeRow) fontSizeRow.style.display = mode === 'lyrics' ? 'flex' : 'none';
 
-      if (mode === 'lyrics') {
-        overlayIframe.src = `overlay-lyrics.html?preview=true`;
-        await updateOverlayLyrics({
-          current: "",
-          next: "첫 번째 가사가 여기에 미리 표시됩니다."
-        }).catch(err => console.error(err));
-      } else {
-        overlayIframe.src = `overlay-info.html?preview=true`;
-        await updateOverlayLyrics({ current: "", next: "" }).catch(err => console.error(err));
-      }
-      requestAnimationFrame(resizeOverlayPreview);
-    };
-  });
+        if (mode === 'lyrics') {
+          overlayIframe.src = `overlay-lyrics.html?preview=true&cb=${OVERLAY_CACHE_BUST}`;
+          await updateOverlayLyrics({
+            current: "",
+            next: "첫 번째 가사가 여기에 미리 표시됩니다."
+          }).catch(err => console.error(err));
+        } else {
+          overlayIframe.src = `overlay-info.html?preview=true&cb=${OVERLAY_CACHE_BUST}`;
+          await updateOverlayLyrics({ current: "", next: "" }).catch(err => console.error(err));
+        }
+        requestAnimationFrame(resizeOverlayPreview);
+      };
+    });
 
   const loadOverlaySettings = () => {
-    const saved = localStorage.getItem('overlay-settings');
-    let config = {};
-    try { config = JSON.parse(saved) || {}; } catch(e) {}
+      const saved = localStorage.getItem('overlay-settings');
+      let config = {};
+      try { config = JSON.parse(saved) || {}; } catch(e) {}
 
-    const activeTab = document.querySelector('.preview-tab.active');
-    const currentTarget = (activeTab && activeTab.dataset.previewMode === 'lyrics') ? 'lyrics' : 'info';
+      // 이전 형식(info/lyrics 분리 저장) 마이그레이션: 분리된 키가 있으면 info 값을 우선 통합
+      if (config.info || config.lyrics) {
+        const migrated = config.info || config.lyrics || {};
+        config = { ...migrated, isForceVisible: config.isForceVisible };
+        localStorage.setItem('overlay-settings', JSON.stringify(config));
+      }
 
-    const defaults = {
-      scale: 1.0,
-      color: currentTarget === 'lyrics' ? 'ffffff' : '8b5cf6',
-      textColor: 'ffffff',
-      bgOpacity: 0.6,
-      rounding: 20,
-      bgColor: '0f0f14',
-      font: 'Inter',
-      animationDirection: 'left',
-      fontSize: 22,
-      effectFloat: false,
-      effectGlow: false
-    };
+      const defaults = {
+        scale: 1.0,
+        color: '8b5cf6',
+        textColor: 'ffffff',
+        bgOpacity: 0.6,
+        rounding: 20,
+        bgColor: '0f0f14',
+        font: 'Inter',
+        animationDirection: 'left',
+        fontSize: 22,
+        effectFloat: false,
+        effectGlow: false
+      };
 
-    const settings = config[currentTarget] || {};
-    const final = { ...defaults, ...settings };
+      // 통합 설정 — 탭 구분 없이 하나의 값만 사용
+      const settings = config;
+      const final = { ...defaults, ...settings };
 
     if (overlayScale) overlayScale.value = final.scale;
     if (overlayColor) {
@@ -390,51 +417,59 @@ export function initOverlayListeners() {
   };
 
   const syncAllOverlayStylesToBackend = async () => {
-    const saved = localStorage.getItem('overlay-settings');
-    let config = {};
-    try { config = JSON.parse(saved) || {}; } catch (e) {}
+      const saved = localStorage.getItem('overlay-settings');
+      let config = {};
+      try { config = JSON.parse(saved) || {}; } catch (e) {}
 
-    const isForceVisible = config.isForceVisible === true;
-    const themeMode = document.documentElement.getAttribute('data-theme') || 'dark';
-    const targets = ['info', 'lyrics'];
+      // 이전 형식 마이그레이션
+      if (config.info || config.lyrics) {
+        const migrated = config.info || config.lyrics || {};
+        config = { ...migrated, isForceVisible: config.isForceVisible };
+      }
 
-    for (const target of targets) {
+      const isForceVisible = config.isForceVisible === true;
+      const themeMode = document.documentElement.getAttribute('data-theme') || 'dark';
+      const targets = ['info', 'lyrics'];
+
+      // 통합 설정 — info/lyrics 모두 같은 값으로 동기화
       const defaults = {
         scale: 1.0,
-        color: target === 'lyrics' ? 'ffffff' : '8b5cf6',
+        color: '8b5cf6',
         textColor: 'ffffff',
         bgOpacity: 0.6,
         rounding: 20,
         bgColor: '0f0f14',
         font: 'Inter',
         animationDirection: 'left',
+        fontSize: 22,
         effectFloat: false,
         effectGlow: false
       };
-      const targetSettings = config[target] || {};
-      const final = { ...defaults, ...targetSettings };
+      const final = { ...defaults, ...config };
 
-      try {
-        await updateOverlayStyle({
-          target,
-          scale: parseFloat(final.scale) || 1.0,
-          font: final.font || 'Inter',
-          color: String(final.color || defaults.color).replace('#', ''),
-          textColor: String(final.textColor || defaults.textColor).replace('#', ''),
-          bgColor: String(final.bgColor || defaults.bgColor).replace('#', ''),
-          bgOpacity: Number.isFinite(final.bgOpacity) ? final.bgOpacity : defaults.bgOpacity,
-          rounding: Number.isFinite(final.rounding) ? final.rounding : defaults.rounding,
-          isForceVisible,
-          animationDirection: final.animationDirection || 'left',
-          themeMode,
-          effectFloat: !!final.effectFloat,
-          effectGlow: !!final.effectGlow
-        });
-      } catch (err) {
-        console.error(`Failed to sync ${target} overlay style:`, err);
+      for (const target of targets) {
+        try {
+          await updateOverlayStyle({
+            target,
+            scale: parseFloat(final.scale) || 1.0,
+            font: final.font || 'Inter',
+            color: String(final.color || defaults.color).replace('#', ''),
+            textColor: String(final.textColor || defaults.textColor).replace('#', ''),
+            bgColor: String(final.bgColor || defaults.bgColor).replace('#', ''),
+            bgOpacity: Number.isFinite(final.bgOpacity) ? final.bgOpacity : defaults.bgOpacity,
+            rounding: Number.isFinite(final.rounding) ? final.rounding : defaults.rounding,
+            isForceVisible,
+            animationDirection: final.animationDirection || 'left',
+            themeMode,
+            fontSize: final.fontSize || 22,
+            effectFloat: !!final.effectFloat,
+            effectGlow: !!final.effectGlow
+          });
+        } catch (err) {
+          console.error(`Failed to sync ${target} overlay style:`, err);
+        }
       }
-    }
-  };
+    };
 
   [overlayScale, overlayBgOpacity, overlayRounding, toggleOverlayForceVisible, overlayEffectFloat, overlayEffectGlow].forEach(el => {
     if (!el) return;
