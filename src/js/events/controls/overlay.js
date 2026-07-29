@@ -3,6 +3,7 @@
  */
 import { updateOverlayLyrics, updateOverlayStyle, getLanAddresses } from '../../overlay-api.js';
 import { getLineVisibility, setLineVisibility } from '../../lrc-parser.js';
+import { state } from '../../state.js';
 
 const OVERLAY_LAN_PREF_KEY = 'overlay-use-lan-address';
 let cachedLanAddress = null;
@@ -314,6 +315,47 @@ export function initOverlayListeners() {
   document.querySelectorAll('.overlay-preset-btn').forEach((btn) => {
     btn.addEventListener('click', () => applyPreset(btn.dataset.preset));
   });
+
+  /** 기본값 복원 — 기준서 5: "기본값을 쉽게 복원할 수 있어야 합니다".
+   *  오버레이 설정은 곡 정보/가사 구분 없이 하나로 저장되므로(통합 구조),
+   *  스타일 값만 지우고 '상시 표시'처럼 스타일이 아닌 설정은 남긴다. */
+  document.getElementById('btn-overlay-reset')?.addEventListener('click', async () => {
+    if (!confirm('오버레이 디자인을 기본값으로 되돌릴까요?\n(색·크기·글씨체·애니메이션이 처음 상태로 돌아갑니다)')) return;
+
+    const saved = localStorage.getItem('overlay-settings');
+    let config = {};
+    try { config = JSON.parse(saved) || {}; } catch (e) {}
+    // 스타일 키만 제거 — isForceVisible 등 나머지는 사용자의 방송 상태라 보존.
+    const styleKeys = ['scale', 'font', 'color', 'textColor', 'bgOpacity', 'rounding',
+                       'bgColor', 'animationDirection', 'fontSize', 'effectFloat', 'effectGlow',
+                       'info', 'lyrics'];
+    styleKeys.forEach((k) => delete config[k]);
+    localStorage.setItem('overlay-settings', JSON.stringify(config));
+
+    // 저장본이 비었으므로 loadOverlaySettings가 defaults로 폼을 채우고,
+    // 그 끝의 updateOverlaySettings가 미리보기·백엔드까지 반영한다.
+    loadOverlaySettings();
+    const { showNotification } = await import('../../utils.js');
+    showNotification('오버레이 디자인을 기본값으로 되돌렸습니다.', 'success');
+  });
+
+  /** 지금 시청자에게 실제로 보이는 상태인지 표시.
+   *  조건: '상시 표시'가 켜져 있거나, 곡이 재생 중이면 오버레이가 송출된다. */
+  const syncLiveState = () => {
+    const box = document.getElementById('overlay-live-state');
+    const txt = document.getElementById('overlay-live-state-text');
+    if (!box || !txt) return;
+    const forced = !!toggleOverlayForceVisible?.checked;
+    const playing = !!state.isPlaying;
+    const on = forced || playing;
+    box.dataset.on = on ? 'true' : 'false';
+    txt.textContent = on
+      ? (forced ? '시청자에게 보임 · 상시 표시' : '시청자에게 보임 · 재생 중')
+      : '지금은 시청자에게 안 보임';
+  };
+  toggleOverlayForceVisible?.addEventListener('change', syncLiveState);
+  syncLiveState();
+  setInterval(syncLiveState, 1000);
 
   const previewTabs = document.querySelectorAll('.preview-tab');
   previewTabs.forEach(tab => {

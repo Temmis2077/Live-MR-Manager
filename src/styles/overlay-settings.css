@@ -36,6 +36,100 @@
 }
 .btn-custom-color-picker:hover { background: var(--surface-3); color: var(--text-main); border-color: var(--glass-border); }
 
+/* 미리보기 상태 줄 — 지금 보는 것이 미리보기인지, 시청자에게 실제로
+   나가는 중인지 구분해서 알려준다(UI 기준서 5 · OBS 오버레이). */
+.overlay-preview-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.overlay-preview-note {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.overlay-live-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 11px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--glass-border);
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.overlay-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+
+/* 실제로 송출 중일 때만 붉은 상태 — 색 외에 문구로도 구분된다. */
+.overlay-live-state[data-on="true"] {
+  background: rgba(239, 68, 68, 0.14);
+  border-color: rgba(239, 68, 68, 0.32);
+  color: #fca5a5;
+}
+
+.overlay-live-state[data-on="true"] .overlay-live-dot {
+  background: #ef4444;
+}
+
+/* 세부 설정 — 접을 수 있는 고급 영역 */
+.overlay-advanced {
+  margin-top: 18px;
+  border-top: 1px solid var(--glass-border);
+  padding-top: 14px;
+}
+
+.overlay-advanced-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-main);
+  user-select: none;
+}
+
+.overlay-advanced-summary::-webkit-details-marker { display: none; }
+
+/* ▸ / ▾ 표식 — 열림 상태를 화살표로도 알린다 */
+.overlay-advanced-summary::before {
+  content: "▸";
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  transition: transform 0.15s;
+}
+
+.overlay-advanced[open] > .overlay-advanced-summary::before {
+  content: "▾";
+}
+
+.overlay-advanced-summary:focus-visible {
+  outline: 2px solid var(--accent-secondary);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+.overlay-advanced-hint {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--text-dim);
+}
+
 /* 오버레이 기본 스타일 프리셋 — 기존 조절값(크기·색·투명도·둥글기·방향)을
    한 번에 세팅해 CSS 없이도 바로 쓸 수 있는 완성된 룩을 준다. 이후 아래
    세부 컨트롤로 얼마든지 더 다듬을 수 있어 배타적 선택(라디오)으로 두지

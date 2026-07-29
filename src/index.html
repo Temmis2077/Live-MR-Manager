@@ -457,6 +457,17 @@
               <div class="preview-tab active" data-preview-mode="playing">현재 곡 정보</div>
               <div class="preview-tab" data-preview-mode="lyrics">가사 미리보기</div>
             </div>
+
+            <!-- 미리보기와 실제 방송 상태의 차이를 명시 (UI 기준서 5 · OBS 오버레이) -->
+            <div class="overlay-preview-status">
+              <div class="overlay-preview-note">
+                아래는 <strong>미리보기</strong>입니다. 격자무늬는 실제로는 <strong>투명</strong>하게 나갑니다.
+              </div>
+              <div class="overlay-live-state" id="overlay-live-state" data-on="false">
+                <span class="overlay-live-dot"></span>
+                <span id="overlay-live-state-text">지금은 시청자에게 안 보임</span>
+              </div>
+            </div>
             <div class="overlay-preview-wrapper" style="background: transparent;">
                           <iframe id="overlay-iframe"
                             style="width: 100%; height: 100%; border: none; background: transparent;"
@@ -500,7 +511,12 @@
                   <div class="ai-model-desc">설정 변경 내용이 미리보기에 바로 반영됩니다.</div>
 
                   <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 18px;">
-                    <label style="font-size: 0.8rem; font-weight: 700; color: var(--text-dim);">기본 스타일 (한 번에 적용, 이후 아래서 세부 조정 가능)</label>
+                    <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px;">
+                      <label style="font-size: 0.8rem; font-weight: 700; color: var(--text-dim);">기본 스타일 (한 번에 적용, 이후 아래서 세부 조정 가능)</label>
+                      <button type="button" class="btn-ai-action secondary" id="btn-overlay-reset"
+                              style="height: 28px; padding: 0 12px; font-size: 0.72rem;"
+                              title="이 오버레이의 모든 세부 설정을 처음 상태로 되돌립니다">기본값 복원</button>
+                    </div>
                     <div class="overlay-preset-row" id="overlay-preset-row">
                       <button type="button" class="overlay-preset-btn" data-preset="glass">
                         <span class="overlay-preset-name">글래스</span>
@@ -517,6 +533,12 @@
                     </div>
                   </div>
 
+                  <!-- 세부 옵션은 접을 수 있는 고급 영역으로 분리 (UI 기준서 5) -->
+                  <details class="overlay-advanced" id="overlay-advanced">
+                    <summary class="overlay-advanced-summary">
+                      <span>세부 설정</span>
+                      <span class="overlay-advanced-hint">크기 · 색 · 글씨체 · 애니메이션</span>
+                    </summary>
                   <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-top: 20px;">
                     <!-- 좌측: 크기 및 투명도, 둥글기 -->
                     <div style="display: flex; flex-direction: column; gap: 24px;">
@@ -686,6 +708,7 @@
                       </div>
                     </div>
                   </div>
+                  </details>
                 </div>
               </div>
 
