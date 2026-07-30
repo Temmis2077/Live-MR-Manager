@@ -64,8 +64,12 @@ export function openOverlayFloat() {
   host.hidden = false;
   document.body.classList.add('ov-float-open');
 
-  // 탭에서는 switchTab이 display를 켜 준다. 패널에서는 직접 켠다.
   tab.style.display = 'block';
+
+  // 미리보기 iframe은 처음 열 때 한 번만 붙인다 — 열 때마다 다시 불러오면
+  // 미리보기가 늦게 뜨고 현재 상태가 끊긴다.
+  const iframe = $('overlay-iframe');
+  if (iframe && !iframe.src) iframe.src = 'overlay-info.html?preview=true';
 
   // 키보드 사용자가 패널 안에서 시작하도록 초점을 옮긴다. 보이게 된 직후
   // 바로 잡아야 한다 — rAF로 미루면 그 사이에 초점이 body로 빠진다.

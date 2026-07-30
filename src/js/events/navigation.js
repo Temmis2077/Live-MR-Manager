@@ -25,20 +25,18 @@ export function initNavigation() {
           });
         return;
       }
+      // "OBS 오버레이 설정"은 화면이 아니라 떠 있는 패널이다 — 어디서 열든
+      // 같은 패널로 열린다(라이브에서 화면을 떠나지 않게 만든 것을 통일).
       if (tabId === "overlay") {
-        switchTab("overlay");
+        import('../ui/overlay-float.js').then(({ openOverlayFloat }) => openOverlayFloat())
+          .catch((err) => console.error('[Overlay] panel failed:', err));
         return;
       }
       if (tabId) switchTab(tabId);
     });
   });
 
-  const navOverlay = document.getElementById("nav-overlay");
   const btnCopyOverlayUrl = document.getElementById("btn-copy-overlay-url");
-
-  if (navOverlay) {
-    navOverlay.addEventListener("click", () => switchTab("overlay"));
-  }
 
   if (btnCopyOverlayUrl) {
     btnCopyOverlayUrl.addEventListener("click", () => {
@@ -52,6 +50,14 @@ export function initNavigation() {
 }
 
 export function switchTab(tabId) {
+  // 오버레이 설정은 화면이 아니다. 예전 코드가 탭으로 열려고 하면 빈 화면이
+  // 되므로 여기서 패널로 돌려보낸다(진입 경로를 하나로 유지).
+  if (tabId === "overlay") {
+    import('../ui/overlay-float.js').then(({ openOverlayFloat }) => openOverlayFloat())
+      .catch((err) => console.error('[Overlay] panel failed:', err));
+    return;
+  }
+
   // 떠 있는 오버레이 설정 패널을 먼저 닫는다 — 패널이 #overlay-tab 노드를
   // 자기 안으로 옮겨 두므로, 닫아서 제자리로 돌려야 다른 화면이 정상이다.
   import('../ui/overlay-float.js').then((m) => m.close()).catch(() => {});
@@ -100,7 +106,7 @@ export function switchTab(tabId) {
       .catch((err) => console.error('[Live] screen module failed:', err));
   }
   if (elements.tasksPage) elements.tasksPage.style.display = tabId === "tasks" ? "block" : "none";
-  if (elements.overlayPage) elements.overlayPage.style.display = tabId === "overlay" ? "block" : "none";
+  // 오버레이 설정은 탭이 아니라 떠 있는 패널이다 — overlay-float.js가 표시를 맡는다.
 
   // Lyric Drawer control: Only show on music tabs
   if (elements.lyricDrawerTrigger) {
@@ -171,21 +177,6 @@ export function switchTab(tabId) {
     if (alignmentPage) alignmentPage.style.display = "none";
   }
 
-  if (tabId === "overlay") {
-    // Do not force-reload on every tab switch.
-    // Repeated reloads make preview feel delayed and can drop current preview context.
-    const iframe = document.getElementById("overlay-iframe");
-    if (iframe && !iframe.src) {
-      iframe.src = "overlay-info.html?preview=true";
-    }
-    // Ensure preview scale/position is recalculated after the hidden tab becomes visible.
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        window.dispatchEvent(new Event("resize"));
-      });
-    });
-  }
-
   if (tabId === "tasks") {
     import('../ui/components.js').then(({ updateTaskUI }) => updateTaskUI());
   }
@@ -222,7 +213,6 @@ function getTabTitle(tabId) {
     local: "내 파일",
     meloming: "멜로밍",
     settings: "설정",
-    overlay: "OBS 오버레이",
     tasks: "AI 프로세싱",
     alignment: "가사 싱크"
   };
@@ -237,7 +227,6 @@ function getTabSubtitle(tabId) {
     local: "화면 어디든 음원 파일을 드래그 앤 드롭하여 추가할 수 있습니다.",
     meloming: "멜로밍 노래책과 연동된 곡만 모아서 확인합니다.",
     settings: "애플리케이션 설정을 관리합니다.",
-    overlay: "방송에 송출될 오버레이의 실시간 미리보기입니다.",
     tasks: "AI 작업 진행 상태를 확인합니다.",
     alignment: "가사 싱크를 조정하고 저장합니다."
   };

@@ -39,9 +39,9 @@ function screenLabel(view) {
   // 멜로밍은 프론트에서 숨긴 상태라 라벨만 음원 관리로 맞춘다.
   if (view === 'meloming') return '음원 관리';
   const hit = SCREENS.find((s) => s.id === view);
+  // 오버레이 설정은 화면이 아니라 떠 있는 패널이라 여기 없다.
   return hit ? hit.label : (view === 'settings' ? '설정'
-    : view === 'tasks' ? 'AI 프로세싱'
-    : view === 'overlay' ? 'OBS 오버레이' : '음원 관리');
+    : view === 'tasks' ? 'AI 프로세싱' : '음원 관리');
 }
 
 function closeAllMenus() {
