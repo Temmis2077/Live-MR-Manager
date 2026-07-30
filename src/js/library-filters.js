@@ -1,6 +1,7 @@
 /**
  * Pure library filter/sort logic (testable without DOM)
  */
+import { parentGenre } from './taxonomy.js';
 
 export function getSongCategoryFromMetadata(song) {
   if (!song) return "";
@@ -62,11 +63,20 @@ export function filterSongLibrary(songs, {
     );
   }
 
-  if (genreFilter !== "all" && genreFilter !== "") {
-    filtered = filtered.filter(s => s.genre === genreFilter);
+  if (genreFilter === "none") {
+    // 미분류 — 숨기지 않고 고를 수 있게 한다(35%가 여기 있다).
+    filtered = filtered.filter(s => !String(s.genre || "").trim());
+  } else if (genreFilter !== "all" && genreFilter !== "") {
+    // 대장르를 고르면 그 아래 서브장르까지 함께 나온다
+    // (락 → 락발라드·펑크(Punk)). 서브장르를 고르면 그것만.
+    filtered = filtered.filter(
+      (s) => s.genre === genreFilter || parentGenre(s.genre) === genreFilter
+    );
   }
 
-  if (categoryFilter !== "all" && categoryFilter !== "") {
+  if (categoryFilter === "none") {
+    filtered = filtered.filter(s => !getSongCategoryFromMetadata(s) && !(s.categories || []).length);
+  } else if (categoryFilter !== "all" && categoryFilter !== "") {
     filtered = filtered.filter(
       (s) =>
         getSongCategoryFromMetadata(s) === categoryFilter ||

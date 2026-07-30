@@ -317,8 +317,10 @@
 
           <aside class="lib-side" id="lib-side">
             <div class="lib-side-scroll">
-              <div class="lib-side-title">보관함</div>
+              <div class="lib-side-title">보관함 <span class="lib-side-hint">어디 음악인가</span></div>
               <div class="lib-coll-list" id="lib-coll-list"></div>
+              <div class="lib-side-title" style="margin-top: 18px;">장르 <span class="lib-side-hint">어떤 소리인가</span></div>
+              <div class="lib-coll-list" id="lib-genre-list"></div>
               <div class="lib-side-title" style="margin-top: 18px;">태그</div>
               <div class="lib-tag-list" id="lib-tag-list"></div>
             </div>
@@ -1386,15 +1388,9 @@
         </div>
       </div>
 
-      <!-- Floating Toggle Handle -->
-      <button id="lyric-drawer-trigger" class="lyric-drawer-trigger" title="가사 보기">
-        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3" style="margin-bottom: 6px; opacity: 0.8;">
-          <line x1="3" y1="6" x2="21" y2="6"></line>
-          <line x1="3" y1="12" x2="21" y2="12"></line>
-          <line x1="3" y1="18" x2="15" y2="18"></line>
-        </svg>
-        <span>LYRICS</span>
-      </button>
+      <!-- 화면 오른쪽에 세로로 붙어 있던 LYRICS 손잡이는 제거했다.
+           가사는 인스펙터(싱크 상태)·가사 싱크 화면·별도 가사 창(⚙ 메뉴)에서
+           본다. 서랍은 그 경로들과 겹치면서 본문을 가리기만 했다. -->
   </main>
 
   <!-- 퍼포머 컨트롤 도크 (하단 고정) -->

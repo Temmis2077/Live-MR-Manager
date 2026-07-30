@@ -476,3 +476,33 @@
 @media (prefers-reduced-motion: reduce) {
   .library-layout * { transition-duration: 0.01ms !important; }
 }
+
+/* 좌측 패널 두 축 — 보관함(권역: 어디 음악인가) / 장르(사운드: 어떤 소리인가).
+   두 축을 섞지 않는 게 이 분류의 핵심이라 제목에 뜻을 같이 적는다. */
+.lib-side-hint {
+  font-weight: 600;
+  letter-spacing: 0;
+  opacity: 0.65;
+  margin-left: 4px;
+}
+
+/* 서브장르 — 대장르 아래로 들여쓰고 점을 작게 (락 › 락발라드) */
+.lib-coll.sub {
+  padding-left: 26px;
+}
+
+.lib-coll.sub .lib-coll-dot {
+  width: 4px;
+  height: 4px;
+}
+
+.lib-coll.sub .lib-coll-name {
+  font-weight: 600;
+  font-size: 0.73rem;
+}
+
+/* 미분류·분류 없음 — 숨기지 않되 톤을 낮춰 채워야 할 칸임을 알린다. */
+.lib-coll.muted .lib-coll-name {
+  font-weight: 600;
+  color: var(--text-dim);
+}

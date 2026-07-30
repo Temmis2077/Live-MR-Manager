@@ -109,7 +109,12 @@ async function initApp() {
 
     // 장르/카테고리 표준 재매핑 — 예전 값(소문자 kpop/ballad, 자동수집 '록'
     // 등)을 새 기준으로 한 번만 정리한다(docs/GENRE_CATEGORY_STANDARD.md).
-    if (localStorage.getItem("taxonomyMigratedV1") !== "true") {
+    //
+    // V2: V1이 돈 뒤에도 표준 밖 값이 남아 있었다. REMAP에 없는 값은
+    // classifyOne이 '커스텀'으로 그대로 보존해서, 장르 목록에 락발라드·
+    // 시티팝·신스팝·사운드트랙이, 카테고리에 '기본'·'민요'가 떠돌았다.
+    // 그 값들을 REMAP에 넣고 서브장르 개념을 추가했으므로 한 번 더 돈다.
+    if (localStorage.getItem("taxonomyMigratedV2") !== "true") {
       const { migrateLibraryTaxonomy } = await import('./js/taxonomy.js');
       const changed = migrateLibraryTaxonomy(state.songLibrary);
       if (changed > 0) {
@@ -117,7 +122,8 @@ async function initApp() {
         await saveLibrary(state.songLibrary);
         console.log(`[App] Taxonomy migrated: ${changed} songs`);
       }
-      localStorage.setItem("taxonomyMigratedV1", "true");
+      localStorage.setItem("taxonomyMigratedV2", "true");
+      localStorage.removeItem("taxonomyMigratedV1");
     }
   } catch (err) {
     console.error("Failed to load library:", err);

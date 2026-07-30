@@ -12,6 +12,7 @@ import { state } from '../state.js';
 import { elements } from './elements.js';
 import { invoke } from '../tauri-bridge.js';
 import { getSongCategoryFromMetadata, getLyricSyncStatus } from '../library-filters.js';
+import { parentGenre } from '../taxonomy.js';
 import { getThumbnailUrl, showNotification } from '../utils.js';
 
 const $ = (id) => document.getElementById(id);
@@ -31,15 +32,47 @@ function isSeparated(song) {
 
 /* ────────────────────────────── 좌측: 보관함 · 태그 ───────── */
 
-/** 라이브러리에 실제로 쓰인 카테고리와 곡 수를 센다. */
+/** 라이브러리에 실제로 쓰인 카테고리(권역)와 곡 수. 분류 없는 곡도 센다. */
 function collectCollections() {
   const counts = new Map();
+  let none = 0;
   for (const s of state.songLibrary || []) {
     const c = getSongCategoryFromMetadata(s);
-    if (!c) continue;
+    if (!c) { none += 1; continue; }
     counts.set(c, (counts.get(c) || 0) + 1);
   }
-  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const rows = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  // 분류 없는 곡은 감추지 않고 맨 아래에 둔다 — 채워 넣으려면 보여야 한다.
+  if (none > 0) rows.push(['none', none]);
+  return rows;
+}
+
+/**
+ * 장르를 대장르 › 서브장르 2단으로 센다.
+ * 저장은 장르 필드 하나뿐이고 대장르는 parentGenre()로 되짚는다.
+ * @returns [{ genre, count, subs: [[name, count]] }] + 미분류
+ */
+function collectGenres() {
+  const parents = new Map(); // 대장르 -> { count, subs: Map }
+  let none = 0;
+  for (const s of state.songLibrary || []) {
+    const raw = String(s.genre || '').trim();
+    if (!raw) { none += 1; continue; }
+    const parent = parentGenre(raw) || raw; // 표준 밖 값은 자기 자신을 대장르로
+    if (!parents.has(parent)) parents.set(parent, { count: 0, subs: new Map() });
+    const node = parents.get(parent);
+    node.count += 1;
+    if (raw !== parent) node.subs.set(raw, (node.subs.get(raw) || 0) + 1);
+  }
+  const rows = [...parents.entries()]
+    .map(([genre, n]) => ({
+      genre,
+      count: n.count,
+      subs: [...n.subs.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])),
+    }))
+    .sort((a, b) => b.count - a.count || a.genre.localeCompare(b.genre));
+  if (none > 0) rows.push({ genre: 'none', count: none, subs: [] });
+  return rows;
 }
 
 function collectTags() {
@@ -59,6 +92,50 @@ function activeTag() {
   return q;
 }
 
+/** 장르 목록 — 대장르 아래에 서브장르를 들여쓴다. 대장르를 고르면 서브장르
+ *  곡까지 함께 나온다(필터 로직은 library-filters.js가 담당). */
+function renderGenreTree() {
+  const box = $('lib-genre-list');
+  if (!box) return;
+
+  const cur = elements.libGenreFilter?.value || 'all';
+  const rows = collectGenres();
+  const total = (state.songLibrary || []).length;
+
+  const item = (value, label, count, isSub) => `
+    <button type="button" class="lib-coll${cur === value ? ' active' : ''}${isSub ? ' sub' : ''}${value === 'none' ? ' muted' : ''}"
+            data-genre="${esc(value)}">
+      <span class="lib-coll-dot"></span>
+      <span class="lib-coll-name" title="${esc(label)}">${esc(label)}</span>
+      <span class="lib-coll-count">${count}</span>
+    </button>`;
+
+  box.innerHTML = item('all', '전체', total, false)
+    + rows.map((r) => {
+      const label = r.genre === 'none' ? '미분류' : r.genre;
+      return item(r.genre, label, r.count, false)
+        + r.subs.map(([sub, n]) => item(sub, sub, n, true)).join('');
+    }).join('');
+
+  box.querySelectorAll('[data-genre]').forEach((btn) => {
+    btn.onclick = async () => {
+      const val = btn.dataset.genre;
+      if (elements.libGenreFilter) elements.libGenreFilter.value = val;
+      // 앱바의 장르 드롭다운 표시도 맞춘다(있을 때만).
+      const dd = $('lib-genre-dropdown');
+      if (dd) {
+        const sel = dd.querySelector('.selected-text');
+        const opt = [...dd.querySelectorAll('.option-item')].find((o) => o.dataset.value === val);
+        dd.querySelectorAll('.option-item').forEach((o) => o.classList.toggle('selected', o === opt));
+        if (sel) sel.textContent = opt ? opt.textContent : (val === 'all' ? '전체 장르' : val);
+      }
+      const { renderLibrary } = await import('./library.js');
+      renderLibrary();
+      renderCollections();
+    };
+  });
+}
+
 export function renderCollections() {
   const list = $('lib-coll-list');
   const tagList = $('lib-tag-list');
@@ -75,14 +152,19 @@ export function renderCollections() {
        <span class="lib-coll-name">전체</span>
        <span class="lib-coll-count">${total}</span>
      </button>`,
-    ...colls.map(([name, n]) => `
-      <button type="button" class="lib-coll${cur === name ? ' active' : ''}" data-coll="${esc(name)}">
+    ...colls.map(([name, n]) => {
+      const label = name === 'none' ? '분류 없음' : name;
+      return `
+      <button type="button" class="lib-coll${cur === name ? ' active' : ''}${name === 'none' ? ' muted' : ''}" data-coll="${esc(name)}">
         <span class="lib-coll-dot"></span>
-        <span class="lib-coll-name" title="${esc(name)}">${esc(name)}</span>
+        <span class="lib-coll-name" title="${esc(label)}">${esc(label)}</span>
         <span class="lib-coll-count">${n}</span>
-      </button>`),
+      </button>`;
+    }),
   ];
   list.innerHTML = rows.join('');
+
+  renderGenreTree();
 
   list.querySelectorAll('.lib-coll').forEach((btn) => {
     btn.onclick = async () => {
