@@ -364,8 +364,9 @@ export function initLiveScreen() {
   });
 
   $('live-open-overlay')?.addEventListener('click', async () => {
-    const { switchTab } = await import('./events/navigation.js');
-    switchTab('overlay');
+    // 라이브를 떠나지 않는다 — 설정 UI를 라이브 위에 띄운다.
+    const { openOverlayFloat } = await import('./ui/overlay-float.js');
+    openOverlayFloat();
   });
 
   $('live-ov-toggle')?.addEventListener('click', () => {

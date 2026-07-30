@@ -52,6 +52,10 @@ export function initNavigation() {
 }
 
 export function switchTab(tabId) {
+  // 떠 있는 오버레이 설정 패널을 먼저 닫는다 — 패널이 #overlay-tab 노드를
+  // 자기 안으로 옮겨 두므로, 닫아서 제자리로 돌려야 다른 화면이 정상이다.
+  import('../ui/overlay-float.js').then((m) => m.close()).catch(() => {});
+
   state.activeView = tabId;
 
   // 앱바가 현재 화면 이름과 화면별 컨트롤 노출을 맞춘다(사이드바 대체).
