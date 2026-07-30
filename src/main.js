@@ -122,6 +122,15 @@ async function initApp() {
         await saveLibrary(state.songLibrary);
         console.log(`[App] Taxonomy migrated: ${changed} songs`);
       }
+      // 재매핑으로 아무도 안 쓰게 된 장르·카테고리 행을 지운다
+      // (옛 영문 슬러그 jpop/rock/ballad, 중복된 록·인디 록·포크 등).
+      try {
+        const [g, c] = await invoke('prune_unused_taxonomy');
+        if (g || c) console.log(`[App] Pruned unused taxonomy: genres ${g}, categories ${c}`);
+      } catch (err) {
+        console.warn('[App] taxonomy prune skipped:', err);
+      }
+
       localStorage.setItem("taxonomyMigratedV2", "true");
       localStorage.removeItem("taxonomyMigratedV1");
     }

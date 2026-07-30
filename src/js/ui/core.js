@@ -116,7 +116,8 @@ export function setupGridResizeObserver() {
   if (resizeObserver) resizeObserver.disconnect();
   
   resizeObserver = new ResizeObserver(entries => {
-    if (state.viewMode === 'list') return;
+    // 표 한 가지뿐이라 카드 열 수 계산은 더 이상 필요 없다.
+    return;
     
     for (let entry of entries) {
       const width = entry.contentRect.width;

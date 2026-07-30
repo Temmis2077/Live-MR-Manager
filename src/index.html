@@ -179,21 +179,7 @@
           <div class="title-row">
             <h1 id="view-title">Library</h1>
             <div class="view-controls" id="view-controls">
-              <button class="view-btn active" id="view-grid" title="그리드 모드">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
-                  <path d="M3 3h8v8H3V3zm0 10h8v8H3v-8zM13 3h8v8h-8V3zm0 10h8v8h-8v-8z" />
-                </svg>
-              </button>
-              <button class="view-btn" id="view-list" title="리스트 모드">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
-                  <path d="M4 6h2v2H4V6zm5 0h11v2H9V6zm-5 5h2v2H4v-2zm5 0h11v2H9v-2zm-5 5h2v2H4v-2zm5 0h11v2H9v-2z" />
-                </svg>
-              </button>
-              <button class="view-btn" id="view-button" title="버튼 모드">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
-                  <path d="M3 4h8v6H3V4zm10 0h8v6h-8V4zm0 10h8v6h-8v-6zM3 14h8v6H3v-6z" />
-                </svg>
-              </button>
+              <!-- 보기 모드 전환(그리드/리스트/버튼) 제거 — 표 한 가지만 쓴다 -->
               <button class="view-btn" id="library-select-mode" title="선택 모드 (여러 곡 일괄 작업)">
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <polyline points="9 11 12 14 22 4"></polyline>
@@ -424,28 +410,20 @@
                     <button type="button" class="live-step-btn" id="live-tempo-up" aria-label="노래 빠르기 올리기">＋</button>
                   </div>
                 </div>
-                <div class="live-card">
-                  <div class="live-card-title">가이드 보컬</div>
-                  <div class="live-card-hint">원곡 보컬을 얼마나 섞을지</div>
-                  <div class="live-stepper">
-                    <button type="button" class="live-step-btn" id="live-guide-down" aria-label="가이드 보컬 줄이기">−</button>
-                    <button type="button" class="live-step-val" id="live-guide-val" aria-label="가이드 보컬 끄기(0)" title="클릭하면 0으로 되돌립니다">0</button>
-                    <button type="button" class="live-step-btn" id="live-guide-up" aria-label="가이드 보컬 늘리기">＋</button>
-                  </div>
-                </div>
               </div>
 
               <div class="live-volumes">
                 <div class="live-card">
                   <div class="live-vol-head">
-                    <div class="live-vol-name">반주(MR) 소리</div>
-                    <div class="live-vol-val" id="live-mr-val">100</div>
+                    <div class="live-vol-name">반주 ↔ 가이드 보컬</div>
+                    <div class="live-vol-val" id="live-mix-val">0</div>
                   </div>
-                  <div class="live-vol-track" id="live-mr-track" role="slider" tabindex="0"
-                       aria-label="반주(MR) 소리" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100"
-                       title="클릭한 위치로 설정 · ←→ 키로 5씩 조절">
-                    <div class="live-vol-fill" id="live-mr-fill" style="width: 100%"></div>
+                  <div class="live-vol-track" id="live-mix-track" role="slider" tabindex="0"
+                       aria-label="반주와 가이드 보컬 믹스" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"
+                       title="끌어서 조절 · ←→ 키로 5씩">
+                    <div class="live-vol-fill" id="live-mix-fill" style="width: 0%"></div>
                   </div>
+                  <div class="live-vol-scale"><span>반주만</span><span>보컬 100</span></div>
                 </div>
                 <div class="live-card">
                   <div class="live-vol-head">
@@ -454,7 +432,7 @@
                   </div>
                   <div class="live-vol-track" id="live-mon-track" role="slider" tabindex="0"
                        aria-label="내 귀에 들리는 소리" aria-valuemin="0" aria-valuemax="120" aria-valuenow="100"
-                       title="클릭한 위치로 설정 · ←→ 키로 5씩 조절">
+                       title="끌어서 조절 · ←→ 키로 5씩">
                     <div class="live-vol-fill" id="live-mon-fill" style="width: 100%"></div>
                   </div>
                 </div>
@@ -1457,34 +1435,21 @@
 
       <!-- AI 처리 섹션 -->
       <div class="ai-processing">
-        <div class="ai-item vocal-item" title="보컬/반주 밸런스 조절">
-          <span class="ai-label clickable" id="label-vocal-balance">보컬</span>
+        <!-- 보컬 on/off + 반주↔보컬 믹스량. 예전엔 믹스가 팝오버 안에 숨어 있어
+             한 번 더 눌러야 했다 — 전송부에서 바로 조절되게 꺼냈다. -->
+        <div class="ai-item vocal-item" title="보컬 소리 켜기/끄기">
+          <span class="ai-label" id="label-vocal-balance">보컬</span>
           <label class="switch">
             <input type="checkbox" id="toggle-vocal" checked>
             <span class="slider round"></span>
           </label>
-
-          <!-- Mini Popover for Balance -->
-          <div class="balance-popover" id="popover-vocal-balance">
-            <div class="popover-arrow"></div>
-            <div class="popover-header">
-              <span>보컬 밸런스</span>
-              <span id="vocal-balance-val">50%</span>
-            </div>
-            <div class="popover-body">
-              <span class="side-label">반주</span>
-              <input type="range" id="vocal-balance" min="0" max="100" value="50" class="mini-range-slider">
-              <span class="side-label">보컬</span>
-            </div>
-          </div>
         </div>
-        <div class="ai-item" title="AI 가사 싱크 활성">
-          <span class="ai-label">가사</span>
-          <label class="switch">
-            <input type="checkbox" id="toggle-lyric">
-            <span class="slider round"></span>
-          </label>
+        <div class="ai-item mix-item" title="반주와 보컬을 섞는 비율">
+          <input type="range" id="vocal-balance" min="0" max="100" value="50" class="mini-range-slider">
+          <span class="ai-mix-val" id="vocal-balance-val">50%</span>
         </div>
+        <!-- '가사' 토글 제거 — 음원 관리에는 보컬 on/off와 믹스량만 둔다.
+             가사는 표의 '가사' 열·가사 싱크 화면·별도 가사 창에서 다룬다. -->
       </div>
 
       <!-- 실시간 오디오 제어 (2단 구성) -->
@@ -1550,6 +1515,8 @@
   <div id="context-menu" class="context-menu">
     <div class="context-menu-item" id="menu-play">재생</div>
     <div class="context-menu-item" id="menu-lyrics-view">가사보기</div>
+    <div class="context-menu-item" id="menu-queue">라이브 다음 곡에 담기</div>
+    <div class="context-menu-item" id="menu-lyric-sync">가사 싱크 수정</div>
     <div class="context-menu-item" id="menu-separate">MR 분리</div>
     <div class="context-menu-item" id="menu-delete-mr">MR 삭제</div>
     <div class="context-menu-item" id="menu-edit">정보 수정</div>

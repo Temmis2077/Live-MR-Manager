@@ -113,20 +113,8 @@ export function initAiListeners() {
     };
   }
 
-  if (elements.toggleLyric) {
-    elements.toggleLyric.onchange = async (e) => {
-      const enabled = e.target.checked;
-      state.lyricsEnabled = enabled;
-      localStorage.setItem("lyricsEnabled", enabled);
-      await toggleAiFeature("lyric", enabled);
-
-      if (enabled) {
-        getAppHandler('openLyricDrawer')?.();
-      } else {
-        getAppHandler('closeLyricDrawer')?.();
-      }
-    };
-  }
+  // '가사' 토글은 전송부에서 뺐다 — 가사는 표의 '가사' 열, 가사 싱크 화면,
+  // 별도 가사 창에서 다룬다.
 
   const aiModelSelect = document.getElementById("ai-model-select-dropdown");
   const aiModelDesc = document.getElementById("ai-model-desc");

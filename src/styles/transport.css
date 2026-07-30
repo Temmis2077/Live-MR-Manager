@@ -189,3 +189,21 @@ body.transport-slim .volume-inline-row .volume-slider {
 @media (prefers-reduced-motion: reduce) {
   .control-dock { transition-duration: 0.01ms !important; }
 }
+
+/* 보컬 믹스 — 팝오버에 숨어 있던 슬라이더를 전송부에 그대로 꺼냈다. */
+body.transport-slim .ai-item.mix-item {
+  gap: 8px !important;
+}
+
+body.transport-slim .mix-item .mini-range-slider {
+  width: 104px !important;
+  margin: 0 !important;
+}
+
+body.transport-slim .ai-mix-val {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  min-width: 30px;
+  text-align: right;
+}

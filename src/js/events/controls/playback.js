@@ -118,17 +118,8 @@ export function initPlaybackListeners() {
     if (elements.volSliderVal) setupDirectInput(elements.volSliderVal, elements.volSlider);
   }
 
-  const labelVocal = document.getElementById("label-vocal-balance");
-  const popoverVocal = document.getElementById("popover-vocal-balance");
+  // 믹스 슬라이더는 이제 전송부에 그대로 나와 있다(팝오버 제거).
   const vocalBalanceVal = document.getElementById("vocal-balance-val");
-
-  if (labelVocal && popoverVocal) {
-    labelVocal.onclick = (e) => {
-      e.stopPropagation();
-      if (elements.toggleVocal && elements.toggleVocal.disabled) return;
-      popoverVocal.classList.toggle("active");
-    };
-  }
 
   initDockMoreMenu();
 

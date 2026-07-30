@@ -4,16 +4,8 @@
 import { state } from '../../state.js';
 import { elements } from '../../ui/elements.js';
 
-export function initViewMode(updateViewMode) {
-  if (elements.viewGridBtn) {
-    elements.viewGridBtn.onclick = () => updateViewMode("grid");
-  }
-  if (elements.viewListBtn) {
-    elements.viewListBtn.onclick = () => updateViewMode("list");
-  }
-  if (elements.viewButtonBtn) {
-    elements.viewButtonBtn.onclick = () => updateViewMode("button");
-  }
+// 보기 모드 전환은 없앴다 — 표 한 가지만 쓴다. 선택 모드만 남는다.
+export function initViewMode() {
   initSelectionMode();
 }
 
@@ -84,28 +76,22 @@ function initSelectionMode() {
   }
 }
 
+/** 표 모드 하나만 남았지만, 목록 컨테이너의 클래스·표시는 여전히 맞춰 줘야
+ *  한다(다른 탭에서 돌아올 때 display가 none으로 남아 있을 수 있다). */
 export function createViewModeUpdater() {
-  const updateViewMode = (mode) => {
-    state.viewMode = mode;
-    localStorage.setItem("viewMode", mode);
-
-    if (elements.viewGridBtn) elements.viewGridBtn.classList.toggle("active", mode === "grid");
-    if (elements.viewListBtn) elements.viewListBtn.classList.toggle("active", mode === "list");
-    if (elements.viewButtonBtn) elements.viewButtonBtn.classList.toggle("active", mode === "button");
-
-    if (elements.viewport) elements.viewport.setAttribute("data-view-mode", mode);
-
+  const applyListMode = () => {
+    state.viewMode = "list";
+    if (elements.viewport) elements.viewport.setAttribute("data-view-mode", "list");
     if (elements.songGrid) {
-      elements.songGrid.classList.remove("grid-mode", "list-mode", "button-mode");
-      elements.songGrid.classList.add(`${mode}-mode`);
-      elements.songGrid.style.display = (mode === "list") ? "flex" : "grid";
+      elements.songGrid.classList.remove("grid-mode", "button-mode");
+      elements.songGrid.classList.add("list-mode");
+      elements.songGrid.style.display = "flex";
     }
-
     import('../../ui/library.js').then(({ renderLibrary }) => renderLibrary());
   };
 
-  initViewMode(updateViewMode);
-  return updateViewMode;
+  initViewMode();
+  return applyListMode;
 }
 
 export function initLibraryListeners(updateViewMode) {
@@ -206,7 +192,5 @@ export function initLibraryListeners(updateViewMode) {
     libSyncFilter.addEventListener("change", renderLibraryDeferred);
   }
 
-  if (updateViewMode) {
-    updateViewMode(state.viewMode || "grid");
-  }
+  if (updateViewMode) updateViewMode();
 }

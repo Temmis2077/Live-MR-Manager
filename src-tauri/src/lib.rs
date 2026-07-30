@@ -158,7 +158,7 @@ pub fn run() {
             library::get_audio_metadata, audio_commands::get_playback_state, 
             model_commands::check_ai_runtime, model_commands::check_model_ready, model_commands::download_ai_model, 
             library::save_library, library::load_library, library::get_songs, library::get_categories, library::get_genres, 
-            library::get_track_count, 
+            library::get_track_count, library::prune_unused_taxonomy,
             model_commands::cancel_separation, 
             model_commands::set_broadcast_mode,
             model_commands::get_mr_cache_format,

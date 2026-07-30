@@ -60,7 +60,7 @@ function stemCellHtml(song) {
  *  헤더와 행의 열 폭이 자동으로 일치한다(밖에 두면 패딩만큼 어긋난다). */
 export function renderListHeader() {
   const grid = elements.songGrid;
-  if (!grid || state.viewMode !== 'list') return;
+  if (!grid) return;
 
   const header = document.createElement('div');
   header.id = 'library-list-header';
@@ -68,6 +68,7 @@ export function renderListHeader() {
   header.innerHTML = `
     <div class="col col-info" data-sort="title" role="button" tabindex="0" title="제목순으로 정렬">곡 · 가수</div>
     <div class="col col-stems">스템 상태</div>
+    <div class="col col-lyrics">가사</div>
     <div class="col col-duration">길이</div>
     <div class="col col-keybpm">키 / BPM</div>
     <div class="col col-added" data-sort="dateNew" role="button" tabindex="0" title="추가일순으로 정렬">추가일</div>
@@ -144,26 +145,16 @@ export function renderLibrary() {
 
 export function addSongCard(song, index) {
   const card = document.createElement("article");
-  card.className = `song-card ${state.viewMode === "list" ? "list-row" : ""} ${state.viewMode === "button" ? "button-row" : ""}`;
+  // 보기 모드는 표 하나뿐이다 — 그리드·버튼 모드는 없앴다.
+  card.className = 'song-card list-row';
   card.dataset.path = song.path;
   card.dataset.index = index;
-  const isButton = state.viewMode === "button";
-  const isList = state.viewMode === "list";
 
   const thumbUrl = getThumbnailUrl(song.thumbnail, song);
-
-  // 가사 싱크 상태 배지 (싱크 완료/미싱크만 표시, 가사 없음은 생략해 과밀 방지)
-  const syncStatus = getLyricSyncStatus(song);
-  const syncBadge = syncStatus === 'synced'
-    ? `<span class="lyric-sync-badge synced" title="가사 싱크 완료">싱크</span>`
-    : (syncStatus === 'unsynced'
-        ? `<span class="lyric-sync-badge unsynced" title="가사만 있음 (미싱크)">미싱크</span>`
-        : '');
 
   card.innerHTML = `
     <div class="thumbnail">
       <img src="${thumbUrl}" alt="${song.title}" style="width:100%; height:100%; object-fit:cover;">
-      ${syncBadge}
       <div class="thumb-overlay">
         <svg class="icon-loading" viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="3">
           <circle cx="12" cy="12" r="10" stroke-opacity="0.2"/>
@@ -178,65 +169,23 @@ export function addSongCard(song, index) {
       </div>
     </div>
     
-    ${isButton ? (() => {
-      const activeTask = (state.activeTasks || {})[song.path];
-      let badgeHtml = "";
-      if (activeTask && activeTask.status !== "Finished") {
-        badgeHtml = `<span class="status-badge processing sm">ING</span>`;
-      } else if (song.isSeparated || song.is_separated || song.isMr || song.is_mr || song.mr_path) {
-        badgeHtml = `<span class="status-badge mr sm">MR</span>`;
-      }
-
-      return `
-      <div class="song-info-content button-layout">
-        <div class="col col-info">
-          <div class="song-name" title="${song.title || ''}">${song.title || '제목 정보 없음'}</div>
-          <div class="song-artist">${song.artist || '가수 정보 없음'}</div>
-        </div>
-        <div class="col col-status-duration">
-          <div class="status-badge-wrapper">${badgeHtml}</div>
-          <span class="duration-text">${song.duration || '--:--'}</span>
-        </div>
-      </div>
-      `;
-    })() : isList ? (() => {
-      // 표(리스트) 모드 — 많은 곡을 한눈에 비교·관리하는 용도.
-      // 열 구성은 renderListHeader()의 헤더와 CSS 그리드를 공유한다.
+    ${(() => {
+      // 표 한 가지뿐 — 열 구성은 renderListHeader()의 헤더와 CSS 그리드를 공유한다.
+      // 상태는 썸네일 위 배지가 아니라 각자의 열에서 보여준다.
+      const sync = getLyricSyncStatus(song);
+      const syncLabel = sync === 'synced' ? '싱크 완료' : (sync === 'unsynced' ? '가사만' : '없음');
       return `
         <div class="col col-info">
           <div class="song-name" title="${song.title || ''}">${song.title || '제목 정보 없음'}</div>
           <div class="song-artist-badge ${!song.artist ? 'no-info' : ''}">${song.artist || '가수 정보 없음'}${song.genre ? ` · ${song.genre}` : ''}</div>
         </div>
         <div class="col col-stems">${stemCellHtml(song)}</div>
+        <div class="col col-lyrics"><span class="lyric-cell ${sync}">${syncLabel}</span></div>
         <div class="col col-duration"><span class="duration-text">${song.duration || '--:--'}</span></div>
         <div class="col col-keybpm">${song.songKey || song.song_key || '-'} / ${song.bpm || '-'}</div>
         <div class="col col-added">${formatAddedDate(song.dateAdded ?? song.date_added)}</div>
         <div class="col col-status"><div class="status-badge-wrapper"></div></div>
         <div class="col col-more" title="더보기">⋯</div>
-      `;
-    })() : (() => {
-      const category = getSongCategory(song);
-      return `
-      <div class="song-info-content grid-layout">
-        <div class="song-name" title="${song.title || ''}">${song.title || '제목 정보 없음'}</div>
-        <div class="song-artist-badge ${!song.artist ? 'no-info' : ''}">${song.artist || '가수 정보 없음'}</div>
-        
-        <div class="metadata-row">
-          <div class="badge-group-inline">
-            ${category ? `<span class="category-badge">${category}</span>` : ''}
-            <span class="genre-badge ${!song.genre ? 'no-info' : ''}">${(song.genre || '미분류').toUpperCase()}</span>
-          </div>
-          <span class="duration-text">${song.duration || '--:--'}</span>
-        </div>
-
-        <div class="tag-row">
-          <div class="tag-container ${!song.tags || song.tags.length === 0 ? 'no-info' : ''}">
-            ${song.tags && song.tags.length > 0
-              ? song.tags.map(t => `<span class="tag-badge">${t}</span>`).join('')
-              : '<span class="tag-no-info">태그 정보 없음</span>'}
-          </div>
-        </div>
-      </div>
       `;
     })()}
   `;

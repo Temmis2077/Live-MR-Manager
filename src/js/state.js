@@ -11,7 +11,13 @@ export const state = {
   isSeparating: false,
   editingSongIndex: null,
   selectedTrackIndex: -1, // Currently highlighted but not playing
-  viewMode: localStorage.getItem("viewMode") || "grid",
+  // 보기 모드는 표 하나뿐이다 — 그리드·버튼 모드는 제거했다.
+  viewMode: "list",
+
+  // 라이브 '다음 곡' 큐 — 곡 경로 배열. 비어서 시작하고 사용자가 담는다
+  // (라이브러리 전체를 자동으로 밀어 넣지 않는다).
+  // 나중에 신청곡 연동이 붙어도 결국 이 배열에 들어온다.
+  liveQueue: JSON.parse(localStorage.getItem("liveQueue") || "[]"),
   themeMode: localStorage.getItem("themeMode") || "dark",
   masterVolume: (() => {
     const raw = parseFloat(localStorage.getItem("masterVolume") || "100");

@@ -415,10 +415,16 @@ export function updateAiTogglesState(song = null) {
     vocalItem.classList.toggle('disabled', !canToggleVocal);
   }
 
-  // If disabled, ensure balance popover is closed
-  if (!canToggleVocal) {
-    const popover = document.getElementById("popover-vocal-balance");
-    if (popover) popover.classList.remove("active");
+  // 믹스 슬라이더도 같이 잠근다 — 분리된 보컬이 없으면 섞을 것이 없다.
+  // (라이브 화면의 믹스는 여기에 걸리지 않는다. 두 화면의 조작은 독립이다.)
+  const mixInput = document.getElementById("vocal-balance");
+  if (mixInput) {
+    mixInput.disabled = !canToggleVocal;
+    const mixItem = mixInput.closest('.mix-item');
+    if (mixItem) {
+      mixItem.classList.toggle('disabled', !canToggleVocal);
+      mixItem.title = canToggleVocal ? "반주와 보컬을 섞는 비율" : "MR 분리를 먼저 해야 섞을 보컬이 생깁니다";
+    }
   }
 
   if (elements.toggleLyric) {
@@ -476,6 +482,8 @@ export function showSongContextMenu(e, song, originalIndex) {
   const menuLyricsView = document.getElementById("menu-lyrics-view");
   const menuEdit = document.getElementById("menu-edit");
   const menuDelete = document.getElementById("menu-delete");
+  const menuLyricSync = document.getElementById("menu-lyric-sync");
+  const menuQueue = document.getElementById("menu-queue");
   const inputSeparator = document.getElementById("menu-input-separator");
   const menuUndo = document.getElementById("menu-undo");
   const menuRedo = document.getElementById("menu-redo");
@@ -485,9 +493,31 @@ export function showSongContextMenu(e, song, originalIndex) {
   const menuSelectAll = document.getElementById("menu-select-all");
 
   // Song context: show song actions, hide text-input actions.
-  [menuSeparate, menuDeleteMr, menuEdit, menuDelete].forEach((el) => {
+  [menuSeparate, menuDeleteMr, menuEdit, menuDelete, menuLyricSync, menuQueue].forEach((el) => {
     if (el) el.style.display = "block";
   });
+
+  // 라이브 '다음 곡'에 담기 — 큐는 사용자가 직접 채운다.
+  if (menuQueue) {
+    menuQueue.onclick = async () => {
+      elements.contextMenu.classList.remove("active");
+      elements.contextMenu.style.display = 'none';
+      const { addToLiveQueue } = await import('../live-screen.js');
+      const { showNotification } = await import('../utils.js');
+      const added = addToLiveQueue(song.path);
+      showNotification(added ? `라이브 다음 곡에 담았습니다: ${song.title}` : '이미 담겨 있습니다.', added ? 'success' : 'info');
+    };
+  }
+
+  // 가사 싱크 수정 — 그 곡을 실은 채로 가사 싱크 화면으로 간다.
+  if (menuLyricSync) {
+    menuLyricSync.onclick = async () => {
+      elements.contextMenu.classList.remove("active");
+      elements.contextMenu.style.display = 'none';
+      const { openAlignmentForTrack } = await import('../events/navigation.js');
+      await openAlignmentForTrack(song.path, { forceLoad: true });
+    };
+  }
   // 재생/가사 보기는 기본 숨김 — 카드 클릭/드로어로 대체 가능해 메뉴를
   // 단순하게 유지. 설정 > 재생에서 다시 켤 수 있음.
   if (menuPlay) menuPlay.style.display = localStorage.getItem('ctxMenuPlayEnabled') === 'true' ? "block" : "none";
@@ -697,7 +727,7 @@ export function updateCardStatusBadge(path, card = null) {
   const targetCard = card || Array.from(document.querySelectorAll('.song-card')).find(el => el.dataset.path === path);
   if (!targetCard) return;
 
-  const mode = state.viewMode || "grid";
+  const mode = "list"; // 표 한 가지뿐
   let parent;
   
   if (mode === "grid") {

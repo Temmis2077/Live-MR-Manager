@@ -129,21 +129,15 @@ export function switchTab(tabId) {
   }
 
   if (elements.songGrid) {
-    const isFlexMode = (state.viewMode === "list");
-    // Use !important to override CSS !important when hiding
+    // 보기 모드는 표 하나뿐이다.
     if (isMusicTab) {
       elements.songGrid.style.removeProperty("display");
-      elements.songGrid.style.display = isFlexMode ? "flex" : "grid";
+      elements.songGrid.style.display = "flex";
     } else {
       elements.songGrid.style.setProperty("display", "none", "important");
     }
-
-    elements.songGrid.classList.toggle("list-mode", state.viewMode === "list");
-    elements.songGrid.classList.toggle("button-view", state.viewMode === "button");
-
-    if (elements.viewport) {
-      elements.viewport.setAttribute("data-view-mode", state.viewMode);
-    }
+    elements.songGrid.classList.add("list-mode");
+    if (elements.viewport) elements.viewport.setAttribute("data-view-mode", "list");
     if (isMusicTab) renderLibrary();
   }
 

@@ -9,16 +9,18 @@
  * 따로 만들지 않고, 이미 있는 도크의 슬라이더(pitch/tempo/보컬 밸런스/마스터 볼륨)를
  * 그대로 조작한다. 그러면 백엔드 호출·설정 저장·도크 UI 동기화가 기존 경로로
  * 한 번에 처리되고, 두 화면의 값이 어긋날 일이 없다.
- * (시안의 '가사 타이밍' 카드는 대응하는 기능이 앱에 없어, 실제로 동작하는
- *  '가이드 보컬'로 대체했다 — 눌러도 아무 일 없는 버튼을 두지 않기 위해.)
+ * 예외 — 반주↔가이드 보컬 믹스는 도크 입력을 거치지 않고 백엔드를 직접 부른다.
+ * 도크의 '보컬' 토글이 꺼져 있으면 그 입력이 잠겨서, 라이브에서 믹스를 만질 수
+ * 없었기 때문이다. 두 화면의 조작이 서로를 막아서는 안 된다.
  */
 import { state } from './state.js';
 import { invoke } from './tauri-bridge.js';
 import { formatTime, getThumbnailUrl } from './utils.js';
 
 const WAVE_BARS = 84;
-/** 반주(MR) 페이더는 도크에 대응 슬라이더가 없어 여기서 값을 들고 저장한다. */
-const MR_FADER_KEY = 'liveMrFader';
+/** 반주 ↔ 가이드 보컬 믹스(0 = 반주만, 100 = 보컬 100). 라이브가 값을 들고
+ *  저장한다 — 음원 관리의 '보컬' 토글에 잠기지 않고 독립적으로 조작되어야 한다. */
+const MIX_KEY = 'liveVocalMix';
 
 let initialized = false;
 let tickTimer = null;
@@ -26,6 +28,28 @@ let waveEls = [];
 let waveSeedPath = null;
 
 const $ = (id) => document.getElementById(id);
+
+function saveQueue() {
+  try { localStorage.setItem('liveQueue', JSON.stringify(state.liveQueue || [])); } catch (_) {}
+}
+
+/** 라이브 '다음 곡'에 담는다. 이미 있으면 중복으로 넣지 않는다. */
+export function addToLiveQueue(path) {
+  if (!path) return false;
+  if (!Array.isArray(state.liveQueue)) state.liveQueue = [];
+  if (state.liveQueue.includes(path)) return false;
+  state.liveQueue.push(path);
+  saveQueue();
+  renderLiveQueue();
+  return true;
+}
+
+export function removeFromLiveQueue(path) {
+  if (!Array.isArray(state.liveQueue)) return;
+  state.liveQueue = state.liveQueue.filter((p) => p !== path);
+  saveQueue();
+  renderLiveQueue();
+}
 
 /** 곡 경로로 고정된 파형 모양을 만든다 — 같은 곡이면 항상 같은 그림이라
  *  재생 위치만 채워지는 것처럼 보인다(실제 파형 해석은 가사 싱크 탭에 있다). */
@@ -56,11 +80,6 @@ function buildWave(path) {
     .join('');
   waveEls = Array.from(wrap.children);
   waveSeedPath = path;
-}
-
-function readMrFader() {
-  const raw = parseFloat(localStorage.getItem(MR_FADER_KEY) || '100');
-  return Number.isFinite(raw) ? Math.max(0, Math.min(100, raw)) : 100;
 }
 
 /** 도크 슬라이더를 프로그램적으로 움직인다 — input 이벤트를 직접 쏴서
@@ -158,19 +177,14 @@ function tick() {
     tempoEl.classList.toggle('changed', tempoPct !== 100);
   }
 
-  const guide = parseFloat($('vocal-balance')?.value ?? '0') || 0;
-  const guideEl = $('live-guide-val');
-  if (guideEl) {
-    guideEl.textContent = String(Math.round(guide));
-    guideEl.classList.toggle('changed', Math.round(guide) !== 0);
-  }
-
-  const mr = readMrFader();
-  const mrVal = $('live-mr-val');
-  const mrFill = $('live-mr-fill');
-  if (mrVal) mrVal.textContent = String(Math.round(mr));
-  if (mrFill) mrFill.style.width = `${mr}%`;
-  $('live-mr-track')?.setAttribute('aria-valuenow', String(Math.round(mr)));
+  // 반주 ↔ 가이드 보컬 믹스 (0 = 반주만, 100 = 보컬 100)
+  const savedMix = Number(localStorage.getItem(MIX_KEY));
+  const mix = Number.isFinite(savedMix) ? Math.max(0, Math.min(100, savedMix)) : 0;
+  const mixVal = $('live-mix-val');
+  const mixFill = $('live-mix-fill');
+  if (mixVal) mixVal.textContent = String(mix);
+  if (mixFill) mixFill.style.width = `${mix}%`;
+  $('live-mix-track')?.setAttribute('aria-valuenow', String(mix));
 
   const mon = parseFloat($('master-volume-slider')?.value ?? '100') || 0;
   const monVal = $('live-mon-val');
@@ -184,27 +198,28 @@ function tick() {
   $('live-wave')?.setAttribute('aria-valuenow', String(Math.round(ratio * 100)));
 }
 
-/** 오른쪽 '다음 곡' 목록 — 지금 라이브러리 필터가 적용된 순서를 그대로 쓴다. */
+/** 오른쪽 '다음 곡' 목록.
+ *
+ *  라이브러리 전체를 자동으로 밀어 넣지 않는다 — 방송에서 부를 곡은
+ *  라이브러리에 있는 곡 전부가 아니라 그날 고른 몇 곡이다. 비어 있는 채로
+ *  시작하고 사용자가 담는다(docs/UI_DESIGN_GUIDELINES.md).
+ *  나중에 신청곡 연동으로 자동으로 붙는 것도 이 큐에 들어온다. */
 export function renderLiveQueue() {
   const listEl = $('live-queue-list');
   const countEl = $('live-queue-count');
   if (!listEl) return;
 
-  const tracks = (state.filteredTracks && state.filteredTracks.length)
-    ? state.filteredTracks
-    : (state.songLibrary || []).map((s, i) => ({ ...s, originalIndex: i }));
+  const queue = state.liveQueue || [];
+  const byPath = new Map((state.songLibrary || []).map((s, i) => [s.path, { ...s, originalIndex: i }]));
+  // 라이브러리에서 사라진 곡은 큐에서도 조용히 뺀다.
+  const ordered = queue.map((p) => byPath.get(p)).filter(Boolean);
 
   const curPath = state.currentTrack?.path;
-  const curIdx = tracks.findIndex((t) => t.path === curPath);
-  // 현재 곡 다음부터 이어서 보여준다(끝나면 처음으로 돌아가는 재생 순서와 동일).
-  const ordered = curIdx >= 0
-    ? tracks.slice(curIdx).concat(tracks.slice(0, curIdx))
-    : tracks;
 
-  if (countEl) countEl.textContent = `${tracks.length}곡`;
+  if (countEl) countEl.textContent = `${ordered.length}곡`;
 
   if (ordered.length === 0) {
-    listEl.innerHTML = '<div class="live-q-empty">라이브러리가 비어 있습니다.<br>아래 “노래 추가”로 곡을 넣어 주세요.</div>';
+    listEl.innerHTML = '<div class="live-q-empty">다음 곡이 비어 있습니다.<br>음원 관리에서 곡을 골라 담아 주세요.</div>';
     return;
   }
 
@@ -311,33 +326,79 @@ export function initLiveScreen() {
   $('live-tempo-up')?.addEventListener('click', () => stepSlider('tempo-slider', +0.05, { decimals: 2 }));
   $('live-tempo-val')?.addEventListener('click', () => driveSlider('tempo-slider', '1.00'));
 
-  $('live-guide-down')?.addEventListener('click', () => stepSlider('vocal-balance', -10, {}));
-  $('live-guide-up')?.addEventListener('click', () => stepSlider('vocal-balance', +10, {}));
-  $('live-guide-val')?.addEventListener('click', () => driveSlider('vocal-balance', 0));
-
-  // ── 볼륨 막대 (클릭한 지점 비율로 설정)
-  const barRatio = (trackEl, e) => {
-    const rect = trackEl.getBoundingClientRect();
-    return Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+  // ── 반주 ↔ 가이드 보컬 믹스
+  //
+  // 예전에는 '가이드 보컬'(도크의 vocal-balance)과 '반주 소리'(inst 페이더)를
+  // 따로 조절했다. 둘은 결국 같은 믹스의 양쪽 끝이라 하나의 막대로 합쳤다.
+  //
+  // 도크의 vocal-balance 입력을 거치지 않고 백엔드를 직접 부른다 — 예전에는
+  // 음원 관리의 '보컬' 토글이 꺼져 있으면 그 입력이 잠겨서, 라이브에서
+  // 믹스를 못 만졌다. 두 화면의 조작이 서로를 막지 않아야 한다.
+  const readMix = () => {
+    const saved = Number(localStorage.getItem(MIX_KEY));
+    return Number.isFinite(saved) ? Math.max(0, Math.min(100, saved)) : 0;
   };
 
-  const applyMr = async (pct) => {
+  const applyMix = async (pct) => {
     const v = Math.max(0, Math.min(100, Math.round(pct)));
-    localStorage.setItem(MR_FADER_KEY, String(v));
+    localStorage.setItem(MIX_KEY, String(v));
     try {
-      await invoke('set_track_fader', { track: 'inst', percent: v });
+      await invoke('set_vocal_balance', { balance: v });
     } catch (err) {
-      console.error('[Live] set_track_fader failed:', err);
+      console.error('[Live] set_vocal_balance failed:', err);
+    }
+    // 음원 관리 쪽 표시도 같은 값으로 맞춘다(소리는 하나뿐이라 값은 공유한다).
+    const dockInput = $('vocal-balance');
+    if (dockInput) {
+      dockInput.value = String(v);
+      const label = $('vocal-balance-val');
+      if (label) label.textContent = `${v}%`;
     }
     tick();
   };
 
-  $('live-mr-track')?.addEventListener('click', (e) => {
-    applyMr(barRatio(e.currentTarget, e) * 100);
-  });
-  $('live-mr-track')?.addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowRight') { e.preventDefault(); applyMr(readMrFader() + 5); }
-    else if (e.key === 'ArrowLeft') { e.preventDefault(); applyMr(readMrFader() - 5); }
+  // ── 막대 조절 — 클릭뿐 아니라 끌어서도 바뀌게 (포인터 드래그)
+  const barRatio = (trackEl, clientX) => {
+    const rect = trackEl.getBoundingClientRect();
+    return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+  };
+
+  /** 막대 하나를 드래그 가능한 슬라이더로 만든다. 키보드 조작은 그대로. */
+  const makeDraggable = (trackEl, max, apply) => {
+    if (!trackEl) return;
+    let dragging = false;
+
+    const setFrom = (clientX) => apply(barRatio(trackEl, clientX) * max);
+
+    trackEl.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 && e.pointerType === 'mouse') return;
+      dragging = true;
+      // 포인터를 잡아 두면 막대 밖으로 나가도 계속 따라온다.
+      trackEl.setPointerCapture(e.pointerId);
+      trackEl.classList.add('dragging');
+      setFrom(e.clientX);
+      e.preventDefault();
+    });
+
+    trackEl.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      setFrom(e.clientX);
+    });
+
+    const stop = (e) => {
+      if (!dragging) return;
+      dragging = false;
+      trackEl.classList.remove('dragging');
+      try { trackEl.releasePointerCapture(e.pointerId); } catch (_) {}
+    };
+    trackEl.addEventListener('pointerup', stop);
+    trackEl.addEventListener('pointercancel', stop);
+  };
+
+  makeDraggable($('live-mix-track'), 100, applyMix);
+  $('live-mix-track')?.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight') { e.preventDefault(); applyMix(readMix() + 5); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); applyMix(readMix() - 5); }
   });
 
   // 마스터 볼륨은 0~120 범위라 막대 100%가 120에 대응한다.
@@ -347,9 +408,7 @@ export function initLiveScreen() {
   };
   const curMon = () => parseFloat($('master-volume-slider')?.value ?? '100') || 0;
 
-  $('live-mon-track')?.addEventListener('click', (e) => {
-    applyMon(barRatio(e.currentTarget, e) * 120);
-  });
+  makeDraggable($('live-mon-track'), 120, applyMon);
   $('live-mon-track')?.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowRight') { e.preventDefault(); applyMon(curMon() + 5); }
     else if (e.key === 'ArrowLeft') { e.preventDefault(); applyMon(curMon() - 5); }
@@ -386,10 +445,10 @@ export function initLiveScreen() {
     openAddSongModal();
   });
 
-  // 앱 시작 시 저장된 MR 페이더를 백엔드에 한 번 반영(재시작 후에도 유지되게).
-  const mr = readMrFader();
-  if (mr !== 100) {
-    invoke('set_track_fader', { track: 'inst', percent: mr }).catch(() => {});
+  // 앱 시작 시 저장된 믹스를 백엔드에 한 번 반영(재시작 후에도 유지되게).
+  const savedMix = readMix();
+  if (savedMix !== 0) {
+    invoke('set_vocal_balance', { balance: savedMix }).catch(() => {});
   }
 }
 

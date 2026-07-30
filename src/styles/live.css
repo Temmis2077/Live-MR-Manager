@@ -742,3 +742,28 @@
   border-top: 1px solid var(--glass-border);
   margin-top: 4px;
 }
+
+/* 막대는 클릭만이 아니라 끌어서도 조절된다 — 포인터를 잡아 두므로
+   막대 밖으로 나가도 따라온다. */
+.live-vol-track {
+  cursor: pointer;
+  touch-action: none; /* 드래그가 스크롤로 가로채이지 않게 */
+}
+
+.live-vol-track.dragging,
+.live-vol-track:hover {
+  border-color: rgb(var(--accent-rgb) / 0.5);
+}
+
+.live-vol-track.dragging .live-vol-fill {
+  filter: brightness(1.12);
+}
+
+/* 믹스 막대 양 끝 라벨 — 어느 쪽이 반주이고 어느 쪽이 보컬인지 */
+.live-vol-scale {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-size: 0.64rem;
+  color: var(--text-dim);
+}

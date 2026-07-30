@@ -383,6 +383,52 @@ pub async fn get_genres() -> Result<Vec<crate::types::Genre>, String> {
     Ok(res)
 }
 
+/// 어느 트랙도 쓰지 않는 장르·카테고리 행을 지운다.
+///
+/// 옛 스키마의 영문 슬러그(jpop, rock, ballad …)와 표준화 과정에서 중복이 된
+/// 한글 값(록, 인디 록, 포크)이 0곡짜리로 남아 있었다. get_genres/get_categories가
+/// 트랙이 붙은 것만 돌려주므로 화면에는 안 보이지만, 이름이 겹치는 새 값을
+/// 넣을 때 걸리적거리고 DB를 읽을 때 헷갈린다.
+///
+/// 이름이 비어 있는 행도 함께 정리한다(빈 장르 ''가 실제로 있었다).
+/// 트랙이 하나라도 붙어 있으면 지우지 않는다.
+#[tauri::command]
+pub async fn prune_unused_taxonomy() -> Result<(u32, u32), String> {
+    let db = DB.lock();
+
+    // 빈 이름 장르를 참조하는 트랙은 먼저 '장르 없음'으로 풀어 준다.
+    db.execute(
+        "UPDATE Tracks SET genre_id = NULL
+         WHERE genre_id IN (SELECT id FROM Genres WHERE TRIM(COALESCE(name, '')) = '')",
+        [],
+    )
+    .map_err(to_sqlite_err)?;
+
+    let genres = db
+        .execute(
+            "DELETE FROM Genres
+             WHERE id NOT IN (SELECT genre_id FROM Tracks WHERE genre_id IS NOT NULL)",
+            [],
+        )
+        .map_err(to_sqlite_err)? as u32;
+
+    // 카테고리는 매핑 테이블과 Tracks.curation_category 두 곳에서 쓰인다.
+    let categories = db
+        .execute(
+            "DELETE FROM Categories
+             WHERE id NOT IN (SELECT category_id FROM Track_Category_Map)
+               AND TRIM(COALESCE(name, '')) NOT IN (
+                   SELECT TRIM(COALESCE(curation_category, '')) FROM Tracks
+                   WHERE curation_category IS NOT NULL
+               )",
+            [],
+        )
+        .map_err(to_sqlite_err)? as u32;
+
+    println!("[Taxonomy] 미사용 정리: 장르 {genres}개, 카테고리 {categories}개");
+    Ok((genres, categories))
+}
+
 #[tauri::command]
 pub async fn add_category(name: String) -> Result<i64, String> {
     let db = DB.lock();

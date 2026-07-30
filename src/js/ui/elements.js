@@ -37,9 +37,6 @@ export const elements = {
   vocalBalance: null,
   toggleVocal: null,
   toggleLyric: null,
-  viewGridBtn: null,
-  viewListBtn: null,
-  viewButtonBtn: null,
   btnResetAudio: null,
   ytFetchBtn: null,
   ytUrlInput: null,
@@ -154,9 +151,6 @@ export function initDomReferences() {
   elements.volSlider = document.getElementById("master-volume-slider");
   elements.volSliderVal = document.getElementById("master-volume-val");
   elements.vocalBalance = document.getElementById("vocal-balance");
-  elements.viewGridBtn = document.getElementById("view-grid");
-  elements.viewListBtn = document.getElementById("view-list");
-  elements.viewButtonBtn = document.getElementById("view-button");
   elements.ytFetchBtn = document.getElementById("yt-fetch-btn");
   elements.ytUrlInput = document.getElementById("yt-url-input");
   elements.btnPrev = document.getElementById("btn-prev");

@@ -4,10 +4,10 @@
    변경할 때는 두 규칙을 함께 수정한다. */
 
 :root {
-  /* 곡·가수 / 스템 / 길이 / 키·BPM / 추가일 / 상태 / 더보기
+  /* 곡·가수 / 스템 / 가사 / 길이 / 키·BPM / 추가일 / 상태 / 더보기
      3단 레이아웃(좌 보관함 + 우 인스펙터) 안에서도 스템 열이 살아남도록
      고정 열은 내용이 들어가는 최소치로 잡았다. */
-  --lib-table-cols: minmax(200px, 1fr) 112px 52px 84px 68px 88px 30px;
+  --lib-table-cols: minmax(200px, 1fr) 112px 68px 52px 84px 68px 88px 30px;
 }
 
 body .song-grid.list-mode {
@@ -193,6 +193,37 @@ body .song-grid.list-mode .song-card.list-row .col-added {
   color: var(--text-dim) !important;
 }
 
+/* 가사 — 예전엔 썸네일 위에 배지로 얹었다. 표에서는 자기 열에서 보여준다
+   (이미지를 가리지 않고, 없는 곡도 '없음'으로 한눈에 비교된다). */
+body .song-grid.list-mode .song-card.list-row .col-lyrics {
+  display: flex !important;
+  align-items: center !important;
+  min-width: 0 !important;
+}
+
+.lyric-cell {
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 5px;
+  white-space: nowrap;
+  border: 1px solid var(--glass-border);
+  background: var(--surface-2);
+  color: var(--text-dim);
+}
+
+.lyric-cell.synced {
+  background: rgb(var(--accent-rgb) / 0.16);
+  color: var(--accent-secondary);
+  border-color: rgb(var(--accent-rgb) / 0.32);
+}
+
+.lyric-cell.unsynced {
+  background: rgba(245, 158, 11, 0.14);
+  color: #fcd34d;
+  border-color: rgba(245, 158, 11, 0.32);
+}
+
 /* 상태 배지 */
 body .song-grid.list-mode .song-card.list-row .col-status {
   display: flex !important;
@@ -240,20 +271,26 @@ body .song-grid.list-mode .song-card.list-row .col-more {
    각 임계값은 그 조합의 열 합계 + gap + 패딩으로 계산한 값이다. */
 /* 각 임계값 = (그 조합의 열 합계 + 52px 썸네일 칸 + gap 12px×n + 행 좌우 패딩
    28px + 그리드 좌우 패딩 32px). 그 폭을 못 주면 뒤쪽 열을 하나 접는다. */
-@container libcenter (max-width: 829px) {
-  .song-grid { --lib-table-cols: minmax(190px, 1fr) 112px 52px 84px 88px 30px; }
+@container libcenter (max-width: 909px) {
+  .song-grid { --lib-table-cols: minmax(190px, 1fr) 112px 68px 52px 84px 88px 30px; }
   .library-list-header .col-added,
   body .song-grid.list-mode .song-card.list-row .col-added { display: none !important; }
 }
 
-@container libcenter (max-width: 729px) {
-  .song-grid { --lib-table-cols: minmax(160px, 1fr) 112px 52px 88px 30px; }
+@container libcenter (max-width: 809px) {
+  .song-grid { --lib-table-cols: minmax(170px, 1fr) 112px 68px 52px 88px 30px; }
   .library-list-header .col-keybpm,
   body .song-grid.list-mode .song-card.list-row .col-keybpm { display: none !important; }
 }
 
-@container libcenter (max-width: 613px) {
-  .song-grid { --lib-table-cols: minmax(160px, 1fr) 52px 88px 30px; }
+@container libcenter (max-width: 693px) {
+  .song-grid { --lib-table-cols: minmax(160px, 1fr) 68px 52px 88px 30px; }
   .library-list-header .col-stems,
   body .song-grid.list-mode .song-card.list-row .col-stems { display: none !important; }
+}
+
+@container libcenter (max-width: 613px) {
+  .song-grid { --lib-table-cols: minmax(160px, 1fr) 52px 88px 30px; }
+  .library-list-header .col-lyrics,
+  body .song-grid.list-mode .song-card.list-row .col-lyrics { display: none !important; }
 }
