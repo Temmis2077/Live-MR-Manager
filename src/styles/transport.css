@@ -1,0 +1,142 @@
+/* 하단 전송부 — 화면별로 다르게 (시안 방향)
+   시안에는 하단 고정 재생바가 없다. 라이브는 본문에 자기 전송부가 있고,
+   음원 관리·가사 싱크는 곡을 확인하며 듣는 게 필요하므로 얇은 전송 스트립만
+   남긴다. 소비용 음악 플레이어 장식(큰 앨범아트, 곡 메뉴, 공연용 피치·템포
+   패널)은 여기서 걷어낸다.
+
+   중요 — dock의 슬라이더는 live-screen.js가 실제로 조작하는 백엔드다
+   (pitch-slider / tempo-slider / vocal-balance / master-volume-slider).
+   그래서 DOM에서 지우지 않고 숨기기만 한다. 숨은 input도 value 대입과
+   input 이벤트는 그대로 동작한다. */
+
+/* 높이는 --dock-height 하나로 관리한다 — 본문 아래 여백, 가사 서랍 위치,
+   모달 여백이 모두 이 변수를 보고 있어서 여기만 바꾸면 전부 따라온다. */
+body.view-live { --dock-height: 0px; }
+body.transport-slim { --dock-height: 60px; }
+
+.control-dock {
+  height: var(--dock-height) !important;
+  /* 원래 transition: all 0.3s 였다. 화면을 바꿀 때마다 바 높이가 눈에 보이게
+     늘었다 줄었다 하고(정보를 주지 않는 움직임), height 트랜지션이 걸린 동안은
+     레이아웃 값도 중간값으로 남는다. 색만 부드럽게 바꾼다. */
+  transition: background-color 0.18s ease, border-color 0.18s ease !important;
+}
+
+/* ── 라이브: 하단 전송부 없음 ───────────────────────────── */
+body.view-live .control-dock {
+  display: none !important;
+}
+
+/* ── 음원 관리 · 가사 싱크 · 그 밖: 얇은 전송 스트립 ────── */
+body.transport-slim .control-dock {
+  /* 떠 있는 유리판 느낌을 줄여 '플레이어'보다 도구처럼 보이게 */
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: none !important;
+  background: var(--sidebar-bg) !important;
+}
+
+body.transport-slim .dock-inner {
+  gap: 14px !important;
+  padding: 0 16px !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  align-items: center !important;
+}
+
+/* 60px 안에 두 줄(컨트롤+제목 / 진행바+시간)이 들어가도록 각 줄을 눌러 준다.
+   안 그러면 dock-inner가 84px로 남아 스트립을 넘친다. */
+body.transport-slim .playing-details {
+  gap: 3px !important;
+  min-height: 0 !important;
+  justify-content: center !important;
+}
+
+body.transport-slim .playing-top-row,
+body.transport-slim .playing-bottom-row {
+  min-height: 0 !important;
+}
+
+body.transport-slim .playing-top-row {
+  height: 30px !important;
+}
+
+body.transport-slim .playing-bottom-row {
+  height: 16px !important;
+}
+
+/* 걷어내는 것들 — 앨범아트, 공연용 피치·템포 패널, 곡 메뉴 */
+body.transport-slim .mini-thumb,
+body.transport-slim .audio-panel .control-row,
+body.transport-slim .dock-more,
+body.transport-slim .status-msg-dock {
+  display: none !important;
+}
+
+/* 곡 제목은 표·인스펙터가 이미 크게 보여준다. 여기선 한 줄 라벨 크기로. */
+body.transport-slim .control-dock .song-name {
+  font-size: 0.84rem !important;
+  font-weight: 700 !important;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.transport-slim .control-dock .song-artist {
+  font-size: 0.72rem !important;
+  color: var(--text-dim) !important;
+}
+
+body.transport-slim .playing-details {
+  gap: 2px !important;
+}
+
+body.transport-slim .playing-top-row {
+  gap: 10px !important;
+}
+
+body.transport-slim .playing-bottom-row {
+  gap: 10px !important;
+}
+
+/* 재생 버튼도 리모컨 크기에서 도구 크기로 */
+body.transport-slim .control-dock .play-main-btn {
+  width: 32px !important;
+  height: 32px !important;
+}
+
+body.transport-slim .control-dock .control-btn {
+  width: 28px !important;
+  height: 28px !important;
+}
+
+/* 보컬·가사 스위치는 남긴다(기능이 여기에만 있다). 다만 60px에 맞게
+   세로 두 줄 → 가로 한 줄로 눕힌다. */
+body.transport-slim .ai-processing {
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 14px !important;
+  padding: 0 12px !important;
+}
+
+body.transport-slim .ai-processing .ai-item {
+  gap: 6px !important;
+}
+
+/* 볼륨은 남긴다 — 곡을 확인하며 듣는 데 필요하다. */
+body.transport-slim .audio-panel {
+  flex: none !important;
+}
+
+body.transport-slim .volume-inline-row {
+  gap: 8px !important;
+}
+
+body.transport-slim .volume-inline-row .volume-slider {
+  width: 96px !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .control-dock { transition-duration: 0.01ms !important; }
+}

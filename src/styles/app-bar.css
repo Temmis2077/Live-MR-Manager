@@ -1,0 +1,311 @@
+/* 앱 상단바 — 사이드바를 대체하는 단일 셸 (시안 구성).
+   [OSW 마크 | 현재 화면 ▾] … [화면별 컨트롤] [⚙] */
+
+/* 사이드바는 DOM에 남겨 두고 숨긴다 — nav-item 핸들러를 앱바가 재사용한다. */
+.sidebar {
+  display: none !important;
+}
+
+/* 사이드바가 없어졌으니 본문이 창 전체를 쓴다. */
+.viewport {
+  margin-left: 0 !important;
+}
+
+.app-bar {
+  height: 52px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  background: var(--sidebar-bg);
+  border-bottom: 1px solid var(--glass-border);
+  position: relative;
+  z-index: 40;
+}
+
+/* ── 브랜드 ─────────────────────────────────────────────── */
+.appbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.appbar-mark {
+  width: 22px;
+  height: 22px;
+}
+
+.appbar-word {
+  font-size: 0.9rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.appbar-beta {
+  font-size: 0.56rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  padding: 2px 5px;
+  border-radius: 4px;
+  color: var(--accent-secondary);
+  background: rgb(var(--accent-rgb) / 0.14);
+}
+
+.appbar-divider {
+  width: 1px;
+  height: 20px;
+  margin-left: 4px;
+  background: var(--glass-border);
+}
+
+/* ── 화면 전환 드롭다운 ─────────────────────────────────── */
+.appbar-switcher {
+  position: relative;
+  flex: none;
+}
+
+.appbar-screen-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 11px;
+  border-radius: 9px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-main);
+  background: var(--surface-1);
+  border: 1px solid var(--glass-border);
+  transition: background 0.18s, border-color 0.18s;
+}
+
+.appbar-screen-btn:hover {
+  background: var(--surface-2);
+  border-color: rgb(var(--accent-rgb) / 0.35);
+}
+
+.appbar-caret {
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid var(--text-dim);
+}
+
+.appbar-icon-btn {
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  cursor: pointer;
+  color: var(--text-muted);
+  background: var(--surface-1);
+  border: 1px solid var(--glass-border);
+  transition: background 0.18s, color 0.18s;
+}
+
+.appbar-icon-btn:hover {
+  background: var(--surface-2);
+  color: var(--text-main);
+}
+
+.appbar-screen-btn:focus-visible,
+.appbar-icon-btn:focus-visible,
+.appbar-menu-item:focus-visible {
+  outline: 2px solid var(--accent-secondary);
+  outline-offset: 2px;
+}
+
+/* 메뉴 */
+.appbar-menu {
+  display: none;
+  position: absolute;
+  top: 40px;
+  left: 0;
+  width: 264px;
+  padding: 6px;
+  border-radius: 12px;
+  background: var(--menu-bg, rgba(18, 18, 24, 0.98));
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.5);
+  z-index: 50;
+}
+
+.appbar-menu.open {
+  display: block;
+}
+
+.appbar-menu.align-right {
+  left: auto;
+  right: 0;
+}
+
+.appbar-menu-label {
+  padding: 7px 9px 5px;
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+}
+
+.appbar-menu-item {
+  display: block;
+  width: 100%;
+  padding: 9px 9px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.appbar-menu-item:hover:not([aria-disabled="true"]) {
+  background: var(--surface-1);
+}
+
+/* 현재 화면 — 색 외에 왼쪽 막대로도 표시한다(색상만으로 상태 표현 금지). */
+.appbar-menu-item.current {
+  background: rgb(var(--accent-rgb) / 0.12);
+  border-color: rgb(var(--accent-rgb) / 0.3);
+  box-shadow: inset 2px 0 0 0 var(--accent-primary);
+}
+
+.appbar-menu-item[aria-disabled="true"] {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.appbar-menu-item-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.appbar-menu-item-desc {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  line-height: 1.45;
+}
+
+.appbar-soon,
+.appbar-menu-badge {
+  font-size: 0.56rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--text-dim);
+  background: var(--surface-3);
+}
+
+.appbar-menu-badge {
+  display: none;
+}
+
+.appbar-menu-badge.on {
+  display: inline-block;
+  color: var(--accent-secondary);
+  background: rgb(var(--accent-rgb) / 0.16);
+}
+
+/* ── 화면별 컨트롤 자리 ─────────────────────────────────── */
+.appbar-center {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.appbar-right {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 라이브러리 컨트롤은 앱바 높이에 맞춰 납작하게 — 원래 규칙을 덮어쓴다. */
+.app-bar .search-bar {
+  flex: 1;
+  min-width: 0;
+  max-width: 380px;
+  height: 34px !important;
+  margin: 0 !important;
+}
+
+.app-bar .filter-group {
+  gap: 6px !important;
+  margin: 0 !important;
+  flex: none;
+}
+
+.app-bar .custom-select .select-trigger {
+  height: 34px !important;
+}
+
+.app-bar #view-controls {
+  gap: 4px;
+}
+
+/* '노래 추가'는 사이드바의 큰 버튼에서 앱바의 주 버튼으로 */
+.nav-item.appbar-add-song {
+  display: flex !important;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 13px !important;
+  margin: 0 !important;
+  width: auto !important;
+  border-radius: 9px !important;
+  background: var(--accent-gradient) !important;
+  border: none !important;
+  color: #fff !important;
+  font-size: 0.78rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.nav-item.appbar-add-song span {
+  font-size: 0.78rem !important;
+  font-weight: 800 !important;
+}
+
+/* 화면 이름·부제는 앱바가 대신 알려주므로 옛 제목 줄과 컨트롤 띠를 걷어낸다.
+   (안에 있던 요소들은 initAppBar가 앱바로 옮겨 놓았다) */
+.top-bar,
+.page-controls-wrapper {
+  display: none !important;
+}
+
+/* 검색·필터는 곡 목록이 있는 화면에서만 의미가 있다. */
+#app-bar:not([data-view="library"]):not([data-view="meloming"]) .appbar-center {
+  display: none;
+}
+
+/* 좁은 창에서는 필터부터 접는다 — 검색과 노래 추가가 먼저 살아남아야 한다. */
+@media (max-width: 1180px) {
+  .app-bar .filter-group { display: none !important; }
+}
+
+@media (max-width: 1000px) {
+  .appbar-word,
+  .appbar-beta { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-bar *,
+  .appbar-menu * { transition-duration: 0.01ms !important; }
+}

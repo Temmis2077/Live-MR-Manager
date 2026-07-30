@@ -54,6 +54,14 @@ export function initNavigation() {
 export function switchTab(tabId) {
   state.activeView = tabId;
 
+  // 앱바가 현재 화면 이름과 화면별 컨트롤 노출을 맞춘다(사이드바 대체).
+  import('../ui/app-bar.js').then((m) => m.syncAppBar(tabId)).catch(() => {});
+
+  // 하단 전송부는 화면마다 다르다 — 라이브는 본문에 자기 전송부가 있어 숨기고,
+  // 나머지는 얇은 스트립만 남긴다(styles/transport.css).
+  document.body.classList.toggle('view-live', tabId === 'live');
+  document.body.classList.toggle('transport-slim', tabId !== 'live');
+
   if (elements.viewTitle) elements.viewTitle.textContent = getTabTitle(tabId);
 
   // Sync viewport data-view attribute for CSS selectors
