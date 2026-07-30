@@ -13,9 +13,12 @@ OSW는 MIT 라이선스로 배포됩니다. 이 문서는 OSW가 함께 배포�
 
 ## 1. OSW가 기반한 프로젝트
 
+OSW는 아래 프로젝트에서 갈라져 나온 **별개의 앱**입니다. 원본의 모드(개조판)가
+아니며, 설치·데이터·업데이트가 모두 분리되어 있습니다.
+
 | 프로젝트 | 라이선스 | 비고 |
 | --- | --- | --- |
-| [AutumnColor77/Live-MR-Manager](https://github.com/AutumnColor77/Live-MR-Manager) | MIT | 초기 오디오 엔진·AI 분리·라이브러리·OBS 오버레이의 설계·구현. MIT 조건에 따라 저작권 표시를 `LICENSE`에 함께 싣습니다. |
+| [AutumnColor77/Live-MR-Manager](https://github.com/AutumnColor77/Live-MR-Manager) | MIT | 초기 오디오 엔진·AI 분리·라이브러리·OBS 오버레이의 설계·구현. 이후 전면 재작성했으나, MIT 조건에 따라 저작권 표시를 `LICENSE`에 함께 싣습니다. |
 
 ---
 
@@ -129,4 +132,4 @@ OSW는 곡 정보와 가사를 채우기 위해 아래 서비스에 요청을 �
 ## 7. 문의
 
 빠진 고지나 잘못된 표기를 발견하면
-[이슈](https://github.com/Temmis2077/Live-MR-Manager-Mod/issues)로 알려주세요.
+[이슈](https://github.com/Temmis2077/OSW/issues)로 알려주세요.

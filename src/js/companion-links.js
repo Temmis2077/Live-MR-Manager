@@ -2,7 +2,7 @@
  * Companion 웹·GitHub Issues·Discord URL (앱 설정 링크용)
  * web/companion/lib/site.ts 와 동기화 유지
  */
-export const GITHUB_REPO = 'Temmis2077/Live-MR-Manager-Mod';
+export const GITHUB_REPO = 'Temmis2077/OSW';
 export const COMPANION_BASE = 'https://lmrm.vercel.app';
 
 export const FAQ_URL = `${COMPANION_BASE}/faq`;

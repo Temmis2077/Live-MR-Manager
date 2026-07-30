@@ -10,7 +10,7 @@ import {
 import { refreshModelDropdown } from './ai.js';
 import { MODEL_CATALOG } from '../../model-catalog.js';
 
-const GUIDE_URL = 'https://github.com/Temmis2077/Live-MR-Manager-Mod/blob/main/docs/CUSTOM_MODELS.md';
+const GUIDE_URL = 'https://github.com/Temmis2077/OSW/blob/main/docs/CUSTOM_MODELS.md';
 
 let presetsCache = [];
 

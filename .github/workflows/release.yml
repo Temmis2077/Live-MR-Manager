@@ -52,7 +52,7 @@ jobs:
             **Windows용 NSIS 설치 파일**을 다운로드하세요. 처음 실행하면 이전 버전
             (Live MR Manager) 데이터를 가져올지 물어봅니다.
 
-            상세 변경 사항: [RELEASE_NOTES.md](https://github.com/Temmis2077/Live-MR-Manager-Mod/blob/main/RELEASE_NOTES.md)
+            상세 변경 사항: [RELEASE_NOTES.md](https://github.com/Temmis2077/OSW/blob/main/RELEASE_NOTES.md)
           releaseDraft: true
           prerelease: true
           args: "--verbose ${{ matrix.bundleArgs }}"

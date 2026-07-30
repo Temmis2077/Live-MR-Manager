@@ -12,7 +12,7 @@
 ## 취약점 신고
 
 **공개 이슈로 올리지 말아 주세요.** GitHub의
-[Security advisories](https://github.com/Temmis2077/Live-MR-Manager-Mod/security/advisories/new)
+[Security advisories](https://github.com/Temmis2077/OSW/security/advisories/new)
 로 비공개 신고해 주시면 됩니다.
 
 알려 주시면 좋은 것:

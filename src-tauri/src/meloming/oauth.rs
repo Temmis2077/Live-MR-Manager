@@ -192,7 +192,7 @@ fn store_tokens(access: &str, refresh: Option<&str>, expires_in: i64) -> Result<
 
 fn token_http_client() -> reqwest::Client {
     reqwest::Client::builder()
-        .user_agent("Live-MR-Manager")
+        .user_agent("OSW")
         .build()
         .unwrap_or_else(|_| reqwest::Client::new())
 }

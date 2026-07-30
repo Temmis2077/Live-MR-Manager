@@ -1,7 +1,12 @@
 MIT License
 
 Copyright (c) 2026 Temmis2077 (OSW — Open Stem Wave)
-Copyright (c) 2026 AutumnColor77 (Live-MR-Manager, the project OSW is based on)
+Copyright (c) 2026 AutumnColor77 (Live-MR-Manager)
+
+OSW is a separate application derived from Live-MR-Manager. It is not a mod of,
+nor affiliated with, the original project; it is maintained independently. The
+copyright notice above is retained as required by the MIT License of the work
+OSW is based on.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

@@ -1,4 +1,4 @@
-export const GITHUB_REPO = "Temmis2077/Live-MR-Manager-Mod";
+export const GITHUB_REPO = "Temmis2077/OSW";
 export const GITHUB_RELEASES_URL = `https://github.com/${GITHUB_REPO}/releases`;
 export const GITHUB_ISSUES_URL = `https://github.com/${GITHUB_REPO}/issues`;
 

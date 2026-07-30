@@ -53,10 +53,12 @@ cd src-tauri && cargo test --lib
 grep -rn "releases/download" src-tauri/src/*.rs | grep -v yt-dlp
 ```
 
-> ⚠️ 정렬 모델은 `Temmis2077/Live-MR-Manager`, GPU 팩은
-> `Temmis2077/Live-MR-Manager-Mod`를 가리킵니다. **서로 다른 레포**입니다.
-> 레포 이름을 바꿀 계획이라면 GitHub의 리다이렉트에 기대지 말고 코드의 주소를
-> 함께 고치세요.
+> 자산은 전부 `Temmis2077/OSW` 한 레포에 있습니다. 코드의 주소도 이 레포를
+> 가리킵니다 — 레포 이름을 또 바꾼다면 GitHub 리다이렉트에 기대지 말고
+> 코드의 주소를 함께 고치세요(위 `grep`으로 확인).
+>
+> 현재 `gpu-pack-v1` 태그는 아직 없습니다. GPU 가속 팩을 쓰려면 이 태그와
+> 자산을 먼저 올려야 합니다.
 
 ## 6. 문서
 

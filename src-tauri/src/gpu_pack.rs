@@ -26,7 +26,7 @@ use crate::ffmpeg_tools::tools_cache_dir;
 /// 목록·크기·sha256을 알려준다. 앱 릴리즈와 분리된 고정 태그(gpu-pack-v1)에 두어
 /// 앱 재배포 없이 팩만 교체할 수 있게 한다.
 const GPU_PACK_MANIFEST_URL: &str =
-    "https://github.com/Temmis2077/Live-MR-Manager-Mod/releases/download/gpu-pack-v1/manifest.json";
+    "https://github.com/Temmis2077/OSW/releases/download/gpu-pack-v1/manifest.json";
 
 /// 설치가 진행 중인지(동시 설치 방지).
 static INSTALLING: AtomicBool = AtomicBool::new(false);
@@ -140,7 +140,7 @@ pub fn register_dll_search_path() {
 /// NVIDIA 재배포 조건(고지)을 충족하기 위한 NOTICE 파일을 팩 폴더에 쓴다.
 fn write_attribution_notice(dir: &Path) {
     let notice = "\
-This directory contains NVIDIA runtime libraries redistributed with Live MR Manager.
+This directory contains NVIDIA runtime libraries redistributed with OSW (Open Stem Wave).
 
 This software contains source code provided by NVIDIA Corporation.
 
@@ -150,7 +150,7 @@ are redistributed under:
   - NVIDIA cuDNN Software License Agreement
   - NVIDIA CUDA Toolkit End User License Agreement, Attachment A
 
-These files are provided solely for use by Live MR Manager and may not be
+These files are provided solely for use by OSW (Open Stem Wave) and may not be
 distributed in isolation.
 ";
     let _ = std::fs::write(dir.join("NVIDIA-NOTICE.txt"), notice);

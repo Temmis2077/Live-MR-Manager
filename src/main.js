@@ -1,5 +1,5 @@
 /**
- * main.js - Entry point for Live-MR-Manager
+ * main.js - Entry point for OSW (Open Stem Wave)
  */
 
 import { state } from './js/state.js';

@@ -1,7 +1,7 @@
 export const PRIVACY_EFFECTIVE_DATE = "2026년 6월 27일";
 
 export const GITHUB_ISSUES_URL =
-  "https://github.com/Temmis2077/Live-MR-Manager-Mod/issues";
+  "https://github.com/Temmis2077/OSW/issues";
 
 export const QA_URL = "https://lmrm.vercel.app/qa";
 

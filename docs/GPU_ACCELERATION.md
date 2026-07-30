@@ -56,7 +56,7 @@ DLL이 전부 합쳐 약 3.8GB(압축 ~2.6GB)라 설치본에 넣을 수 없다.
 python scripts/pack_gpu_pack.py \
   --src "%LOCALAPPDATA%/LiveMRManager/tools/gpu" \
   --out dist/gpu-pack \
-  --base-url https://github.com/Temmis2077/Live-MR-Manager-Mod/releases/download/gpu-pack-v1
+  --base-url https://github.com/Temmis2077/OSW/releases/download/gpu-pack-v1
 ```
 
 생성된 `part_*.zip`과 `manifest.json`을 `gpu-pack-v1` 태그에 업로드한다.

@@ -2,11 +2,11 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 use std::time::Duration;
 
-// 이 모드(개조판)는 자체 릴리즈로 업데이트한다 — 원본 레포를 보면 원본
-// 버전(0.5.x)이 최신으로 잡혀 엉뚱한 곳으로 유도된다.
+// OSW는 원본에서 분리된 별개의 앱이라 자체 릴리즈로만 업데이트한다 —
+// 원본 레포를 보면 원본 버전이 최신으로 잡혀 엉뚱한 곳으로 유도된다.
 const GITHUB_OWNER: &str = "Temmis2077";
-const GITHUB_REPO: &str = "Live-MR-Manager-Mod";
-const USER_AGENT: &str = "Live-MR-Manager-UpdateChecker";
+const GITHUB_REPO: &str = "OSW";
+const USER_AGENT: &str = "OSW-UpdateChecker";
 /// 앱 최초 기동 후 한 번만 자동 확인 (이후는 설정의 「업데이트 확인」 버튼)
 const STARTUP_CHECK_DELAY: Duration = Duration::from_secs(8);
 

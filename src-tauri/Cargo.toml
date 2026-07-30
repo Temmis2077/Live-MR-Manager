@@ -4,7 +4,7 @@ version = "1.0.0-beta.1"
 description = "OSW — Open Stem Wave: 노래하는 스트리머를 위한 로컬 구동형 스템 분리 도구"
 authors = ["Temmis2077"]
 license = "MIT"
-repository = "https://github.com/Temmis2077/Live-MR-Manager-Mod"
+repository = "https://github.com/Temmis2077/OSW"
 edition = "2021"
 default-run = "tauri-app"
 

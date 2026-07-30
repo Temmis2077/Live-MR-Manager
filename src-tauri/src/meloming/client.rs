@@ -102,7 +102,7 @@ pub struct MelomingClient;
 impl MelomingClient {
     fn client() -> reqwest::Client {
         reqwest::Client::builder()
-            .user_agent("Live-MR-Manager")
+            .user_agent("OSW")
             .build()
             .unwrap_or_else(|_| reqwest::Client::new())
     }
