@@ -680,6 +680,19 @@ export function showSongContextMenu(e, song, originalIndex) {
 }
 const mrPresenceChecked = new Set();
 
+/** 라이브러리 정보에 MR 표시가 없을 때 실제 파일 존재를 뒤늦게 확인한다.
+ *  있으면 곡 정보를 갱신하고 배지를 다시 그린다(없으면 그대로 둔다). */
+function probeMrPresence(path, song, targetCard) {
+  invoke("check_mr_separated", { path })
+    .then((separated) => {
+      if (!separated) return;
+      song.isSeparated = true;
+      song.is_separated = true;
+      updateCardStatusBadge(path, targetCard);
+    })
+    .catch(() => {});
+}
+
 export function updateCardStatusBadge(path, card = null) {
   const targetCard = card || Array.from(document.querySelectorAll('.song-card')).find(el => el.dataset.path === path);
   if (!targetCard) return;
@@ -719,18 +732,17 @@ export function updateCardStatusBadge(path, card = null) {
   } else if (song && (song.isSeparated || song.is_separated || song.isMr || song.is_mr || song.mr_path)) {
     badge.classList.add("mr");
     badge.textContent = "MR";
-  } else if (song && !mrPresenceChecked.has(path)) {
+  } else if (song && !mrPresenceChecked.has(path) && mode !== "list") {
     mrPresenceChecked.add(path);
-    invoke("check_mr_separated", { path })
-      .then((separated) => {
-        if (!separated) return;
-        song.isSeparated = true;
-        song.is_separated = true;
-        updateCardStatusBadge(path, targetCard);
-      })
-      .catch(() => {});
+    probeMrPresence(path, song, targetCard);
     return;
   } else if (mode === "list") {
+    // 표 모드는 결과를 기다리지 않고 먼저 '원곡만'을 표시한다 — 기다리면 MR이
+    // 없는 곡의 상태 칸이 영구히 빈 칸으로 남는다(probe가 false면 재렌더가 없으므로).
+    if (song && !mrPresenceChecked.has(path)) {
+      mrPresenceChecked.add(path);
+      probeMrPresence(path, song, targetCard);
+    }
     // 표 모드에는 '상태' 열이 있어 빈 칸으로 두면 미완성처럼 보인다.
     // 아직 분리하지 않은 곡은 조용한 톤으로 사실만 알린다.
     // (그리드·버튼 모드는 배지를 장식처럼 모든 카드에 반복하지 않도록 그대로 비운다.)

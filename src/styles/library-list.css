@@ -4,8 +4,10 @@
    변경할 때는 두 규칙을 함께 수정한다. */
 
 :root {
-  /* 곡·가수 / 스템 / 길이 / 키·BPM / 추가일 / 상태 / 더보기 */
-  --lib-table-cols: minmax(220px, 1fr) 168px 62px 92px 74px 104px 34px;
+  /* 곡·가수 / 스템 / 길이 / 키·BPM / 추가일 / 상태 / 더보기
+     3단 레이아웃(좌 보관함 + 우 인스펙터) 안에서도 스템 열이 살아남도록
+     고정 열은 내용이 들어가는 최소치로 잡았다. */
+  --lib-table-cols: minmax(200px, 1fr) 112px 52px 84px 68px 88px 30px;
 }
 
 body .song-grid.list-mode {
@@ -229,22 +231,29 @@ body .song-grid.list-mode .song-card.list-row .col-more {
   cursor: pointer !important;
 }
 
-/* 표는 정보 밀도가 높아 좁은 창에서 뒤쪽 열부터 접는다
-   (기준서 7: 1280px급에서 핵심이 가려지거나 가로 스크롤이 생기지 않게) */
-@media (max-width: 1320px) {
-  :root { --lib-table-cols: minmax(200px, 1fr) 168px 62px 92px 104px 34px; }
+/* 표는 정보 밀도가 높아 자리가 좁아지면 뒤쪽 열부터 접는다
+   (기준서 7: 1280px급에서 핵심이 가려지거나 가로 스크롤이 생기지 않게)
+
+   기준은 창 너비가 아니라 표가 실제로 쓸 수 있는 가운데 단(.lib-center)의
+   너비다 — 좌측 보관함·우측 인스펙터가 접히고 펼쳐질 때마다 표가 쓸 폭이
+   달라지므로, 창 너비로 재면 3단이 다 펼쳐진 1280px에서 가로 스크롤이 생긴다.
+   각 임계값은 그 조합의 열 합계 + gap + 패딩으로 계산한 값이다. */
+/* 각 임계값 = (그 조합의 열 합계 + 52px 썸네일 칸 + gap 12px×n + 행 좌우 패딩
+   28px + 그리드 좌우 패딩 32px). 그 폭을 못 주면 뒤쪽 열을 하나 접는다. */
+@container libcenter (max-width: 829px) {
+  .song-grid { --lib-table-cols: minmax(190px, 1fr) 112px 52px 84px 88px 30px; }
   .library-list-header .col-added,
   body .song-grid.list-mode .song-card.list-row .col-added { display: none !important; }
 }
 
-@media (max-width: 1120px) {
-  :root { --lib-table-cols: minmax(180px, 1fr) 168px 62px 104px 34px; }
+@container libcenter (max-width: 729px) {
+  .song-grid { --lib-table-cols: minmax(160px, 1fr) 112px 52px 88px 30px; }
   .library-list-header .col-keybpm,
   body .song-grid.list-mode .song-card.list-row .col-keybpm { display: none !important; }
 }
 
-@media (max-width: 940px) {
-  :root { --lib-table-cols: minmax(160px, 1fr) 62px 104px 34px; }
+@container libcenter (max-width: 613px) {
+  .song-grid { --lib-table-cols: minmax(160px, 1fr) 52px 88px 30px; }
   .library-list-header .col-stems,
   body .song-grid.list-mode .song-card.list-row .col-stems { display: none !important; }
 }

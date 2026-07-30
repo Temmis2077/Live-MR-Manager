@@ -106,7 +106,11 @@ function computeGridColumns(containerWidth) {
 }
 
 export function setupGridResizeObserver() {
-  const container = elements.scrollArea || (elements.songGrid ? elements.songGrid.parentElement : null);
+  // 카드 열 수는 그리드가 실제로 쓸 수 있는 폭으로 계산한다 — 3단 레이아웃에서는
+  // 가운데 단(.lib-center)이 그 폭이고, scroll-area를 재면 좌우 패널만큼 넘친다.
+  const container = document.getElementById('lib-center')
+    || elements.scrollArea
+    || (elements.songGrid ? elements.songGrid.parentElement : null);
   if (!container || !elements.songGrid) return;
   
   if (resizeObserver) resizeObserver.disconnect();

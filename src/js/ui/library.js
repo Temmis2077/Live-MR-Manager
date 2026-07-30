@@ -112,6 +112,10 @@ export function renderLibrary() {
   const filtered = getFilteredSongs();
   updateLibraryCount(filtered.length);
 
+  // 좌측 보관함/태그 개수만 갱신한다 — 인스펙터는 여기서 다시 그리지 않는다
+  // (재렌더가 잦아서, 사용자가 입력 중인 값이 날아가면 안 된다).
+  import('./library-panels.js').then((m) => m.renderCollections()).catch(() => {});
+
   elements.songGrid.innerHTML = "";
 
   if (filtered.length === 0) {
@@ -291,6 +295,13 @@ export function addSongCard(song, index) {
   };
 
   card.addEventListener("click", handlePlayClick);
+
+  // 클릭한 곡을 오른쪽 인스펙터 대상으로 — 재생과 별개로 항상 갱신한다.
+  card.addEventListener("click", () => {
+    import('./library-panels.js')
+      .then((m) => m.setInspectedSong(song.path))
+      .catch(() => {});
+  });
 
   card.addEventListener("contextmenu", (e) => {
     e.preventDefault();

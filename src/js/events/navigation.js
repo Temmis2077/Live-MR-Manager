@@ -99,6 +99,17 @@ export function switchTab(tabId) {
     document.body.classList.remove('drawer-open');
   }
 
+  // 음원 관리 3단 레이아웃 — 음악 탭에서만 펼친다.
+  const libLayout = document.getElementById("library-layout");
+  if (libLayout) {
+    libLayout.classList.toggle("active", isMusicTab);
+    if (isMusicTab) {
+      import('../ui/library-panels.js')
+        .then((m) => m.refreshLibraryPanels())
+        .catch((err) => console.error('[Library] panels failed:', err));
+    }
+  }
+
   if (elements.songGrid) {
     const isFlexMode = (state.viewMode === "list");
     // Use !important to override CSS !important when hiding

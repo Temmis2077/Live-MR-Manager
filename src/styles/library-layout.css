@@ -1,0 +1,478 @@
+/* 음원 관리 3단 레이아웃 — claude.ai/design 시안 구성.
+   좌: 보관함(카테고리)·태그 / 중: 곡 목록 / 우: 선택한 곡 인스펙터.
+   각 단이 독립적으로 스크롤되고, 좁은 창에서는 바깥쪽 단부터 접는다. */
+
+.library-layout {
+  display: none;
+  height: 100%;
+  min-height: 0;
+  gap: 0;
+}
+
+/* 음악 탭(라이브러리/멜로밍)에서만 3단으로 펼친다 — switchTab이 토글한다. */
+.library-layout.active {
+  display: flex;
+}
+
+/* ── 좌측: 보관함 · 태그 ─────────────────────────────────── */
+.lib-side {
+  width: 180px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--glass-border);
+}
+
+.lib-side-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 10px;
+}
+
+.lib-side-title {
+  padding: 0 6px 8px;
+  font-size: 0.64rem;
+  font-weight: 800;
+  color: var(--text-dim);
+  letter-spacing: 0.1em;
+}
+
+.lib-coll-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lib-coll {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border-radius: var(--radius-nav, 9px);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  text-align: left;
+  width: 100%;
+  transition: background 0.18s, border-color 0.18s, color 0.18s;
+}
+
+.lib-coll:hover {
+  background: var(--surface-1);
+  color: var(--text-main);
+}
+
+/* 선택 상태 — 색 외에 좌측 인디케이터로도 구분(색상만으로 상태 표현 금지). */
+.lib-coll.active {
+  background: rgb(var(--accent-rgb) / 0.12);
+  border-color: rgb(var(--accent-rgb) / 0.32);
+  color: var(--text-main);
+}
+
+.lib-coll:focus-visible,
+.lib-tag:focus-visible {
+  outline: 2px solid var(--accent-secondary);
+  outline-offset: 2px;
+}
+
+.lib-coll-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--text-dim);
+}
+
+.lib-coll.active .lib-coll-dot {
+  background: var(--accent-secondary);
+}
+
+.lib-coll-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.76rem;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lib-coll-count {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+
+/* 태그 칩 */
+.lib-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 4px;
+}
+
+.lib-tag {
+  padding: 5px 10px;
+  border-radius: 7px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  background: var(--surface-1);
+  border: 1px solid var(--glass-border);
+  color: var(--text-muted);
+  transition: background 0.18s, border-color 0.18s, color 0.18s;
+}
+
+.lib-tag:hover {
+  color: var(--text-main);
+  border-color: rgb(var(--accent-rgb) / 0.4);
+}
+
+.lib-tag.active {
+  background: rgb(var(--accent-rgb) / 0.16);
+  border-color: rgb(var(--accent-rgb) / 0.4);
+  color: var(--accent-secondary);
+}
+
+.lib-side-empty {
+  padding: 8px 6px;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+/* 하단 요약 — 실제 집계만 보여준다(용량 추정 같은 허수 없음). */
+.lib-side-foot {
+  flex: none;
+  padding: 12px;
+  border-top: 1px solid var(--glass-border);
+}
+
+.lib-stat-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.lib-stat-row span:last-child {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-main);
+}
+
+.lib-stat-bar {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+
+.lib-stat-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent-gradient);
+}
+
+.lib-stat-note {
+  font-size: 0.64rem;
+  color: var(--text-dim);
+  margin-top: 7px;
+  line-height: 1.5;
+}
+
+/* ── 중앙: 곡 목록 ───────────────────────────────────────── */
+.lib-center {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  /* 표의 열 접힘 기준 — 창 너비가 아니라 이 단의 실제 폭으로 잰다.
+     (library-list.css의 @container libcenter 규칙이 이 컨테이너를 본다) */
+  container-type: inline-size;
+  container-name: libcenter;
+}
+
+/* 3단 안에서는 그리드 자체가 스크롤하지 않고 중앙 단이 스크롤한다.
+   표 헤더와 행이 모두 그리드 안에 있으므로 좌우 패딩은 그리드에만 준다
+   (헤더/행 열 정렬이 같은 박스를 공유해야 어긋나지 않는다). */
+.library-layout .song-grid {
+  padding: 12px 16px 0 !important;
+  /* 예전 중앙 정렬 레이아웃이 그리드 폭을 --library-max-width로 고정했다.
+     3단에서는 가운데 단이 폭을 정하므로 그 고정을 푼다(안 풀면 표가 단보다
+     넓어져 가로 스크롤이 생긴다). */
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+
+/* 음악 탭에서는 스크롤을 3단이 각각 맡는다 — 바깥 scroll-area는 고정. */
+.viewport[data-view="library"] .scroll-area,
+.viewport[data-view="meloming"] .scroll-area {
+  padding: 0;
+  overflow: hidden !important;
+}
+
+/* 예전에는 곡 그리드가 1048px 고정이라 viewport에 min-width: 1108px을 걸어
+   좁은 창에서 가로 스크롤로 버텼다. 3단 레이아웃은 폭에 맞춰 열을 접으므로
+   음악 탭에서는 그 최소 폭을 풀어, 창 최소치(1024px)에서도 잘리지 않게 한다. */
+.viewport[data-view="library"],
+.viewport[data-view="meloming"] {
+  min-width: 0 !important;
+  overflow-x: hidden;
+}
+
+.lib-dropzone-hint {
+  margin: 14px 16px 20px;
+  padding: 18px;
+  border-radius: 12px;
+  border: 1px dashed var(--glass-border);
+  text-align: center;
+}
+
+.lib-dropzone-title {
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.lib-dropzone-sub {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  margin-top: 5px;
+}
+
+/* ── 우측: 인스펙터 ──────────────────────────────────────── */
+.lib-inspector {
+  width: 288px;
+  flex: none;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--sidebar-bg);
+  border-left: 1px solid var(--glass-border);
+}
+
+.insp-empty {
+  padding: 28px 20px;
+  text-align: center;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  line-height: 1.7;
+}
+
+.insp-section {
+  padding: 16px;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.insp-label {
+  font-size: 0.64rem;
+  font-weight: 800;
+  color: var(--text-dim);
+  letter-spacing: 0.1em;
+}
+
+.insp-head {
+  display: flex;
+  gap: 12px;
+}
+
+.insp-art {
+  width: 72px;
+  height: 72px;
+  flex: none;
+  border-radius: 9px;
+  overflow: hidden;
+  background: var(--surface-1);
+  border: 1px solid var(--glass-border);
+}
+
+.insp-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.insp-title {
+  font-size: 0.92rem;
+  font-weight: 800;
+  margin-top: 5px;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+.insp-artist {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.insp-actions {
+  display: flex;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.insp-btn {
+  flex: 1;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  background: var(--surface-2);
+  border: 1px solid var(--glass-border);
+  color: var(--text-main);
+  transition: background 0.18s, border-color 0.18s;
+}
+
+.insp-btn:hover { background: var(--surface-3); }
+
+.insp-btn.primary {
+  background: rgb(var(--accent-rgb) / 0.18);
+  border-color: rgb(var(--accent-rgb) / 0.35);
+  color: var(--accent-secondary);
+  font-weight: 800;
+}
+
+.insp-btn.danger {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.28);
+  color: #fca5a5;
+}
+
+.insp-btn:focus-visible {
+  outline: 2px solid var(--accent-secondary);
+  outline-offset: 2px;
+}
+
+/* 정보 수정 폼 */
+.insp-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  margin-top: 11px;
+}
+
+.insp-field-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.insp-input {
+  margin-top: 6px;
+  width: 100%;
+  height: 34px;
+  padding: 0 11px;
+  border-radius: 8px;
+  background: var(--input-bg);
+  border: 1px solid var(--glass-border);
+  color: var(--text-main);
+  font-size: 0.76rem;
+  font-weight: 600;
+  font-family: inherit;
+  outline: none;
+}
+
+.insp-input:focus-visible {
+  border-color: rgb(var(--accent-rgb) / 0.5);
+  outline: 2px solid var(--accent-secondary);
+  outline-offset: 1px;
+}
+
+.insp-row-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+/* 스템 파일 목록 */
+.insp-stem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 9px;
+  border-radius: 7px;
+  background: var(--surface-1);
+  border: 1px solid var(--glass-border);
+  margin-top: 5px;
+}
+
+.insp-stem-bar {
+  width: 3px;
+  height: 13px;
+  border-radius: 2px;
+  flex: none;
+  background: var(--text-dim);
+}
+
+.insp-stem.done .insp-stem-bar { background: var(--accent-secondary); }
+
+.insp-stem-name {
+  flex: 1;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.insp-stem-status {
+  font-size: 0.64rem;
+  font-weight: 800;
+  color: var(--text-dim);
+}
+
+.insp-stem.done .insp-stem-status { color: var(--accent-secondary); }
+
+/* 파일 · 처리 이력 */
+.insp-meta-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.72rem;
+  margin-top: 7px;
+}
+
+.insp-meta-row > span:first-child {
+  color: var(--text-dim);
+  flex: none;
+}
+
+.insp-meta-row > span:last-child {
+  color: var(--text-main);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 좁은 창에서는 인스펙터 → 보관함 순으로 접는다
+   (기준서 7: 1280px급에서 핵심 기능이 가려지지 않게) */
+@media (max-width: 1240px) {
+  .lib-inspector { display: none; }
+}
+
+@media (max-width: 980px) {
+  .lib-side { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .library-layout * { transition-duration: 0.01ms !important; }
+}

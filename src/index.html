@@ -311,16 +311,40 @@
       </div>
 
       <div class="scroll-area">
-        <!-- 곡 목록 그리드 -->
-        <div id="song-grid" class="song-grid"></div>
+        <!-- 음원 관리 3단 레이아웃 (시안) — 좌: 보관함·태그 / 중: 곡 목록 / 우: 인스펙터.
+             음악 탭에서만 3단으로 펼치고, 다른 탭에서는 library-layout 자체를 숨긴다. -->
+        <div class="library-layout" id="library-layout">
 
-        <!-- 선택 모드 일괄 작업 바 (선택 곡이 있을 때만 표시) -->
-        <div id="library-selection-bar" class="library-selection-bar" style="display: none;">
-          <span id="library-selection-count" class="selection-count">0개 선택됨</span>
-          <div class="selection-actions">
-            <button id="btn-selection-align" class="btn-ai-action">AI 정렬 요청</button>
-            <button id="btn-selection-clear" class="btn-ai-action secondary">선택 해제</button>
+          <aside class="lib-side" id="lib-side">
+            <div class="lib-side-scroll">
+              <div class="lib-side-title">보관함</div>
+              <div class="lib-coll-list" id="lib-coll-list"></div>
+              <div class="lib-side-title" style="margin-top: 18px;">태그</div>
+              <div class="lib-tag-list" id="lib-tag-list"></div>
+            </div>
+            <div class="lib-side-foot" id="lib-side-foot"></div>
+          </aside>
+
+          <div class="lib-center" id="lib-center">
+            <!-- 선택 모드 일괄 작업 바 (선택 곡이 있을 때만 표시) -->
+            <div id="library-selection-bar" class="library-selection-bar" style="display: none;">
+              <span id="library-selection-count" class="selection-count">0개 선택됨</span>
+              <div class="selection-actions">
+                <button id="btn-selection-align" class="btn-ai-action">AI 정렬 요청</button>
+                <button id="btn-selection-clear" class="btn-ai-action secondary">선택 해제</button>
+              </div>
+            </div>
+
+            <!-- 곡 목록 -->
+            <div id="song-grid" class="song-grid"></div>
+
+            <div class="lib-dropzone-hint">
+              <div class="lib-dropzone-title">여기로 음원 파일을 끌어다 놓으면 바로 분리 대기열에 들어갑니다</div>
+              <div class="lib-dropzone-sub">mp3 · wav · flac · m4a · 유튜브 링크 붙여넣기도 지원</div>
+            </div>
           </div>
+
+          <aside class="lib-inspector" id="lib-inspector"></aside>
         </div>
 
         <!-- 라이브 (공연 리모컨) — claude.ai/design 시안의 '라이브' 화면 -->
