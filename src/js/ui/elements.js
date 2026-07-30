@@ -59,19 +59,9 @@ export const elements = {
   cudaRecommendBanner: null,
   viewControls: null,
 
-  // Library Manager
-  managerModal: null,
-  btnOpenManager: null,
-  btnLibraryManage: null,
   mgrFilterCategory: null,
   mgrFilterGenre: null,
   mgrFilterSync: null,
-  btnManagerSave: null,
-  btnManagerCancel: null,
-  managerModalClose: null,
-  managerSearchInput: null,
-  managerTableBody: null,
-  managerStat: null,
   toggleBroadcastMode: null,
   toggleBroadcastModeActive: null,
   broadcastTasksControl: null,
@@ -173,19 +163,9 @@ export function initDomReferences() {
   elements.toggleLyric = document.getElementById("toggle-lyric");
   elements.cudaRecommendBanner = document.getElementById("cuda-recommend-banner");
 
-  // Library Manager
-  elements.managerModal = document.getElementById("library-manager-modal");
-  elements.btnOpenManager = document.getElementById("btn-open-manager");
-  elements.btnLibraryManage = document.getElementById("btn-library-manage");
   elements.mgrFilterCategory = document.getElementById("mgr-filter-category");
   elements.mgrFilterGenre = document.getElementById("mgr-filter-genre");
   elements.mgrFilterSync = document.getElementById("mgr-filter-sync");
-  elements.btnManagerSave = document.getElementById("manager-modal-save");
-  elements.btnManagerCancel = document.getElementById("manager-modal-cancel");
-  elements.managerModalClose = document.getElementById("manager-modal-close");
-  elements.managerSearchInput = document.getElementById("manager-search-input");
-  elements.managerTableBody = document.getElementById("manager-table-body");
-  elements.managerStat = document.getElementById("manager-stat");
   elements.viewControls = document.getElementById("view-controls");
   elements.toggleBroadcastMode = document.getElementById("toggle-broadcast-mode");
   elements.toggleBroadcastModeActive = document.getElementById("toggle-broadcast-mode-tasks");

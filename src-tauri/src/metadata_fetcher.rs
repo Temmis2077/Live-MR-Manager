@@ -342,105 +342,6 @@ pub async fn fetch_and_process_tags(
     process_metadata_logic(&client, artist, track).await
 }
 
-#[tauri::command]
-pub fn get_unclassified_tags(app: AppHandle) -> Result<HashMap<String, usize>, String> {
-    // 1. 설정 컨텍스트가 로드되었는지 확인하고, 없으면 로드 시도
-    {
-        let ctx = CONTEXT.read();
-        if ctx.is_none() {
-            drop(ctx);
-            let _ = init_metadata_context(app);
-        }
-    }
-
-    use crate::state::DB;
-    
-    let db = DB.lock();
-    // COUNT의 결과는 i64로 받는 것이 안정적입니다.
-    let mut stmt = db.prepare("
-        SELECT Tags.name, COUNT(Track_Tag_Map.track_id) 
-        FROM Tags 
-        LEFT JOIN Track_Tag_Map ON Tags.id = Track_Tag_Map.tag_id 
-        GROUP BY Tags.id"
-    ).map_err(|e| format!("쿼리 준비 실패: {}", e))?;
-
-    let tag_iter = stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-    }).map_err(|e| format!("쿼리 실행 실패: {}", e))?;
-
-    let mut result = HashMap::new();
-    let ctx_lock = CONTEXT.read();
-    
-    if let Some(ctx) = &*ctx_lock {
-        for tag_res in tag_iter {
-            if let Ok((name, count)) = tag_res {
-                let lower_name = name.to_lowercase();
-                
-                // 한글 포함 여부 확인 (한글이 있으면 이미 번역된 것이므로 제외)
-                let has_hangul = name.chars().any(|c| ('\u{AC00}'..='\u{D7AF}').contains(&c) || ('\u{1100}'..='\u{11FF}').contains(&c));
-                
-                // 이미 분류된 태그이거나 한글이 포함된 경우 제외
-                let is_mapped = ctx.genre_map.contains_key(&lower_name) || 
-                               ctx.tag_map.contains_key(&lower_name) ||
-                               ctx.exclusions.iter().any(|re| re.is_match(&lower_name));
-                               
-                if !is_mapped && !has_hangul && count > 0 {
-                    result.insert(name, count as usize);
-                }
-            }
-        }
-    }
-
-    Ok(result)
-}
-
-#[tauri::command]
-pub async fn update_custom_dictionary(app: AppHandle, category: String, original: String, translated: String) -> Result<(), String> {
-    let app_dir = app.path().app_data_dir().unwrap_or_else(|_| PathBuf::from("."));
-    
-    // Ensure the directory exists to avoid OS Error 3
-    if !app_dir.exists() {
-        std::fs::create_dir_all(&app_dir).map_err(|e| e.to_string())?;
-    }
-    
-    let custom_path = app_dir.join("metadata_custom.json");
-    
-    let mut custom_val = if custom_path.exists() {
-        let content = std::fs::read_to_string(&custom_path).map_err(|e| e.to_string())?;
-        serde_json::from_str::<Value>(&content).unwrap_or(serde_json::json!({"genres": [], "tags": [], "exclusions": []}))
-    } else {
-        serde_json::json!({"genres": [], "tags": [], "exclusions": []})
-    };
-
-    if category == "genre" {
-        if let Some(genres) = custom_val["genres"].as_array_mut() {
-            genres.push(serde_json::json!({
-                "name": translated,
-                "mappings": [original]
-            }));
-        }
-    } else {
-        if let Some(tags) = custom_val["tags"].as_array_mut() {
-            tags.push(serde_json::json!({
-                "name": translated,
-                "mappings": [original]
-            }));
-        }
-    }
-
-    let updated_content = serde_json::to_string_pretty(&custom_val).map_err(|e| e.to_string())?;
-    std::fs::write(&custom_path, updated_content).map_err(|e| e.to_string())?;
-
-    // Reload context immediately
-    let _ = init_metadata_context(app);
-    
-    // Remove from unknown tags
-    let mut unknown = UNKNOWN_TAGS.write();
-    unknown.remove(&original.to_lowercase());
-
-    Ok(())
-}
-
 async fn process_metadata_logic(client: &reqwest::Client, artist: String, track: String) -> Result<ProcessedMetadata, String> {
     let mut raw_tags = Vec::new();
     
@@ -604,6 +505,9 @@ async fn process_metadata_logic(client: &reqwest::Client, artist: String, track:
     })
 }
 
+// 번역 사전 '관리' UI는 제거했다. 사전을 고치는 명령(get_unclassified_tags /
+// update_custom_dictionary)도 함께 지웠다 — 부르는 곳이 없어졌다.
+// 자동 번역이 읽는 사전 데이터 자체는 그대로다(읽기 전용이 된 것뿐).
 #[tauri::command]
 pub async fn sync_dictionary_to_db(_app: AppHandle) -> Result<(), String> {
     let ctx_lock = CONTEXT.read();

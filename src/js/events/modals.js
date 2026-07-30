@@ -155,13 +155,8 @@ export function initModalListeners() {
     };
   }
 
-  // Open Library Manager (설정의 옛 버튼 + 라이브러리 툴바의 새 버튼 둘 다 지원)
-  const openManager = async () => {
-    const { openLibraryManager } = await import('../ui/manager.js');
-    openLibraryManager();
-  };
-  if (elements.btnOpenManager) elements.btnOpenManager.onclick = openManager;
-  if (elements.btnLibraryManage) elements.btnLibraryManage.onclick = openManager;
+  // '곡 정보 관리자' 모달은 제거했다 — 일괄 편집은 음원 관리 표의 선택 모드,
+  // 개별 편집은 우측 인스펙터에서 한다(창을 따로 열 이유가 없다).
 
   // Modal Cancel/Close
   const modalCancel = document.getElementById("modal-cancel");
@@ -174,28 +169,6 @@ export function initModalListeners() {
 
   if (modalCancel) modalCancel.onclick = closeModal;
   if (modalClose) modalClose.onclick = closeModal;
-
-  // Library Manager Actions
-  if (elements.btnManagerSave) {
-    elements.btnManagerSave.onclick = async () => {
-      const { saveManagerChanges } = await import('../ui/manager.js');
-      await saveManagerChanges();
-      const { closeManagerModal } = await import('../ui/manager.js');
-      closeManagerModal();
-    };
-  }
-  if (elements.btnManagerCancel) {
-    elements.btnManagerCancel.onclick = async () => {
-      const { closeManagerModal } = await import('../ui/manager.js');
-      closeManagerModal();
-    };
-  }
-  if (elements.managerModalClose) {
-    elements.managerModalClose.onclick = async () => {
-      const { closeManagerModal } = await import('../ui/manager.js');
-      closeManagerModal();
-    };
-  }
 
   // Online Metadata Search
   if (elements.btnMetadataSearch) {

@@ -211,8 +211,10 @@ pub fn run() {
             updater::check_for_app_update,
             updater::open_app_update_page,
             metadata_fetcher::search_track_metadata, metadata_fetcher::fetch_and_process_tags,
-            metadata_fetcher::init_metadata_context, metadata_fetcher::get_unclassified_tags,
-            metadata_fetcher::update_custom_dictionary, metadata_fetcher::sync_dictionary_to_db,
+            metadata_fetcher::init_metadata_context,
+            // 번역 사전 '관리' 명령(get_unclassified_tags / update_custom_dictionary /
+            // sync_dictionary_to_db)은 등록에서 뺐다 — 그 UI를 없앴기 때문이다.
+            // 자동 번역이 읽는 사전 자체는 그대로 남는다(읽기 전용이 된 것뿐).
             overlay_server::update_overlay_state,
             overlay_server::update_overlay_style,
             overlay_server::update_overlay_lyrics,

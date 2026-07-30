@@ -16,8 +16,38 @@ export function updateSelectionBar() {
   const countEl = document.getElementById('library-selection-count');
   if (!bar) return;
   const count = state.selectedSongPaths ? state.selectedSongPaths.size : 0;
-  bar.style.display = (state.librarySelectionMode && count > 0) ? 'flex' : 'none';
+  // 선택 모드에 들어가면 아직 고른 곡이 없어도 바를 보여 준다 — '보이는 곡
+  // 모두 선택'이 그 안에 있어서, 안 보이면 시작할 수가 없다.
+  bar.style.display = state.librarySelectionMode ? 'flex' : 'none';
   if (countEl) countEl.textContent = `${count}개 선택됨`;
+
+  const apply = document.getElementById('btn-selection-apply');
+  if (apply) apply.disabled = count === 0;
+  ['btn-selection-align', 'btn-selection-separate', 'btn-selection-delete'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = count === 0;
+  });
+}
+
+/** 일괄 지정 드롭다운을 표준 목록 + 라이브러리에 실제로 쓰인 값으로 채운다. */
+async function fillBulkSelects() {
+  const { GENRES, SUBGENRES, CATEGORIES } = await import('../../taxonomy.js');
+  const catSel = document.getElementById('bulk-category');
+  const genSel = document.getElementById('bulk-genre');
+
+  if (catSel && catSel.options.length <= 1) {
+    catSel.insertAdjacentHTML('beforeend',
+      '<option value="__clear__">— 비우기 —</option>'
+      + CATEGORIES.map((c) => `<option value="${c}">${c}</option>`).join(''));
+  }
+  if (genSel && genSel.options.length <= 1) {
+    // 대장르 아래에 서브장르를 들여쓴다(락 › 락발라드).
+    const opts = GENRES.map((g) => {
+      const subs = (SUBGENRES[g] || []).map((s) => `<option value="${s}">　› ${s}</option>`).join('');
+      return `<option value="${g}">${g}</option>${subs}`;
+    }).join('');
+    genSel.insertAdjacentHTML('beforeend', '<option value="__clear__">— 비우기 —</option>' + opts);
+  }
 }
 
 function exitSelectionMode() {
@@ -49,6 +79,69 @@ function initSelectionMode() {
   const clearBtn = document.getElementById('btn-selection-clear');
   if (clearBtn) clearBtn.onclick = () => exitSelectionMode();
 
+  fillBulkSelects();
+
+  // 지금 표에 보이는(필터가 걸린) 곡만 모두 선택 — 라이브러리 전체가 아니다.
+  const allBtn = document.getElementById('btn-selection-all');
+  if (allBtn) {
+    allBtn.onclick = async () => {
+      const { getFilteredSongs } = await import('../../ui/library.js');
+      const visible = getFilteredSongs();
+      const allSelected = visible.length > 0 && visible.every((s) => state.selectedSongPaths.has(s.path));
+      if (allSelected) state.selectedSongPaths.clear();
+      else visible.forEach((s) => state.selectedSongPaths.add(s.path));
+      document.querySelectorAll('.song-card').forEach((c) => {
+        c.classList.toggle('selected-for-batch', state.selectedSongPaths.has(c.dataset.path));
+      });
+      allBtn.textContent = allSelected ? '보이는 곡 모두 선택' : '선택 모두 풀기';
+      updateSelectionBar();
+    };
+  }
+
+  // 일괄 적용 — 보관함/장르/태그를 선택한 곡들에 한 번에 반영.
+  const applyBtn = document.getElementById('btn-selection-apply');
+  if (applyBtn) applyBtn.onclick = () => applyBulkEdit();
+
+  const sepBtn = document.getElementById('btn-selection-separate');
+  if (sepBtn) {
+    sepBtn.onclick = async () => {
+      const paths = Array.from(state.selectedSongPaths);
+      if (paths.length === 0) return;
+      const { startMrSeparation } = await import('../../audio.js');
+      const { showNotification } = await import('../../utils.js');
+      for (const p of paths) {
+        try { await startMrSeparation(p, null); } catch (_) { /* 개별 실패는 알림이 뜬다 */ }
+      }
+      exitSelectionMode();
+      showNotification(`${paths.length}곡을 MR 분리 대기열에 넣었습니다.`, 'success');
+      const { callAppHandler } = await import('../../app-context.js');
+      callAppHandler('switchToTab', 'tasks');
+    };
+  }
+
+  const delBtn = document.getElementById('btn-selection-delete');
+  if (delBtn) {
+    delBtn.onclick = async () => {
+      const paths = Array.from(state.selectedSongPaths);
+      if (paths.length === 0) return;
+      const { openConfirmModal } = await import('../../ui/modals.js');
+      openConfirmModal('곡 삭제', `선택한 ${paths.length}곡을 목록에서 삭제할까요?`, async () => {
+        const { performDeleteSong, renderLibrary } = await import('../../ui/library.js');
+        const { showNotification } = await import('../../utils.js');
+        // 인덱스가 삭제마다 밀리므로 경로로 매번 다시 찾는다.
+        let done = 0;
+        for (const p of paths) {
+          const idx = state.songLibrary.findIndex((s) => s.path === p);
+          if (idx < 0) continue;
+          try { await performDeleteSong(idx); done++; } catch (_) {}
+        }
+        exitSelectionMode();
+        renderLibrary();
+        showNotification(`${done}곡을 삭제했습니다.`, 'success');
+      });
+    };
+  }
+
   const alignBtn = document.getElementById('btn-selection-align');
   if (alignBtn) {
     alignBtn.onclick = async () => {
@@ -74,6 +167,74 @@ function initSelectionMode() {
       callAppHandler('switchToTab', 'tasks');
     };
   }
+}
+
+/**
+ * 선택한 곡들에 보관함·장르·태그를 한 번에 반영한다.
+ *
+ * 예전에는 '곡 정보 관리자' 모달을 따로 열어야 했다. 표에서 고른 채로 바로
+ * 고칠 수 있으면 창을 오갈 이유가 없다.
+ *
+ * 비워 둔 칸은 건드리지 않는다("그대로 두기") — 일괄 편집에서 가장 흔한 사고가
+ * 안 건드리려던 값이 빈 값으로 덮이는 것이다. 지우려면 '— 비우기 —'를 고른다.
+ */
+async function applyBulkEdit() {
+  const paths = Array.from(state.selectedSongPaths || []);
+  if (paths.length === 0) return;
+
+  const { invoke } = await import('../../tauri-bridge.js');
+  const { showNotification } = await import('../../utils.js');
+
+  const catVal = document.getElementById('bulk-category')?.value || '';
+  const genVal = document.getElementById('bulk-genre')?.value || '';
+  const tagRaw = (document.getElementById('bulk-tags')?.value || '').trim();
+  const tagMode = document.getElementById('bulk-tag-mode')?.value || 'add';
+  const tags = tagRaw.split(',').map((t) => t.trim()).filter(Boolean);
+
+  if (!catVal && !genVal && tags.length === 0) {
+    showNotification('바꿀 값을 하나 이상 골라 주세요.', 'info');
+    return;
+  }
+
+  const updates = [];
+  for (const p of paths) {
+    const idx = state.songLibrary.findIndex((s) => s.path === p);
+    if (idx < 0) continue;
+    const song = { ...state.songLibrary[idx] };
+
+    if (catVal) {
+      const next = catVal === '__clear__' ? [] : [catVal];
+      song.categories = next;
+      song.curationCategory = next[0] || null;
+      song.curation_category = song.curationCategory;
+    }
+    if (genVal) {
+      song.genre = genVal === '__clear__' ? undefined : genVal;
+    }
+    if (tags.length > 0) {
+      const cur = Array.isArray(song.tags) ? song.tags : [];
+      if (tagMode === 'replace') song.tags = [...tags];
+      else if (tagMode === 'remove') song.tags = cur.filter((t) => !tags.includes(t));
+      else song.tags = [...new Set([...cur, ...tags])];
+    }
+
+    state.songLibrary[idx] = song;
+    updates.push(invoke('update_song_metadata', { song }));
+  }
+
+  try {
+    await Promise.all(updates);
+  } catch (err) {
+    showNotification('일괄 수정에 실패했습니다: ' + err, 'error');
+    return;
+  }
+
+  // 화면 갱신은 저장과 분리한다 — 갱신이 삐끗해도 '실패했다'고 알리면 안 된다.
+  const { renderLibrary } = await import('../../ui/library.js');
+  renderLibrary();
+  import('../../ui/core.js').then((m) => m.refreshFilterDropdowns()).catch(() => {});
+  import('../../ui/library-panels.js').then((m) => m.renderCollections()).catch(() => {});
+  showNotification(`${updates.length}곡을 수정했습니다.`, 'success');
 }
 
 /** 표 모드 하나만 남았지만, 목록 컨테이너의 클래스·표시는 여전히 맞춰 줘야

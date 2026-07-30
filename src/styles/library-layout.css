@@ -506,3 +506,152 @@
   font-weight: 600;
   color: var(--text-dim);
 }
+
+/* ── 선택 모드 일괄 편집 바 ────────────────────────────────
+   예전엔 화면 아래 떠 있는 알약이었지만, 이제 필드까지 들어가 커졌다.
+   표 위에 붙여 두면 무엇을 고쳤는지 표를 보면서 확인할 수 있다. */
+.library-layout .library-selection-bar {
+  position: sticky !important;
+  top: 0;
+  left: auto !important;
+  bottom: auto !important;
+  transform: none !important;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch !important;
+  gap: 10px !important;
+  margin: 12px 16px 0;
+  padding: 12px 14px !important;
+  border-radius: 12px !important;
+  background: var(--surface-2) !important;
+  border: 1px solid rgb(var(--accent-rgb) / 0.28) !important;
+  box-shadow: none !important;
+}
+
+.selbar-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.selbar-link {
+  padding: 5px 10px;
+  border-radius: 7px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  background: var(--surface-1);
+  border: 1px solid var(--glass-border);
+  color: var(--text-muted);
+}
+
+.selbar-link:hover {
+  color: var(--text-main);
+  border-color: rgb(var(--accent-rgb) / 0.4);
+}
+
+.selbar-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.selbar-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.selbar-field > span {
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+.selbar-field-wide {
+  flex: 1;
+  min-width: 200px;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+.selbar-field-wide > span {
+  flex: none;
+  align-self: center;
+}
+
+.selbar-select,
+.selbar-input {
+  height: 32px;
+  padding: 0 9px;
+  border-radius: 8px;
+  background: var(--input-bg);
+  border: 1px solid var(--glass-border);
+  color: var(--text-main);
+  font-size: 0.76rem;
+  font-family: inherit;
+  outline: none;
+  min-width: 130px;
+}
+
+.selbar-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.selbar-select-sm {
+  min-width: 84px;
+}
+
+.selbar-select:focus-visible,
+.selbar-input:focus-visible,
+.selbar-link:focus-visible {
+  outline: 2px solid var(--accent-secondary);
+  outline-offset: 1px;
+}
+
+.library-selection-bar .selection-actions {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.library-selection-bar .btn-ai-action.danger {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
+}
+
+.library-selection-bar .btn-ai-action:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* 필드가 남는 폭을 다 먹어 '적용' 버튼이 다음 줄로 밀리고, 액션 버튼들이
+   기본 크기 그대로라 바가 311px까지 커졌다. 한 줄에 들어오게 묶는다. */
+.selbar-field-wide {
+  flex: 1 1 260px;
+  max-width: 420px;
+}
+
+.library-selection-bar .btn-ai-action {
+  flex: none !important;
+  width: auto !important;
+  height: 32px !important;
+  min-height: 0 !important;
+  padding: 0 13px !important;
+  margin: 0 !important;
+  font-size: 0.76rem !important;
+  border-radius: 8px !important;
+  white-space: nowrap;
+}
+
+.library-selection-bar .selection-actions {
+  align-items: center;
+}
