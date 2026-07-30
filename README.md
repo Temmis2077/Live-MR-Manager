@@ -134,7 +134,16 @@ cd src-tauri && cargo test --lib   # Rust 테스트
   (구 버전 데이터는 `com.autumncolor77.live-mr-manager\`에 있었고, 첫 실행 시 새 위치로 가져올지 물어봅니다. 관리형 도구 폴더는 식별자와 무관해 그대로 유지됩니다.)
 
 ## 📄 라이선스·크레딧
-- 기반: [AutumnColor77/Live-MR-Manager](https://github.com/AutumnColor77/Live-MR-Manager) — 초기 핵심 설계·구현 저작권은 원 개발자.
-- AI 정렬 모델: [kresnik/wav2vec2-large-xlsr-korean](https://huggingface.co/kresnik/wav2vec2-large-xlsr-korean), [facebook/wav2vec2-base-960h](https://huggingface.co/facebook/wav2vec2-base-960h) — Apache-2.0.
-- 분리 모델: Kim Vocal 2 / UVR-MDX-NET (UVR 커뮤니티), Mel-Band RoFormer Deux([becruily](https://huggingface.co/becruily/mel-band-roformer-deux), CC-BY-NC-4.0).
-- GPU 가속: [ONNX Runtime](https://onnxruntime.ai/) + NVIDIA TensorRT/cuDNN(각 라이선스는 NVIDIA 약관).
+
+OSW는 **[MIT 라이선스](LICENSE)** 로 배포됩니다.
+
+- 기반: [AutumnColor77/Live-MR-Manager](https://github.com/AutumnColor77/Live-MR-Manager) (MIT) — 초기 핵심 설계·구현 저작권은 원 개발자. MIT 조건에 따라 저작권 표시를 `LICENSE`에 함께 싣습니다.
+- **설치 파일은 서드파티 바이너리를 포함하지 않습니다.** ffmpeg·yt-dlp·AI 모델·GPU 가속 팩은 실행 중에 각 배포처에서 사용자 PC로 내려받습니다.
+- ⚠️ 기본 분리 모델 **Mel-Band RoFormer Deux는 CC-BY-NC-4.0(비상업)** 입니다. 수익을 내는 용도로 쓸 계획이라면 다른 모델을 고르거나 권리자 허락이 필요합니다.
+
+전체 목록(도구·모델·폰트·외부 API)과 각 라이선스는 **[docs/THIRD-PARTY.md](docs/THIRD-PARTY.md)** 를 보세요.
+
+## 🤝 함께 만들기
+- 기여 방법: [CONTRIBUTING.md](CONTRIBUTING.md)
+- 보안 신고: [SECURITY.md](SECURITY.md)
+- 릴리즈 절차: [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md)

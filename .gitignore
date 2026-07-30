@@ -4,6 +4,8 @@ src-tauri/gen
 src-tauri/scratch
 src-tauri/*.log
 src-tauri/*.txt
+# 번들되는 폰트의 라이선스 원문은 반드시 함께 배포해야 한다(OFL-1.1 요구).
+!src/assets/fonts/SUITE-LICENSE.txt
 src-tauri/*.m4a
 
 # Python
@@ -25,6 +27,8 @@ src-tauri/.env
 logs
 *.log
 *.txt
+# 번들되는 폰트의 라이선스 원문은 반드시 함께 배포해야 한다 (OFL-1.1 요구)
+!src/assets/fonts/SUITE-LICENSE.txt
 *.bak
 *.json
 !tauri.conf.json
