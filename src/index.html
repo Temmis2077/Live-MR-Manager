@@ -14,8 +14,8 @@
   <div class="titlebar">
     <div class="titlebar-drag-region" data-tauri-drag-region>
       <div class="titlebar-logo">
-        <img src="./assets/images/app-icon.png" alt="Logo" style="width: 18px; height: 18px; object-fit: contain;"> Live
-        MR Manager(Beta) v0.6.0-beta.3 Mod
+        <img src="./assets/images/osw-mark.svg" alt="" style="width: 18px; height: 18px; object-fit: contain;">
+        OSW — Open Stem Wave
       </div>
     </div>
     <div data-tauri-drag-region class="titlebar-drag-fill"></div>
@@ -354,11 +354,17 @@
               <span class="live-mode-label">라이브</span>
             </div>
             <div class="live-topbar-right">
-              <button type="button" class="live-chip is-button" id="live-device" title="소리를 내보낼 장치를 바꿉니다 (재생 중에도 즉시 전환)">
-                <span class="live-dot on"></span>
-                <span>소리 보내는 곳</span>
-                <span class="live-chip-value" id="live-device-name">기본 장치</span>
-              </button>
+              <!-- 소리 보내는 곳 — 라이브 중에는 화면을 떠나지 않고 여기서 바로 바꾼다 -->
+              <div class="live-device-wrap">
+                <button type="button" class="live-chip is-button" id="live-device" aria-haspopup="menu"
+                        aria-expanded="false" title="소리를 내보낼 장치를 바꿉니다 (재생 중에도 즉시 전환)">
+                  <span class="live-dot on"></span>
+                  <span>소리 보내는 곳</span>
+                  <span class="live-chip-value" id="live-device-name">기본 장치</span>
+                  <span class="live-caret" aria-hidden="true"></span>
+                </button>
+                <div class="live-device-menu" id="live-device-menu" role="menu" hidden></div>
+              </div>
               <button type="button" class="live-chip is-button live-ov-toggle" id="live-ov-toggle"
                       aria-pressed="false" title="OBS 가사 오버레이를 항상 보이게 할지 켜고 끕니다">
                 <span class="live-dot"></span>

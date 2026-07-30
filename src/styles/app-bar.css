@@ -235,6 +235,9 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  /* ⚙를 포함한 우측 그룹은 항상 오른쪽 끝에 붙는다. 검색·필터가 없는 화면
+     에서는 .appbar-center가 숨어 늘어나는 칸이 사라지므로, 여기서 직접 민다. */
+  margin-left: auto;
 }
 
 /* 라이브러리 컨트롤은 앱바 높이에 맞춰 납작하게 — 원래 규칙을 덮어쓴다. */

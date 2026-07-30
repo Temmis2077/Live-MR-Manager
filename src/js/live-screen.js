@@ -356,11 +356,14 @@ export function initLiveScreen() {
   });
 
   // ── 상단 바
-  $('live-device')?.addEventListener('click', async () => {
-    const { switchTab } = await import('./events/navigation.js');
-    switchTab('settings');
-    // 출력 장치는 설정 → 미디어·출력에 있다.
-    document.querySelector('#settings-subtabs [data-scat="media"]')?.click();
+  $('live-device')?.addEventListener('click', () => toggleDeviceMenu());
+
+  // 바깥 클릭·ESC로 닫기
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.live-device-wrap')) closeDeviceMenu();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeDeviceMenu();
   });
 
   $('live-open-overlay')?.addEventListener('click', async () => {
@@ -400,6 +403,85 @@ function syncOverlayChip() {
   chip.setAttribute('aria-pressed', on ? 'true' : 'false');
   // 색만이 아니라 문구로도 상태를 알린다(기준서 3 · 7).
   text.textContent = on ? '가사 화면 켜짐' : '가사 화면 꺼짐';
+}
+
+/* ── 소리 보내는 곳 (출력 장치) ────────────────────────────
+   라이브 중에는 설정 화면으로 보내지 않는다. 여기서 바로 고른다.
+   백엔드는 설정 화면과 같은 것(list_output_devices / set_output_device)을
+   쓰고, 바꾼 뒤에는 설정의 <select>도 맞춰 둔다 — 두 곳이 어긋나면 안 된다. */
+
+let deviceBusy = false;
+
+function closeDeviceMenu() {
+  const menu = $('live-device-menu');
+  if (!menu || menu.hidden) return;
+  menu.hidden = true;
+  $('live-device')?.setAttribute('aria-expanded', 'false');
+}
+
+async function toggleDeviceMenu() {
+  const menu = $('live-device-menu');
+  const btn = $('live-device');
+  if (!menu || !btn) return;
+  if (!menu.hidden) {
+    closeDeviceMenu();
+    return;
+  }
+
+  menu.hidden = false;
+  btn.setAttribute('aria-expanded', 'true');
+  menu.innerHTML = '<div class="live-device-empty">장치를 찾는 중…</div>';
+
+  let devices = [];
+  try {
+    devices = await invoke('list_output_devices');
+  } catch (err) {
+    menu.innerHTML = '<div class="live-device-empty">장치 목록을 가져오지 못했습니다.</div>';
+    return;
+  }
+
+  const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  const anyActive = devices.some((d) => d.isActive);
+  const row = (name, label, sub, active) => `
+    <button type="button" class="live-device-item${active ? ' active' : ''}" role="menuitem"
+            data-device="${esc(name)}">
+      <span class="live-device-check" aria-hidden="true">${active ? '✓' : ''}</span>
+      <span class="live-device-text">
+        <span class="live-device-name">${esc(label)}</span>
+        ${sub ? `<span class="live-device-sub">${esc(sub)}</span>` : ''}
+      </span>
+    </button>`;
+
+  menu.innerHTML = `<div class="live-device-label">소리 보내는 곳</div>`
+    + row('', '시스템 기본 장치', '윈도우에서 고른 장치를 따라갑니다', !anyActive)
+    + devices.map((d) => row(d.name, d.name, d.config || '', !!d.isActive)).join('')
+    + `<div class="live-device-note">재생 중에도 바로 바뀝니다.</div>`;
+
+  menu.querySelectorAll('[data-device]').forEach((item) => {
+    item.addEventListener('click', () => selectDevice(item.dataset.device));
+  });
+  menu.querySelector('.live-device-item')?.focus();
+}
+
+async function selectDevice(name) {
+  if (deviceBusy) return;
+  deviceBusy = true;
+  try {
+    const resolved = await invoke('set_output_device', { name });
+    closeDeviceMenu();
+    const el = $('live-device-name');
+    if (el) el.textContent = resolved || '기본 장치';
+    // 설정 화면의 <select>도 같은 값으로 — 두 곳이 어긋나면 안 된다.
+    import('./audio-devices.js').then((m) => m.refreshOutputDevices()).catch(() => {});
+    const { showNotification } = await import('./utils.js');
+    showNotification(`소리 보내는 곳: ${resolved}`, 'success');
+  } catch (err) {
+    const { showNotification } = await import('./utils.js');
+    showNotification('장치를 바꾸지 못했습니다: ' + err, 'error');
+    syncDeviceChip();
+  } finally {
+    deviceBusy = false;
+  }
 }
 
 /** 상단 출력 장치 이름 — 설정에서 고른 값을 그대로 보여준다. */
