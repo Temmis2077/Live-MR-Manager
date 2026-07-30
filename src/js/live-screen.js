@@ -440,9 +440,15 @@ export function initLiveScreen() {
     syncOverlayChip();
   });
 
-  $('live-add-song')?.addEventListener('click', async () => {
-    const { openAddSongModal } = await import('./ui/add-song-modal.js');
-    openAddSongModal();
+  // '다음 곡 담기' — 저장된 곡에서 골라 큐에 넣는다.
+  // (새 곡을 받아오는 '노래 추가'는 상단 앱바에 따로 있다.)
+  $('live-queue-add')?.addEventListener('click', () => openPicker());
+  $('live-picker')?.querySelectorAll('[data-picker-close]').forEach((el) => {
+    el.addEventListener('click', closePicker);
+  });
+  $('live-picker-input')?.addEventListener('input', renderPicker);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !$('live-picker')?.hidden) closePicker();
   });
 
   // 앱 시작 시 저장된 믹스를 백엔드에 한 번 반영(재시작 후에도 유지되게).
@@ -450,6 +456,91 @@ export function initLiveScreen() {
   if (savedMix !== 0) {
     invoke('set_vocal_balance', { balance: savedMix }).catch(() => {});
   }
+}
+
+/* ── 다음 곡 담기 패널 ──────────────────────────────────────
+   라이브 중에 화면을 떠나지 않고 저장된 곡에서 골라 큐에 넣는다.
+   이미 담긴 곡은 목록에 남되 '담김'으로 표시하고 다시 담지 않는다. */
+
+function openPicker() {
+  const host = $('live-picker');
+  if (!host) return;
+  host.hidden = false;
+  $('live-queue-add')?.setAttribute('aria-expanded', 'true');
+  const input = $('live-picker-input');
+  if (input) { input.value = ''; input.focus(); }
+  renderPicker();
+}
+
+function closePicker() {
+  const host = $('live-picker');
+  if (!host || host.hidden) return;
+  host.hidden = true;
+  $('live-queue-add')?.setAttribute('aria-expanded', 'false');
+  $('live-queue-add')?.focus();
+}
+
+function renderPicker() {
+  const listEl = $('live-picker-list');
+  const footEl = $('live-picker-foot');
+  if (!listEl) return;
+
+  const q = ($('live-picker-input')?.value || '').toLowerCase().trim();
+  const queued = new Set(state.liveQueue || []);
+  const all = state.songLibrary || [];
+
+  const hit = all.filter((s) => {
+    if (!q) return true;
+    return (s.title || '').toLowerCase().includes(q)
+      || (s.artist || '').toLowerCase().includes(q)
+      || (s.genre || '').toLowerCase().includes(q)
+      || (s.tags || []).some((t) => String(t).toLowerCase().includes(q));
+  });
+
+  const esc = (v) => {
+    const d = document.createElement('div');
+    d.textContent = v || '';
+    return d.innerHTML;
+  };
+
+  if (footEl) {
+    footEl.textContent = all.length === 0
+      ? '저장된 곡이 없습니다.'
+      : `${hit.length}곡 / 전체 ${all.length}곡 · 담긴 곡 ${queued.size}곡`;
+  }
+
+  if (hit.length === 0) {
+    listEl.innerHTML = `<div class="live-picker-empty">${all.length === 0
+      ? '먼저 음원 관리에서 곡을 추가해 주세요.'
+      : '검색 결과가 없습니다.'}</div>`;
+    return;
+  }
+
+  listEl.innerHTML = hit.slice(0, 100).map((s) => {
+    const already = queued.has(s.path);
+    const ready = !!(s.isSeparated || s.is_separated || s.isMr || s.is_mr || s.mr_path);
+    return `
+      <button type="button" class="live-picker-item${already ? ' queued' : ''}"
+              data-path="${esc(s.path)}"${already ? ' aria-disabled="true"' : ''}>
+        <span class="live-picker-info">
+          <span class="live-picker-name">${esc(s.title || '제목 없음')}</span>
+          <span class="live-picker-meta">${esc(s.artist || '가수 정보 없음')}${s.duration ? ' · ' + esc(s.duration) : ''}</span>
+        </span>
+        <span class="live-picker-tags">
+          ${ready ? '<span class="live-picker-chip on">MR</span>' : '<span class="live-picker-chip">원곡만</span>'}
+          <span class="live-picker-add">${already ? '담김' : '담기'}</span>
+        </span>
+      </button>`;
+  }).join('');
+
+  listEl.querySelectorAll('[data-path]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (btn.getAttribute('aria-disabled') === 'true') return;
+      addToLiveQueue(btn.dataset.path);
+      // 패널은 열어 둔다 — 보통 여러 곡을 이어서 담는다.
+      renderPicker();
+    });
+  });
 }
 
 /** 상단 '가사 화면' 칩을 오버레이 상시 표시 상태에 맞춘다. */

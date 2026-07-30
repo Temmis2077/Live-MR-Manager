@@ -478,9 +478,32 @@
                   </div>
                   <div class="live-sep-pct" id="live-sep-pct">0%</div>
                 </div>
-                <button type="button" class="live-add-btn" id="live-add-song">＋ 노래 추가</button>
+                <!-- 저장된 곡에서 골라 '다음 곡'에 담는다. 새 곡을 받아오는
+                     '노래 추가'(상단 앱바)와는 하는 일이 다르다. -->
+                <button type="button" class="live-add-btn" id="live-queue-add"
+                        aria-haspopup="dialog" aria-expanded="false">＋ 다음 곡 담기</button>
               </div>
             </aside>
+
+            <!-- 다음 곡 담기 — 저장된 음원에서 검색해 큐에 넣는다 -->
+            <div class="live-picker" id="live-picker" hidden>
+              <div class="live-picker-scrim" data-picker-close></div>
+              <div class="live-picker-panel" role="dialog" aria-modal="true" aria-labelledby="live-picker-title">
+                <div class="live-picker-head">
+                  <div>
+                    <div class="live-picker-title" id="live-picker-title">다음 곡 담기</div>
+                    <div class="live-picker-sub">저장된 곡에서 골라 담습니다.</div>
+                  </div>
+                  <button type="button" class="live-picker-close" data-picker-close aria-label="닫기">✕</button>
+                </div>
+                <div class="live-picker-search">
+                  <input type="text" id="live-picker-input" placeholder="곡 제목 · 가수 · 태그로 검색"
+                         autocomplete="off" spellcheck="false">
+                </div>
+                <div class="live-picker-list" id="live-picker-list"></div>
+                <div class="live-picker-foot" id="live-picker-foot"></div>
+              </div>
+            </div>
           </div>
         </div>
 
