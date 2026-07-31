@@ -7,6 +7,8 @@
 .worktrees/
 # 아이디어 메모 (개인 스크래치)
 IDEA.md
+# 디자인 참고용 시안 — 레포에 올리지 않는다
+design/
 
 # Tauri artifacts
 src-tauri/target

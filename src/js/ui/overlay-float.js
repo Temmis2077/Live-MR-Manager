@@ -48,10 +48,79 @@ function build() {
   });
 }
 
+/**
+ * 시안(design/)의 오버레이 설정 화면 구성으로 한 번만 재배치한다.
+ *
+ * 좌: 설정(연결·URL → 프리셋 → 세부) / 우: 미리보기(체커보드 = 투명) + OBS 안내.
+ * 요소를 새로 만들지 않고 기존 노드를 옮기기만 한다 — 프리셋·슬라이더·복사
+ * 버튼에 이미 붙어 있는 핸들러를 그대로 살리기 위해서다(ID도 유지).
+ */
+function restructureIntoPanes(tab) {
+  if (tab.dataset.paned === '1') return;
+
+  const panes = document.createElement('div');
+  panes.className = 'ov-panes';
+  const left = document.createElement('div');
+  left.className = 'ov-pane-left';
+  const right = document.createElement('div');
+  right.className = 'ov-pane-right';
+  panes.append(left, right);
+
+  // 옮길 블록을 미리 잡아둔다(옮기는 순간 DOM 순서가 바뀌므로).
+  const previewTabs = tab.querySelector('.preview-tabs-container');
+  const previewStatus = tab.querySelector('.overlay-preview-status');
+  const previewBox = tab.querySelector('.overlay-preview-wrapper');
+  // 각 카드는 "안에 무엇이 있는가"로 찾는다 — 구조가 바뀌어도 덜 깨진다.
+  const urlCard = tab.querySelector('#overlay-url-display')?.closest('.ai-model-card');
+  const designCard = tab.querySelector('#overlay-preset-row')?.closest('.ai-model-card');
+  const forceVisibleRow = tab.querySelector('#toggle-overlay-force-visible')?.closest('.group-header');
+
+  const container = tab.querySelector('.overlay-tab-container') || tab;
+  container.appendChild(panes);
+
+  // 우측 — 미리보기가 위, 그 아래 OBS 안내
+  const head = document.createElement('div');
+  head.className = 'ov-preview-head';
+  head.innerHTML = `
+    <div>
+      <div class="ov-preview-title">OBS 미리보기</div>
+      <div class="ov-preview-sub">격자 무늬는 실제 방송에서 투명하게 나가는 부분입니다.</div>
+    </div>`;
+  right.appendChild(head);
+  if (previewStatus) head.appendChild(previewStatus);
+  if (previewTabs) right.appendChild(previewTabs);
+  if (previewBox) {
+    previewBox.classList.add('ov-preview-canvas');
+    right.appendChild(previewBox);
+  }
+
+  const guide = document.createElement('div');
+  guide.className = 'ov-guide';
+  guide.innerHTML = `
+    <div class="ov-guide-title">OBS 쪽 설정은 한 번만</div>
+    <div class="ov-guide-body">
+      소스 추가 → <strong>브라우저</strong> → 왼쪽 주소 붙여넣기 →
+      “장면이 활성화될 때 새로 고침” 켜기.
+      배경은 투명하게 전달되므로 <strong>색상 키를 쓸 필요가 없습니다.</strong>
+    </div>
+    <div class="ov-guide-body" style="margin-top:8px">
+      방송 중에는 이 창을 닫아도 됩니다. 라이브 화면에서 만진 값이 오버레이에 바로 반영됩니다.
+    </div>`;
+  right.appendChild(guide);
+
+  // 좌측 — 연결·URL이 맨 위(시안 순서), 그 아래 디자인 설정
+  if (forceVisibleRow) left.appendChild(forceVisibleRow);
+  if (urlCard) left.appendChild(urlCard);
+  if (designCard) left.appendChild(designCard);
+
+  tab.dataset.paned = '1';
+}
+
 export function openOverlayFloat() {
   build();
   const tab = $('overlay-tab');
   if (!tab) return;
+  restructureIntoPanes(tab);
 
   // 원래 자리를 기억해 둔다 — 닫을 때 그대로 돌려놓아야 탭으로 열 때도 정상.
   if (tab.parentElement !== slot) {

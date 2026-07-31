@@ -25,7 +25,8 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  width: min(1000px, 100%);
+  /* 2단(설정 + 미리보기)이 나란히 들어갈 만큼은 줘야 시안 구성이 산다 */
+  width: min(1180px, 100%);
   max-height: 100%;
   min-height: 0;
   border-radius: 14px;
@@ -87,6 +88,9 @@
   min-height: 0;
   overflow-y: auto;
   padding: 16px 18px 20px;
+  /* 2단이 접히는 기준을 창이 아니라 이 영역의 폭으로 잰다 */
+  container-type: inline-size;
+  container-name: ovbody;
 }
 
 /* 패널 안에서는 탭 화면용 바깥 여백을 걷어낸다 — 패널이 이미 여백을 준다. */
@@ -101,4 +105,112 @@
 
 @media (prefers-reduced-motion: reduce) {
   .ov-float * { transition-duration: 0.01ms !important; }
+}
+
+/* ── 시안(design/) 오버레이 설정 구성: 좌 설정 / 우 미리보기 ──────────
+   설정을 만지면서 결과를 같은 화면에서 바로 볼 수 있게 나눈다. */
+.ov-panes {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.ov-pane-left {
+  width: 420px;
+  flex: none;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ov-pane-right {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  position: sticky;
+  top: 0;
+}
+
+.ov-preview-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.ov-preview-title {
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.ov-preview-sub {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  margin-top: 3px;
+  line-height: 1.5;
+}
+
+/* 체커보드 = 투명. "배경이 하얗게 나온다"는 오해를 없애는 게 목적이라
+   미리보기 바탕에 반드시 보여야 한다. */
+.ov-preview-canvas {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--glass-border);
+  background-color: #101014 !important;
+  background-image:
+    linear-gradient(45deg, rgba(255, 255, 255, 0.045) 25%, transparent 25%, transparent 75%, rgba(255, 255, 255, 0.045) 75%),
+    linear-gradient(45deg, rgba(255, 255, 255, 0.045) 25%, transparent 25%, transparent 75%, rgba(255, 255, 255, 0.045) 75%);
+  background-size: 26px 26px;
+  background-position: 0 0, 13px 13px;
+}
+
+/* iframe의 크기·위치는 overlay.js의 resizeOverlayPreview()가 정한다
+   (실제 소스 크기 640×200을 유지한 채 무대 안에 맞춰 축소·중앙 정렬).
+   여기서 겹쳐 잡으면 그 계산과 싸우게 되므로 배경만 담당한다. */
+
+.ov-guide {
+  padding: 13px 14px;
+  border-radius: 12px;
+  background: rgb(var(--accent-rgb) / 0.07);
+  border: 1px solid rgb(var(--accent-rgb) / 0.24);
+}
+
+.ov-guide-title {
+  font-size: 0.74rem;
+  font-weight: 800;
+  color: var(--accent-secondary);
+}
+
+.ov-guide-body {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  line-height: 1.7;
+  margin-top: 7px;
+}
+
+/* 패널 안에서는 카드 여백을 줄여 두 단이 함께 들어오게 */
+.ov-panes .ai-model-card {
+  margin-top: 0 !important;
+}
+
+/* 좁을 때는 미리보기를 위로 올리고 한 단으로.
+   기준은 창 너비가 아니라 패널이 실제로 쓰는 폭이다 — 패널은 창보다 좁아서
+   창 너비로 재면 두 단이 다 들어가지 않는데도 그대로 버틴다. */
+@container ovbody (max-width: 860px) {
+  .ov-panes {
+    flex-direction: column-reverse;
+  }
+
+  .ov-pane-left,
+  .ov-pane-right {
+    width: 100%;
+    position: static;
+  }
 }
