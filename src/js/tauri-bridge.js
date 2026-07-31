@@ -111,9 +111,9 @@ export async function invoke(command, args = {}) {
     case 'search_lyrics_sites':
       return [
         { title: `${args.query} 가사`, url: 'https://music.bugs.co.kr/track/1804107',
-          snippet: '가사 미리보기 샘플 텍스트입니다.', domain: 'music.bugs.co.kr' },
+          snippet: '가사 미리보기 샘플 텍스트입니다.', domain: 'music.bugs.co.kr', preferred: true },
         { title: `${args.query} - 노래 가사`, url: 'https://www.lyrics.co.kr/?p=270496',
-          snippet: '두 번째 결과 샘플.', domain: 'lyrics.co.kr' },
+          snippet: '두 번째 결과 샘플.', domain: 'lyrics.co.kr', preferred: false },
       ];
     default:
       return null;

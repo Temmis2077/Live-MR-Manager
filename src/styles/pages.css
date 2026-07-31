@@ -1151,6 +1151,19 @@ html[data-theme="dark"] .overlay-preview-wrapper::before {
   font-weight: 800;
 }
 
+/* 언어권별 우선 출처 표시 — 공식 음원 배지와 구분되게 초록 계열로.
+   색만으로 구분하지 않도록 글자로도 "원문 정확"이라고 적는다. */
+.addsong-preferred-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  margin-right: 5px;
+  border-radius: 999px;
+  background: rgba(34, 197, 94, 0.16);
+  color: #4ade80;
+  font-size: 0.62rem;
+  font-weight: 800;
+}
+
 .addsong-open-btn {
   flex-shrink: 0;
   width: 24px;

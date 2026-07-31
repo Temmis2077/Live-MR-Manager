@@ -42,6 +42,8 @@ pub struct LyricsSearchResult {
     pub url: String,
     pub snippet: String,
     pub domain: String,
+    /// 이 언어권에서 원문이 정확하기로 알려진 출처. UI가 배지로 표시한다.
+    pub preferred: bool,
 }
 
 fn parse_flat_line(line: &str) -> Option<YoutubeSearchResult> {
@@ -183,49 +185,273 @@ fn domain_of(url: &str) -> String {
         .to_string()
 }
 
-/// 가사 페이지 검색 — 곡명+가수로 웹 검색해 가사 사이트 링크 후보를 준다.
-/// 가사 원문은 가져오지 않고 링크만 반환(저작권).
-#[tauri::command]
-pub async fn search_lyrics_sites(query: String) -> Result<Vec<LyricsSearchResult>, String> {
-    let q = query.trim();
-    if q.is_empty() {
-        return Ok(Vec::new());
-    }
-    let search_q = format!("{} 가사", q);
-    let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36")
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(|e| e.to_string())?;
+/// 도메인당 개수를 셀 때 쓰는 키. 모바일판(`m.blog.naver.com`)은 데스크톱판과
+/// 같은 사이트인데 도메인이 달라, 그냥 세면 네이버 블로그만 목록을 채운다.
+fn domain_group(domain: &str) -> String {
+    domain
+        .trim_start_matches("m.")
+        .trim_start_matches("mobile.")
+        .to_string()
+}
 
-    let body = client
+/* ────────────────────────── 가사 검색 언어권 ──────────────────────────
+   같은 "가사"라도 언어권마다 좋은 출처가 완전히 다르다. 예전에는 모든 곡에
+   한국어 "가사"를 붙여 검색해서, 영어 곡을 찾아도 한국 사이트의 번역·요약
+   페이지만 올라오고 원문이 있는 곳은 안 나왔다. 언어를 먼저 가른다. */
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LyricsLang {
+    Korean,
+    Japanese,
+    Western,
+}
+
+impl LyricsLang {
+    /// 검색어에 함께 붙일 단어. 이게 언어권을 가르는 가장 큰 신호다.
+    fn keyword(self) -> &'static str {
+        match self {
+            LyricsLang::Korean => "가사",
+            LyricsLang::Japanese => "歌詞",
+            LyricsLang::Western => "lyrics",
+        }
+    }
+
+    /// 우선 출처와 점수(클수록 위로). 실사용에서 원문이 정확한 순서다.
+    fn preferred_sites(self) -> &'static [(&'static str, i32)] {
+        match self {
+            // 벅스는 이용자가 직접 올린 가사라 싱크용 원문이 가장 정확하다.
+            LyricsLang::Korean => &[
+                ("music.bugs.co.kr", 100),
+                ("bugs.co.kr", 100),
+                ("namu.wiki", 80),
+                ("genie.co.kr", 72),
+                ("vibe.naver.com", 66),
+                ("music.naver.com", 62),
+                ("melon.com", 58),
+                ("lyrics.co.kr", 40),
+            ],
+            // 나무위키의 일본 곡 문서는 원문 가사를 그대로 싣는 경우가 많아,
+            // 번역만 있는 블로그보다 싱크에 쓰기 좋다.
+            LyricsLang::Japanese => &[
+                ("namu.wiki", 100),
+                ("uta-net.com", 88),
+                ("j-lyric.net", 84),
+                ("utaten.com", 78),
+                ("lyrical-nonsense.com", 74),
+                ("petitlyrics.com", 70),
+                ("genius.com", 50),
+            ],
+            LyricsLang::Western => &[
+                ("genius.com", 100),
+                ("azlyrics.com", 90),
+                ("musixmatch.com", 76),
+                ("lyrics.com", 70),
+                ("letras.com", 60),
+                ("songlyrics.com", 52),
+                ("lyricsfreak.com", 48),
+            ],
+        }
+    }
+}
+
+/// 가사 페이지가 아닌 곳 — 검색 결과에 자주 섞이지만 가사 원문이 없다.
+const LYRICS_DENY_DOMAINS: &[&str] = &[
+    "youtube.com",
+    "youtu.be",
+    "tiktok.com",
+    "facebook.com",
+    "instagram.com",
+    "twitter.com",
+    "x.com",
+    "pinterest.com",
+    "soundcloud.com",
+    "spotify.com",
+    "amazon.com",
+    "coupang.com",
+];
+
+fn domain_matches(domain: &str, pat: &str) -> bool {
+    domain == pat || domain.ends_with(&format!(".{}", pat))
+}
+
+/// 검색어의 문자 종류로 언어권을 가른다.
+///
+/// 가나가 하나라도 있으면 일본 곡으로 본다(한글과 섞여 있어도 — 한국 이용자가
+/// 「요아소비 アイドル」처럼 쓰는 경우가 그렇다). 한글만 있으면 한국,
+/// 가나·한글 없이 한자만 있으면 일본 곡 제목일 가능성이 높다.
+pub fn detect_lyrics_lang(q: &str) -> LyricsLang {
+    let mut hangul = false;
+    let mut kana = false;
+    let mut han = false;
+    for ch in q.chars() {
+        let c = ch as u32;
+        if (0xAC00..=0xD7A3).contains(&c) || (0x1100..=0x11FF).contains(&c) || (0x3130..=0x318F).contains(&c) {
+            hangul = true;
+        } else if (0x3040..=0x309F).contains(&c) || (0x30A0..=0x30FF).contains(&c) {
+            kana = true;
+        } else if (0x4E00..=0x9FFF).contains(&c) {
+            han = true;
+        }
+    }
+    if kana {
+        LyricsLang::Japanese
+    } else if hangul {
+        LyricsLang::Korean
+    } else if han {
+        LyricsLang::Japanese
+    } else {
+        LyricsLang::Western
+    }
+}
+
+/// 검색 엔진이 결과 대신 자동화 차단 페이지를 준 경우. 본문에 결과가 하나도
+/// 없으면서 이 표식이 있으면 "결과 없음"이 아니라 "막혔음"이다 — 사용자에게
+/// 다르게 안내해야 한다(잠시 뒤 다시 하면 대개 풀린다).
+fn is_bot_challenge(body: &str) -> bool {
+    body.contains("anomaly") || body.contains("challenge-form") || body.contains("Unfortunately, bots")
+}
+
+struct DdgPage {
+    rows: Vec<(String, String, String)>,
+    challenged: bool,
+}
+
+/// DDG HTML 결과 한 페이지를 파싱한다. 실패해도 패닉하지 않고 빈 결과로
+/// 돌려준다 — 질의 하나가 죽어도 나머지는 보여줘야 한다.
+async fn fetch_ddg(client: &reqwest::Client, query: &str) -> DdgPage {
+    let empty = |challenged| DdgPage { rows: Vec::new(), challenged };
+
+    let Ok(resp) = client
         .get("https://html.duckduckgo.com/html/")
-        .query(&[("q", search_q.as_str())])
+        .query(&[("q", query)])
         .send()
         .await
-        .map_err(|e| format!("가사 검색 요청 실패: {}", e))?
-        .text()
-        .await
-        .map_err(|e| format!("가사 검색 응답 읽기 실패: {}", e))?;
+    else {
+        return empty(false);
+    };
+    let Ok(body) = resp.text().await else {
+        return empty(false);
+    };
 
     let snippets: Vec<String> = DDG_SNIPPET_RE
         .captures_iter(&body)
         .map(|c| strip_html(&c[1]))
         .collect();
 
-    let mut out = Vec::new();
+    let mut rows = Vec::new();
     for (i, cap) in DDG_RESULT_RE.captures_iter(&body).enumerate() {
         let Some(url) = unwrap_ddg_url(&cap[1]) else { continue };
         let title = strip_html(&cap[2]);
         if title.is_empty() || url.is_empty() {
             continue;
         }
-        out.push(LyricsSearchResult {
-            domain: domain_of(&url),
-            snippet: snippets.get(i).cloned().unwrap_or_default(),
-            title,
-            url,
-        });
+        rows.push((url, title, snippets.get(i).cloned().unwrap_or_default()));
+    }
+
+    let challenged = rows.is_empty() && is_bot_challenge(&body);
+    DdgPage { rows, challenged }
+}
+
+/// 검색 결과 하나의 점수. 우선 출처 점수에서 원래 순위를 조금 깎는다
+/// (같은 사이트끼리는 검색 엔진 순서를 존중).
+fn score_result(domain: &str, rank: usize, sites: &[(&'static str, i32)]) -> i32 {
+    let base = sites
+        .iter()
+        .find(|(pat, _)| domain_matches(domain, pat))
+        .map(|(_, s)| *s)
+        .unwrap_or(0);
+    base - (rank as i32)
+}
+
+/// 가사 페이지 검색 — 곡명+가수로 웹 검색해 가사 사이트 링크 후보를 준다.
+/// 가사 원문은 가져오지 않고 링크만 반환(저작권).
+///
+/// 일반 질의와 "가장 좋은 출처 한 곳을 지정한 질의"를 함께 던진다. 지정
+/// 질의가 필요한 이유는, 일반 검색에서는 그 사이트가 아예 안 잡히는 일이
+/// 잦기 때문이다(특히 일본 곡의 나무위키 원문 문서).
+#[tauri::command]
+pub async fn search_lyrics_sites(query: String) -> Result<Vec<LyricsSearchResult>, String> {
+    let q = query.trim();
+    if q.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let lang = detect_lyrics_lang(q);
+    let sites = lang.preferred_sites();
+    let general_q = format!("{} {}", q, lang.keyword());
+    let targeted_q = sites
+        .first()
+        .map(|(site, _)| format!("{} {} site:{}", q, lang.keyword(), site));
+
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36")
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    // 일반 질의를 먼저 보고, 우선 출처가 하나도 안 잡혔을 때만 지정 질의를
+    // 추가로 던진다. 두 질의를 항상 병렬로 쏘면 DuckDuckGo가 금방 요청을
+    // 막아버려(HTML 엔드포인트는 레이트 리밋이 빡빡하다) 검색 자체가 실패한다.
+    let general = fetch_ddg(&client, &general_q).await;
+    let has_preferred = general
+        .rows
+        .iter()
+        .any(|(url, _, _)| score_result(&domain_of(url), 0, sites) > 0);
+
+    let targeted = match (&targeted_q, has_preferred, general.challenged) {
+        // 이미 차단당한 상태라면 한 번 더 두드려봐야 소용없다.
+        (Some(tq), false, false) => fetch_ddg(&client, tq).await,
+        _ => DdgPage { rows: Vec::new(), challenged: false },
+    };
+
+    if general.rows.is_empty() && targeted.rows.is_empty() {
+        if general.challenged || targeted.challenged {
+            return Err(
+                "검색 엔진이 자동 요청을 잠시 막았습니다. 30초쯤 뒤에 다시 시도하거나, \
+                 가사 페이지 주소를 직접 붙여넣어 주세요."
+                    .into(),
+            );
+        }
+        return Err("가사 검색 요청에 실패했습니다. 잠시 후 다시 시도해 주세요.".into());
+    }
+
+    // 지정 질의 결과를 앞에 둬서, 같은 점수면 원하는 출처가 먼저 오게 한다.
+    let mut scored: Vec<(i32, LyricsSearchResult)> = Vec::new();
+    let mut seen_urls = std::collections::HashSet::new();
+    for (url, title, snippet) in targeted.rows.into_iter().chain(general.rows.into_iter()) {
+        let domain = domain_of(&url);
+        if domain.is_empty() || LYRICS_DENY_DOMAINS.iter().any(|d| domain_matches(&domain, d)) {
+            continue;
+        }
+        if !seen_urls.insert(url.clone()) {
+            continue;
+        }
+        let rank = scored.len();
+        let score = score_result(&domain, rank, sites);
+        scored.push((
+            score,
+            LyricsSearchResult {
+                preferred: score > 0,
+                domain,
+                snippet,
+                title,
+                url,
+            },
+        ));
+    }
+
+    scored.sort_by(|a, b| b.0.cmp(&a.0));
+
+    // 한 사이트가 목록을 다 차지하지 않게 도메인당 2개까지만.
+    let mut per_domain = std::collections::HashMap::new();
+    let mut out = Vec::new();
+    for (_, item) in scored {
+        let n = per_domain.entry(domain_group(&item.domain)).or_insert(0usize);
+        if *n >= 2 {
+            continue;
+        }
+        *n += 1;
+        out.push(item);
         if out.len() >= 8 {
             break;
         }
@@ -274,5 +500,86 @@ mod tests {
         assert_eq!(strip_html("<b>가사</b> &amp; 노래"), "가사 & 노래");
         assert_eq!(domain_of("https://www.lyrics.co.kr/?p=1"), "lyrics.co.kr");
         assert_eq!(domain_of("https://music.bugs.co.kr/track/1"), "music.bugs.co.kr");
+    }
+
+    #[test]
+    fn detects_language_from_script() {
+        // 한글만 → 한국
+        assert_eq!(detect_lyrics_lang("아이유 밤편지"), LyricsLang::Korean);
+        // 가나가 있으면 한글과 섞여 있어도 일본 곡으로 본다
+        assert_eq!(detect_lyrics_lang("YOASOBI アイドル"), LyricsLang::Japanese);
+        assert_eq!(detect_lyrics_lang("요아소비 アイドル"), LyricsLang::Japanese);
+        assert_eq!(detect_lyrics_lang("よふかしのうた"), LyricsLang::Japanese);
+        // 가나·한글 없이 한자만 → 일본 곡 제목으로 본다
+        assert_eq!(detect_lyrics_lang("残酷な天使"), LyricsLang::Japanese);
+        // 라틴 문자만 → 서양
+        assert_eq!(detect_lyrics_lang("Oasis Wonderwall"), LyricsLang::Western);
+        assert_eq!(detect_lyrics_lang("Bruno Mars - Talking to the Moon"), LyricsLang::Western);
+    }
+
+    #[test]
+    fn language_picks_its_own_keyword_and_top_site() {
+        // 예전에는 모든 곡에 "가사"를 붙여 영어 곡이 한국 사이트로만 갔다.
+        assert_eq!(LyricsLang::Korean.keyword(), "가사");
+        assert_eq!(LyricsLang::Japanese.keyword(), "歌詞");
+        assert_eq!(LyricsLang::Western.keyword(), "lyrics");
+
+        assert_eq!(LyricsLang::Korean.preferred_sites()[0].0, "music.bugs.co.kr");
+        assert_eq!(LyricsLang::Japanese.preferred_sites()[0].0, "namu.wiki");
+        assert_eq!(LyricsLang::Western.preferred_sites()[0].0, "genius.com");
+    }
+
+    #[test]
+    fn matches_domains_by_suffix_not_substring() {
+        assert!(domain_matches("genius.com", "genius.com"));
+        assert!(domain_matches("music.bugs.co.kr", "bugs.co.kr"));
+        // 접미사 경계를 지켜 엉뚱한 사이트가 우선 출처로 잡히지 않게
+        assert!(!domain_matches("notgenius.com", "genius.com"));
+        assert!(!domain_matches("genius.com.evil.net", "genius.com"));
+    }
+
+    #[test]
+    fn preferred_site_outranks_earlier_generic_result() {
+        let sites = LyricsLang::Korean.preferred_sites();
+        // 검색 결과 3위의 벅스가 1위의 무관한 블로그보다 위로 와야 한다.
+        let blog = score_result("someblog.tistory.com", 0, sites);
+        let bugs = score_result("music.bugs.co.kr", 3, sites);
+        assert!(bugs > blog, "bugs={} blog={}", bugs, blog);
+
+        // 같은 사이트끼리는 검색 엔진 순서를 존중한다.
+        assert!(score_result("music.bugs.co.kr", 1, sites) > score_result("music.bugs.co.kr", 5, sites));
+
+        // 우선 출처가 아니면 0 이하 → preferred 배지가 붙지 않는다.
+        assert!(score_result("random.example.com", 0, sites) <= 0);
+    }
+
+    #[test]
+    fn recognizes_bot_challenge_page() {
+        // 결과 0개 + 차단 표식 = "결과 없음"이 아니라 "막혔음". 안내 문구가
+        // 달라야 사용자가 30초 뒤 재시도하면 된다는 걸 안다.
+        assert!(is_bot_challenge(r#"<div class="anomaly-modal__title">"#));
+        assert!(is_bot_challenge("Unfortunately, bots use DuckDuckGo too"));
+        assert!(!is_bot_challenge(r#"<a class="result__a" href="x">제목</a>"#));
+    }
+
+    #[test]
+    fn groups_mobile_and_desktop_domains_together() {
+        // 도메인당 개수 제한이 모바일판 때문에 뚫리면 안 된다 — 실제로
+        // m.blog.naver.com / blog.naver.com 이 목록을 함께 채우고 있었다.
+        assert_eq!(domain_group("m.blog.naver.com"), domain_group("blog.naver.com"));
+        assert_eq!(domain_group("mobile.twitter.com"), "twitter.com");
+        assert_eq!(domain_group("music.bugs.co.kr"), "music.bugs.co.kr");
+    }
+
+    #[test]
+    fn denies_non_lyrics_domains() {
+        for d in ["youtube.com", "m.youtube.com", "tiktok.com", "open.spotify.com"] {
+            assert!(
+                LYRICS_DENY_DOMAINS.iter().any(|p| domain_matches(d, p)),
+                "{} 가 차단 목록에 걸리지 않음",
+                d
+            );
+        }
+        assert!(!LYRICS_DENY_DOMAINS.iter().any(|p| domain_matches("music.bugs.co.kr", p)));
     }
 }

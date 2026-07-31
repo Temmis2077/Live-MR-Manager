@@ -18,7 +18,7 @@ mod library;
 pub mod gpu_pack;
 pub mod dereverb;
 mod title_parser;
-mod search;
+pub mod search; // 개발용 lyrics_probe 바이너리가 참조한다
 mod meloming;
 mod key_bpm;
 mod audio_commands;

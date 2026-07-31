@@ -177,7 +177,10 @@ async function runSearch() {
                 <div class="addsong-result-body">
                     <div class="addsong-result-title">${esc(r.title)}</div>
                     ${r.snippet ? `<div class="addsong-result-snippet">${esc(r.snippet)}</div>` : ''}
-                    <div class="addsong-result-sub">${esc(r.domain)}</div>
+                    <div class="addsong-result-sub">
+                        ${r.preferred ? '<span class="addsong-preferred-badge" title="이 언어권에서 원문이 정확하기로 알려진 출처">원문 정확</span>' : ''}
+                        ${esc(r.domain)}
+                    </div>
                 </div>
                 <button type="button" class="addsong-open-btn" data-url="${esc(r.url)}" title="브라우저에서 열기">↗</button>
             </div>
