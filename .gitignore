@@ -1,7 +1,20 @@
+# 개발용 로컬 전용 — 레포에 올리지 않는다
+# (git은 줄 끝 주석을 지원하지 않으므로 설명은 반드시 별도 줄에)
+# 개인 에이전트 설정 / 세션 설정
+.agents/
+.claude/
+# git worktree — gitlink으로 커밋되면 GitHub에서 깨진 서브모듈로 보인다
+.worktrees/
+# 아이디어 메모 (개인 스크래치)
+IDEA.md
+
 # Tauri artifacts
 src-tauri/target
 src-tauri/gen
 src-tauri/scratch
+# ORT 실행 공급자 DLL — 어디서도 참조하지 않는다. GPU 가속은 실행 중에
+# 내려받는 GPU 팩이 담당하고(gpu_pack.rs), bundle.resources도 비어 있다.
+src-tauri/resources/libs/
 src-tauri/*.log
 src-tauri/*.txt
 # 번들되는 폰트의 라이선스 원문은 반드시 함께 배포해야 한다(OFL-1.1 요구).

@@ -1,4 +1,4 @@
-# 🗺️ Live MR Manager — Mod 로드맵 (ToDo)
+# 🗺️ OSW — 로드맵 (ToDo)
 
 이 문서는 **개조(모드) 레포의 로드맵**입니다. 원본 프로젝트의 로드맵은 [업스트림 ToDo](https://github.com/AutumnColor77/Live-MR-Manager/blob/main/ToDo.md)를 참고하세요.
 
