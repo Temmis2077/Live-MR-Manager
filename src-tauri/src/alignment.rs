@@ -6,24 +6,119 @@ use tauri::{command, AppHandle, Emitter, Manager};
 use ndarray::Array2;
 use unicode_normalization::UnicodeNormalization;
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use crate::audio::AudioProcessor;
 use crate::onnx_engine::OnnxEngine;
 use regex::Regex;
 use parking_lot::Mutex;
 
+#[derive(Clone)]
 pub struct CachedAlignmentState {
-    pub emission_probs: Array2<f32>,
+    pub emission_probs: Arc<Array2<f32>>,
     pub tokens_path: PathBuf,
     pub lyrics: String,
+    /// 프론트 원문 세그먼트와의 안정적인 병합 키. 텍스트가 중복되어도
+    /// 재정렬 결과가 같은 원문 블록으로 돌아가도록 캐시한다.
+    pub line_ids: Vec<String>,
     /// 사용자 하드 앵커 (입력 줄 인덱스, ms) — 실시간 penalty 튜닝 재정렬에서도
     /// 같은 고정점을 유지하도록 캐시에 함께 둔다.
     pub anchors: Vec<(usize, i64)>,
+    /// 윈도우 정렬은 잘라낸 emission 축을 0ms로 보므로, 결과를 원본 오디오
+    /// 시간축으로 되돌릴 때 이 오프셋을 보존해야 한다.
+    pub time_offset_ms: i64,
 }
 
 pub static CACHED_STATE: Mutex<Option<CachedAlignmentState>> = Mutex::new(None);
+
+/// Full-song acoustic inference is much more expensive than Viterbi alignment.
+/// Keep the Korean and English snapshots for the active song so adjacent
+/// fallback/rescue windows slice the same emission matrix instead of loading
+/// ONNX and re-running the whole song for every request.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct InferenceCacheKey {
+    audio_path: String,
+    audio_size: u64,
+    audio_modified_ns: u128,
+    model_path: String,
+    model_size: u64,
+    model_modified_ns: u128,
+}
+
+#[derive(Clone)]
+struct InferenceCacheEntry {
+    key: InferenceCacheKey,
+    emission_probs: Arc<Array2<f32>>,
+    vocal_activity: Arc<Vec<f32>>,
+}
+
+/// A mixed-language run normally uses exactly two models.  Bounding this cache
+/// avoids retaining one full-song emission matrix per song for the lifetime of
+/// the desktop process while keeping both language passes warm.
+const EMISSION_CACHE_CAPACITY: usize = 2;
+static EMISSION_CACHE: Mutex<Vec<InferenceCacheEntry>> = Mutex::new(Vec::new());
+
+fn cache_file_identity(path: &Path) -> (String, u64, u128) {
+    let normalized = path
+        .canonicalize()
+        .unwrap_or_else(|_| path.to_path_buf())
+        .to_string_lossy()
+        .to_string();
+    let metadata = fs::metadata(path).ok();
+    let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
+    let modified_ns = metadata
+        .and_then(|m| m.modified().ok())
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    (normalized, size, modified_ns)
+}
+
+fn inference_cache_key(audio_path: &Path, model_path: &Path) -> InferenceCacheKey {
+    let (audio_path, audio_size, audio_modified_ns) = cache_file_identity(audio_path);
+    let (model_path, model_size, model_modified_ns) = cache_file_identity(model_path);
+    InferenceCacheKey {
+        audio_path,
+        audio_size,
+        audio_modified_ns,
+        model_path,
+        model_size,
+        model_modified_ns,
+    }
+}
+
+fn read_cached_inference(key: &InferenceCacheKey) -> Option<(Arc<Array2<f32>>, Arc<Vec<f32>>)> {
+    let cache = EMISSION_CACHE.lock();
+    let entry = cache.iter().find(|entry| entry.key == *key)?;
+    Some((Arc::clone(&entry.emission_probs), Arc::clone(&entry.vocal_activity)))
+}
+
+fn store_cached_inference(
+    key: InferenceCacheKey,
+    emission_probs: Arc<Array2<f32>>,
+    vocal_activity: Arc<Vec<f32>>,
+) {
+    let mut cache = EMISSION_CACHE.lock();
+    if let Some(existing) = cache.iter_mut().find(|entry| entry.key == key) {
+        existing.emission_probs = emission_probs;
+        existing.vocal_activity = vocal_activity;
+        return;
+    }
+
+    // Alignment is serialized and each request is scoped to one song. Once a
+    // third distinct key arrives, it is a new song/model combination in normal
+    // use; discard the old pair rather than accumulating large tensors.
+    if cache.len() >= EMISSION_CACHE_CAPACITY {
+        cache.clear();
+    }
+    cache.push(InferenceCacheEntry {
+        key,
+        emission_probs,
+        vocal_activity,
+    });
+}
 
 pub static CANCEL_ALIGNMENT: AtomicBool = AtomicBool::new(false);
 
@@ -34,6 +129,52 @@ pub static CANCEL_ALIGNMENT: AtomicBool = AtomicBool::new(false);
 /// the interactive editor button can never corrupt each other's state.
 pub static ALIGNMENT_QUEUE_LOCK: once_cell::sync::Lazy<tokio::sync::Mutex<()>> =
     once_cell::sync::Lazy::new(|| tokio::sync::Mutex::new(()));
+
+/// 개발 빌드에서만 프런트 정렬 파이프라인의 입출력을 JSONL로 보관한다.
+/// 가사 원문을 포함하므로 릴리스 빌드에서는 의도적으로 아무 파일도 쓰지 않는다.
+#[command]
+pub fn write_alignment_debug_trace(
+    handle: AppHandle,
+    run_id: String,
+    stage: String,
+    payload: serde_json::Value,
+) -> Result<String, String> {
+    if !cfg!(debug_assertions) {
+        return Ok(String::new());
+    }
+
+    let safe_run_id: String = run_id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .take(96)
+        .collect();
+    let safe_run_id = if safe_run_id.is_empty() { "alignment" } else { &safe_run_id };
+    let path = crate::state::AppPaths::from_handle(&handle)
+        .root
+        .join("logs")
+        .join("alignment-debug")
+        .join(format!("{}.jsonl", safe_run_id));
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("정렬 디버그 폴더 생성 실패: {}", e))?;
+    }
+
+    let record = serde_json::json!({
+        "schemaVersion": 1,
+        "timestampMs": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0),
+        "stage": stage,
+        "payload": payload,
+    });
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|e| format!("정렬 디버그 로그 열기 실패: {}", e))?;
+    writeln!(file, "{}", record).map_err(|e| format!("정렬 디버그 로그 쓰기 실패: {}", e))?;
+    Ok(path.to_string_lossy().to_string())
+}
 
 /// 곡 구조 지시어(실제로 불리지 않는 라벨) 판별 — 대소문자 무시, 트림 후 전체
 /// 일치만 인정한다("Chorus"는 지시어, "Chorus of angels"는 실제 가사이므로 유지).
@@ -129,6 +270,11 @@ pub struct WordAlignment {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LineAlignment {
+    /// 정렬 요청 시 프론트가 넘긴 원문 세그먼트 ID. 빈 값은 구버전 호출 호환.
+    #[serde(default)]
+    pub segment_id: String,
+    #[serde(default)]
+    pub input_index: usize,
     pub text: String,
     pub extracted_text: String,
     pub start_ms: i64,
@@ -140,6 +286,18 @@ pub struct LineAlignment {
     /// 배정 프레임이 없는 줄(타 언어·보간)은 0.
     #[serde(default)]
     pub confidence: f32,
+    /// 다중 증거 점수에 섞기 전의 emission 기하평균. 디버깅·분포 분석용.
+    #[serde(default)]
+    pub emission_confidence: f32,
+    /// 목표 토큰이 같은 프레임의 다른 토큰보다 우세한 정도(0~1).
+    #[serde(default)]
+    pub acoustic_margin: f32,
+    /// 기대 토큰 중 Viterbi 경로가 실제 방문한 비율(0~1).
+    #[serde(default)]
+    pub token_coverage: f32,
+    /// 분리 보컬 RMS에서 계산한 해당 구간의 활동도(0~1).
+    #[serde(default)]
+    pub vocal_activity: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -162,6 +320,26 @@ pub struct AlignmentResult {
     pub words: Vec<WordAlignment>,
     pub lines: Vec<LineAlignment>,
     pub raw_segments: Vec<TranscribedSegment>,
+    /// 개발 로그에서 phrase window 적용 여부를 확인하기 위한 메타데이터.
+    /// 가사 텍스트나 세그먼트 순서를 변경하지 않는다.
+    #[serde(default)]
+    pub diagnostics: AlignmentDiagnostics,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct AlignmentDiagnostics {
+    #[serde(default)]
+    pub manual_anchor_count: usize,
+    #[serde(default)]
+    pub automatic_phrase_anchor_count: usize,
+    #[serde(default)]
+    pub phrase_window_count: usize,
+    /// 결과 오디오 시간축 기준의 phrase 경계 시각.
+    #[serde(default)]
+    pub phrase_boundary_ms: Vec<i64>,
+    /// True when this request reused an existing full-song ONNX emission.
+    #[serde(default)]
+    pub emission_cache_hit: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -239,16 +417,16 @@ pub const ALIGNMENT_MODELS: &[AlignmentModelSpec] = &[
         display_name: "한국어 가사 정렬 모델 (실험적, 약 1.2GB)",
         // kresnik/wav2vec2-large-xlsr-korean (Apache-2.0) exported to ONNX
         // (single-file, weights merged) + vocab.json converted to tokens.txt.
-        model_url: "https://github.com/Temmis2077/Live-MR-Manager/releases/download/ai-align-model-v1/model.onnx",
-        tokens_url: "https://github.com/Temmis2077/Live-MR-Manager/releases/download/ai-align-model-v1/tokens.txt",
+        model_url: "https://github.com/Temmis2077/OSW/releases/download/ai-align-model-v1/model.onnx",
+        tokens_url: "https://github.com/Temmis2077/OSW/releases/download/ai-align-model-v1/tokens.txt",
     },
     AlignmentModelSpec {
         id: "wav2vec2-english-lyrics",
         display_name: "영어 가사 정렬 모델 (팝송, 약 360MB)",
         // facebook/wav2vec2-base-960h (Apache-2.0) exported to ONNX.
         // 라틴 char-level vocab (대문자 A–Z, |, <pad>/<unk>).
-        model_url: "https://github.com/Temmis2077/Live-MR-Manager/releases/download/align-model-en-v1/model.onnx",
-        tokens_url: "https://github.com/Temmis2077/Live-MR-Manager/releases/download/align-model-en-v1/tokens.txt",
+        model_url: "https://github.com/Temmis2077/OSW/releases/download/align-model-en-v1/model.onnx",
+        tokens_url: "https://github.com/Temmis2077/OSW/releases/download/align-model-en-v1/tokens.txt",
     },
 ];
 
@@ -393,6 +571,9 @@ pub async fn run_forced_alignment(
     rep_penalty: Option<f32>,
     _use_vad: Option<bool>,
     anchors: Option<Vec<(usize, i64)>>,
+    line_ids: Option<Vec<String>>,
+    window_start_ms: Option<i64>,
+    window_end_ms: Option<i64>,
 ) -> Result<AlignmentResult, String> {
     // -1 sentinel: waiting for a previous alignment to finish (queued).
     let _ = handle.emit("alignment-progress", -1);
@@ -437,76 +618,177 @@ pub async fn run_forced_alignment(
     // "준비 중"으로 표시하도록 별도 신호를 보낸다. (-1은 대기열 대기)
     let _ = handle.emit("alignment-progress", -2);
 
-    let emission_probs = if is_whisper {
-        sys_log("[Alignment] Engine B (Whisper) Preprocessing: Extracting Mel-spectrogram...");
-        let raw_samples = processor.load_and_preprocess(&resolved_audio_path)?;
-        let mel_data = processor.get_mel_spectrogram(raw_samples.as_slice().unwrap());
+    let emission_key = inference_cache_key(&resolved_audio_path, &model_path);
+    let (full_emission_probs, full_vocal_activity, emission_cache_hit) =
+        if let Some((emission_probs, vocal_activity)) = read_cached_inference(&emission_key) {
+            sys_log("[Alignment] Emission cache hit: reusing full-song ONNX output.");
+            // Cache hits skip model progress callbacks; explicitly complete the
+            // preparation phase so the queue UI does not remain in "readying".
+            let _ = handle.emit("alignment-progress", 100);
+            (emission_probs, vocal_activity, true)
+        } else {
+            sys_log("[Alignment] Emission cache miss: running full-song ONNX inference.");
+            let emission_probs = if is_whisper {
+                sys_log("[Alignment] Engine B (Whisper) Preprocessing: Extracting Mel-spectrogram...");
+                let raw_samples = processor.load_and_preprocess(&resolved_audio_path)?;
+                let mel_data = processor.get_mel_spectrogram(raw_samples.as_slice().unwrap());
 
-        sys_log(&format!("[Alignment] Engine B: Creating ONNX session for {:?}", model_path));
-        let mut engine = OnnxEngine::new(&model_path)?;
-        let h_clone = handle.clone();
+                sys_log(&format!("[Alignment] Engine B: Creating ONNX session for {:?}", model_path));
+                let mut engine = OnnxEngine::new(&model_path)?;
+                let h_clone = handle.clone();
 
-        sys_log("[Alignment] Engine B: Running Whisper Inference...");
-        engine.run_inference(&mel_data, true, |p| {
-            let _ = h_clone.emit("alignment-progress", p as i32);
-        }).map_err(|e| {
-            let err_msg = format!("❌ [Engine B Error] {}", e);
-            sys_log(&err_msg);
-            err_msg
-        })?
-    } else {
-        sys_log("[Alignment] Engine A (Wav2Vec2) Preprocessing: Raw audio PCM...");
-        let audio_data = processor.load_and_preprocess(&resolved_audio_path)?;
+                sys_log("[Alignment] Engine B: Running Whisper Inference...");
+                engine.run_inference(&mel_data, true, |p| {
+                    let _ = h_clone.emit("alignment-progress", p as i32);
+                }).map_err(|e| {
+                    let err_msg = format!("❌ [Engine B Error] {}", e);
+                    sys_log(&err_msg);
+                    err_msg
+                })?
+            } else {
+                sys_log("[Alignment] Engine A (Wav2Vec2) Preprocessing: Raw audio PCM...");
+                let audio_data = processor.load_and_preprocess(&resolved_audio_path)?;
 
-        sys_log(&format!("[Alignment] Engine A: Creating ONNX session for {:?}", model_path));
-        let mut engine = OnnxEngine::new(&model_path)?;
-        let h_clone = handle.clone();
+                sys_log(&format!("[Alignment] Engine A: Creating ONNX session for {:?}", model_path));
+                let mut engine = OnnxEngine::new(&model_path)?;
+                let h_clone = handle.clone();
 
-        sys_log("[Alignment] Engine A: Running Wav2Vec2 Inference...");
-        engine.run_inference(audio_data.as_slice().unwrap(), false, |p| {
-            let _ = h_clone.emit("alignment-progress", p as i32);
-        }).map_err(|e| {
-            let err_msg = format!("❌ [Engine A Error] {}", e);
-            sys_log(&err_msg);
-            err_msg
-        })?
-    };
+                sys_log("[Alignment] Engine A: Running Wav2Vec2 Inference...");
+                engine.run_inference(audio_data.as_slice().unwrap(), false, |p| {
+                    let _ = h_clone.emit("alignment-progress", p as i32);
+                }).map_err(|e| {
+                    let err_msg = format!("❌ [Engine A Error] {}", e);
+                    sys_log(&err_msg);
+                    err_msg
+                })?
+            };
+
+            if CANCEL_ALIGNMENT.load(Ordering::SeqCst) {
+                return Err("작업이 사용자에 의해 취소되었습니다.".to_string());
+            }
+
+            // 모델에 넣기 전의 raw 보컬 RMS를 별도 계산한다. 실패해도 정렬 자체는
+            // 중단하지 않고, 품질 게이트가 이 신호를 사용하지 않게 빈 벡터를 준다.
+            let vocal_activity = processor
+                .load_mono_resampled_raw(&resolved_audio_path)
+                .map(|raw| processor.vocal_activity_frames(&raw, emission_probs.nrows()))
+                .unwrap_or_else(|err| {
+                    sys_log(&format!("[Alignment] Vocal activity 분석 생략: {}", err));
+                    Vec::new()
+                });
+            let emission_probs = Arc::new(emission_probs);
+            let vocal_activity = Arc::new(vocal_activity);
+            store_cached_inference(
+                emission_key,
+                Arc::clone(&emission_probs),
+                Arc::clone(&vocal_activity),
+            );
+            (emission_probs, vocal_activity, false)
+        };
 
     if CANCEL_ALIGNMENT.load(Ordering::SeqCst) {
         return Err("작업이 사용자에 의해 취소되었습니다.".to_string());
     }
 
     let anchors = anchors.unwrap_or_default();
+    let line_ids = line_ids.unwrap_or_default();
+
+    // 영어 폴백은 절대 전곡에서 독립적으로 정렬하지 않는다. 프런트가 준
+    // 앵커 사이 창으로 emission을 잘라 Viterbi가 다른 절의 영어를 소비할
+    // 가능성을 차단한다. 창 인자가 없으면 기존 전곡 정렬과 동일하다.
+    let (emission_probs, vocal_activity, anchors, time_offset_ms) = match (window_start_ms, window_end_ms) {
+        (None, None) => (full_emission_probs, full_vocal_activity, anchors, 0),
+        (Some(requested_start), Some(requested_end)) => {
+            if requested_start < 0 || requested_end <= requested_start {
+                return Err("정렬 윈도우 시간이 올바르지 않습니다.".to_string());
+            }
+            let total_frames = full_emission_probs.nrows();
+            if total_frames < 2 {
+                return Err("정렬 emission이 너무 짧아 윈도우를 만들 수 없습니다.".to_string());
+            }
+            let start_frame = ((requested_start as f32 / 20.0).floor() as usize).min(total_frames - 1);
+            let end_frame = ((requested_end as f32 / 20.0).ceil() as usize).min(total_frames);
+            if end_frame <= start_frame + 1 {
+                return Err("정렬 윈도우가 너무 짧습니다.".to_string());
+            }
+            let time_offset_ms = start_frame as i64 * 20;
+            let window_end_ms = end_frame as i64 * 20;
+            sys_log(&format!(
+                "[Alignment] 윈도우 정렬: {}ms..{}ms ({}..{} frame)",
+                time_offset_ms, window_end_ms, start_frame, end_frame
+            ));
+            let window_activity = if full_vocal_activity.is_empty() {
+                Arc::new(Vec::new())
+            } else {
+                Arc::new(full_vocal_activity[
+                    start_frame.min(full_vocal_activity.len())..end_frame.min(full_vocal_activity.len())
+                ].to_vec())
+            };
+            let local_anchors = anchors.into_iter()
+                .filter(|(_, ms)| *ms >= time_offset_ms && *ms <= window_end_ms)
+                .map(|(index, ms)| (index, ms - time_offset_ms))
+                .collect();
+            (
+                Arc::new(full_emission_probs.as_ref().slice(ndarray::s![start_frame..end_frame, ..]).to_owned()),
+                window_activity,
+                local_anchors,
+                time_offset_ms,
+            )
+        }
+        _ => return Err("정렬 윈도우 시작과 끝은 함께 지정해야 합니다.".to_string()),
+    };
 
     // Cache the inference results
     {
         let mut cache = CACHED_STATE.lock();
         *cache = Some(CachedAlignmentState {
-            emission_probs: emission_probs.clone(),
+            emission_probs: Arc::clone(&emission_probs),
             tokens_path: tokens_path.clone(),
             lyrics: lyrics.clone(),
+            line_ids: line_ids.clone(),
             anchors: anchors.clone(),
+            time_offset_ms,
         });
     }
 
-    Ok(perform_alignment_internal(emission_probs, &tokens_path, &lyrics, trans_penalty.unwrap_or(-0.05), blank_penalty.unwrap_or(0.0), rep_penalty.unwrap_or(0.0), &anchors)?)
+    Ok(perform_alignment_internal(
+        emission_probs.as_ref(),
+        &tokens_path,
+        &lyrics,
+        &line_ids,
+        vocal_activity.as_ref(),
+        trans_penalty.unwrap_or(-0.05),
+        blank_penalty.unwrap_or(0.0),
+        rep_penalty.unwrap_or(0.0),
+        &anchors,
+        time_offset_ms,
+        emission_cache_hit,
+    )?)
 }
 
 #[command]
 pub async fn apply_alignment_tuning(penalty: f32, blank_penalty: Option<f32>, rep_penalty: Option<f32>) -> Result<AlignmentResult, String> {
+    let _permit = ALIGNMENT_QUEUE_LOCK.lock().await;
     CANCEL_ALIGNMENT.store(false, Ordering::SeqCst);
     sys_log(&format!("[Alignment] Real-time tuning requested with penalty: {:.3}", penalty));
 
-    let cache = CACHED_STATE.lock();
-    if let Some(state) = &*cache {
+    // Clone the single cached snapshot and release the parking_lot mutex before
+    // the expensive Viterbi pass. The async queue lock above still prevents a
+    // new alignment from replacing this snapshot while tuning is in progress.
+    let state = CACHED_STATE.lock().as_ref().cloned();
+    if let Some(state) = state {
         let result = perform_alignment_internal(
-            state.emission_probs.clone(),
+            state.emission_probs.as_ref(),
             &state.tokens_path,
             &state.lyrics,
+            &state.line_ids,
+            &[],
             penalty,
             blank_penalty.unwrap_or(0.0),
             rep_penalty.unwrap_or(0.0),
             &state.anchors,
+            state.time_offset_ms,
+            false,
         )?;
         sys_log("[Alignment] Real-time tuning completed successfully.");
         Ok(result)
@@ -785,83 +1067,205 @@ fn line_confidences(
     out
 }
 
-/// 노래 가능한 글자 수 — 길이 타당성의 기준이 되는 줄 "무게".
-/// 공백·문장부호를 빼고 실제 발음되는 글자만 센다(최소 1).
-fn singable_len(text: &str) -> usize {
-    text.chars()
-        .filter(|c| c.is_alphanumeric())
-        .count()
-        .max(1)
+/// 각 줄에 속한 목표 토큰 중 최종 Viterbi 경로가 한 프레임 이상 방문한 비율.
+/// CTC가 줄 전체를 blank/보간으로 넘긴 경우를 confidence와 독립적으로 잡는다.
+fn line_token_coverages(line_spans: &[LineTokenSpan], path: &[usize]) -> Vec<f32> {
+    line_spans.iter().map(|span| {
+        let expected = span.tok_to.saturating_sub(span.tok_from);
+        if expected == 0 { return 0.0; }
+        let mut seen = vec![false; expected];
+        for &token_index in path {
+            if token_index >= span.tok_from && token_index < span.tok_to {
+                seen[token_index - span.tok_from] = true;
+            }
+        }
+        seen.into_iter().filter(|visited| *visited).count() as f32 / expected as f32
+    }).collect()
 }
 
-/// 한 줄에 허용할 최대 길이 = 이 곡의 통상 속도 × 글자 수 × 이 배수.
-/// 늘여 부르기·멜리스마를 감안해 넉넉히 잡는다(오탐이 정탐보다 해롭다).
-const DURATION_SANITY_FACTOR: f64 = 3.5;
-/// 통상 속도와 무관하게 한 줄이 이보다 길면 신뢰하지 않는다.
-const DURATION_ABSOLUTE_CAP_MS: i64 = 15_000;
+fn line_vocal_activity(activity_frames: &[f32], start_frame: usize, end_frame: usize) -> f32 {
+    if activity_frames.is_empty() || end_frame <= start_frame { return 1.0; }
+    let from = start_frame.min(activity_frames.len());
+    let to = end_frame.min(activity_frames.len());
+    if to <= from { return 1.0; }
+    activity_frames[from..to].iter().sum::<f32>() / (to - from) as f32
+}
 
-/// 정렬 결과의 길이 타당성 검사·보정.
-///
-/// CTC 정렬은 음향적 근거가 약한 구간(간주·다른 언어 블록·잔향)에서 한 줄에
-/// 프레임을 과도하게 몰아줄 수 있다. 실제로 "한 줄인데 20초짜리 블럭"이 나왔다.
-///
-/// 곡 전체의 글자당 시간(중앙값)을 통상 속도로 보고, 그 배수를 크게 벗어난 줄은
-/// **시작 시각만 남기고 타당한 길이로 잘라낸다**. 시작은 보통 맞고(노래가 그때
-/// 시작된 건 음향적으로 잡힘) 끝이 흘러넘치는 형태라, 끝만 조정하는 게 안전하다.
-/// 잘라낸 뒤 생기는 빈 구간은 간주·타 언어 구간이므로 그대로 두면 된다.
-///
-/// 중앙값을 쓰는 이유: 평균은 문제의 20초 줄 자신에게 끌려가므로 기준이 오염된다.
-fn repair_implausible_durations(lines: &mut [LineAlignment]) -> usize {
-    if lines.len() < 4 {
-        return 0; // 표본이 너무 적어 통상 속도를 신뢰할 수 없음
+/// 전역 coarse 경로의 단어 시각을 줄 단위 범위로 바꾼다. 이 시각은 최종
+/// 결과가 아니라 VAD phrase 경계를 찾기 위한 관측값이므로, 경계를 찾지
+/// 못하면 호출자는 기존 경로를 그대로 사용한다.
+fn line_time_ranges(lyric_lines: &[String], timestamps: &[WordTimestamp]) -> Vec<(i64, i64)> {
+    let mut out = Vec::with_capacity(lyric_lines.len());
+    let mut word_cursor = 0usize;
+    for line in lyric_lines {
+        let word_count = line.split_whitespace().count();
+        let from = word_cursor.min(timestamps.len());
+        let to = word_cursor.saturating_add(word_count).min(timestamps.len());
+        if from < to {
+            out.push((timestamps[from].start_ms as i64, timestamps[to - 1].end_ms as i64));
+        } else {
+            out.push((0, 0));
+        }
+        word_cursor = word_cursor.saturating_add(word_count);
     }
+    out
+}
 
-    // 글자당 ms 비율의 중앙값 = 이 곡의 통상 발화 속도
-    let mut rates: Vec<f64> = lines
-        .iter()
-        .filter_map(|l| {
-            let dur = (l.end_ms - l.start_ms) as f64;
-            if dur <= 0.0 { return None; }
-            Some(dur / singable_len(&l.text) as f64)
-        })
-        .collect();
-    if rates.len() < 4 {
-        return 0;
-    }
-    rates.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let median_rate = rates[rates.len() / 2];
-    if !(median_rate > 0.0) {
-        return 0;
-    }
+/// 인접한 줄 사이에서 충분히 긴 저활동 구간을 찾는다. 이 경계는 모델이
+/// 확신한 줄처럼 취급하지 않고, phrase window를 나누는 약한 자동 앵커로만
+/// 사용한다. 짧은 자음 공백·리버브 꼬리는 경계로 채택하지 않는다.
+fn detect_vad_phrase_anchors(
+    line_spans: &[LineTokenSpan],
+    line_times: &[(i64, i64)],
+    activity_frames: &[f32],
+    frame_duration_ms: f32,
+) -> Vec<(usize, usize)> {
+    const SILENCE_ACTIVITY_THRESHOLD: f32 = 0.12;
+    const MIN_SILENCE_FRAMES: usize = 15; // 300ms at the 20ms CTC frame rate
 
-    let mut repaired = 0;
-    for line in lines.iter_mut() {
-        let dur = line.end_ms - line.start_ms;
-        if dur <= 0 { continue; }
-        let allowed = ((median_rate * DURATION_SANITY_FACTOR) * singable_len(&line.text) as f64) as i64;
-        let cap = allowed.min(DURATION_ABSOLUTE_CAP_MS).max(300);
-        if dur > cap {
-            let new_end = line.start_ms + cap;
-            line.end_ms = new_end;
-            // 줄 안의 단어 타임스탬프도 새 끝을 넘지 않게 맞춘다.
-            for w in line.words.iter_mut() {
-                if w.start_ms > new_end { w.start_ms = new_end; }
-                if w.end_ms > new_end { w.end_ms = new_end; }
+    if activity_frames.is_empty() || line_spans.len() < 2 || line_times.len() != line_spans.len() {
+        return Vec::new();
+    }
+    let mut anchors = Vec::new();
+    for i in 0..line_spans.len() - 1 {
+        let (line_start, line_end) = line_times[i];
+        let (next_start, _) = line_times[i + 1];
+        if line_spans[i].tok_to <= line_spans[i].tok_from
+            || line_spans[i + 1].tok_to <= line_spans[i + 1].tok_from
+            || line_end <= line_start
+            || next_start <= line_end
+        {
+            continue;
+        }
+
+        let from = ((line_end as f32 / frame_duration_ms).ceil() as usize).min(activity_frames.len());
+        let to = ((next_start as f32 / frame_duration_ms).floor() as usize).min(activity_frames.len());
+        if to <= from { continue; }
+
+        let mut best_run = (0usize, 0usize);
+        let mut run_start = None;
+        for frame in from..to {
+            if activity_frames[frame] <= SILENCE_ACTIVITY_THRESHOLD {
+                if run_start.is_none() { run_start = Some(frame); }
+            } else if let Some(start) = run_start.take() {
+                if frame - start > best_run.1 - best_run.0 { best_run = (start, frame); }
             }
-            repaired += 1;
+        }
+        if let Some(start) = run_start {
+            if to - start > best_run.1 - best_run.0 { best_run = (start, to); }
+        }
+        if best_run.1.saturating_sub(best_run.0) >= MIN_SILENCE_FRAMES {
+            let boundary_frame = best_run.0 + (best_run.1 - best_run.0) / 2;
+            anchors.push((line_spans[i + 1].tok_from, boundary_frame));
         }
     }
-    repaired
+    anchors
+}
+
+/// 자동 VAD 앵커를 수동 앵커와 합친다. 수동 앵커의 토큰·시간은 절대
+/// 이동하지 않으며, 그 사이에서만 자동 앵커를 추가한다. 자동 앵커끼리
+/// 순서가 충돌하면 해당 자동 앵커만 버린다.
+fn merge_phrase_anchors(
+    manual: &[(usize, usize)],
+    automatic: &[(usize, usize)],
+) -> Vec<(usize, usize)> {
+    let mut candidates: Vec<(usize, usize, bool)> = manual
+        .iter()
+        .map(|&(tok, frame)| (tok, frame, true))
+        .collect();
+    for &(tok, frame) in automatic {
+        if manual.iter().any(|&(manual_tok, _)| manual_tok == tok) { continue; }
+        let lower = manual.iter().filter(|&&(t, _)| t < tok).max_by_key(|&&(t, _)| t);
+        let upper = manual.iter().filter(|&&(t, _)| t > tok).min_by_key(|&&(t, _)| t);
+        if lower.map(|&(_, f)| frame <= f).unwrap_or(false)
+            || upper.map(|&(_, f)| frame >= f).unwrap_or(false)
+        {
+            continue;
+        }
+        candidates.push((tok, frame, false));
+    }
+    candidates.sort_by_key(|&(tok, _, is_manual)| (tok, !is_manual));
+
+    let mut out: Vec<(usize, usize, bool)> = Vec::new();
+    for candidate in candidates {
+        if let Some(last) = out.last() {
+            if candidate.0 <= last.0 || candidate.1 <= last.1 {
+                if candidate.2 && !last.2 {
+                    out.pop();
+                } else {
+                    continue;
+                }
+            }
+        }
+        if let Some(last) = out.last() {
+            if candidate.0 <= last.0 || candidate.1 <= last.1 { continue; }
+        }
+        out.push(candidate);
+    }
+    out.into_iter().map(|(tok, frame, _)| (tok, frame)).collect()
+}
+
+/// 줄의 Viterbi 프레임에서 목표 토큰과 같은 행의 최선의 다른 토큰 사이
+/// margin을 계산한다. emission 절대값이 전체 곡에서 흔들려도, 모델이 그
+/// 토큰을 다른 후보보다 선택했는지를 별도 증거로 사용할 수 있다.
+fn line_acoustic_margins(
+    emission_probs: &Array2<f32>,
+    target_tokens: &[usize],
+    line_spans: &[LineTokenSpan],
+    path: &[usize],
+) -> Vec<f32> {
+    let vocab = emission_probs.ncols();
+    line_spans.iter().map(|span| {
+        if span.tok_to <= span.tok_from || vocab < 2 { return 0.0; }
+        let mut sum = 0.0f32;
+        let mut count = 0usize;
+        for (frame, &token_index) in path.iter().enumerate() {
+            if token_index == usize::MAX || token_index < span.tok_from || token_index >= span.tok_to {
+                continue;
+            }
+            let target_id = target_tokens[token_index].min(vocab - 1);
+            let target_score = emission_probs[[frame, target_id]];
+            let mut best_other = f32::NEG_INFINITY;
+            for id in 0..vocab {
+                if id != target_id { best_other = best_other.max(emission_probs[[frame, id]]); }
+            }
+            let delta = (target_score - best_other).clamp(-20.0, 20.0);
+            let margin = 1.0 / (1.0 + (-delta).exp());
+            if margin.is_finite() { sum += margin; count += 1; }
+        }
+        if count == 0 { 0.0 } else { (sum / count as f32).clamp(0.0, 1.0) }
+    }).collect()
+}
+
+fn multi_evidence_confidences(
+    emission: &[f32],
+    margins: &[f32],
+    coverages: &[f32],
+    activities: &[f32],
+) -> Vec<f32> {
+    emission.iter().enumerate().map(|(i, &raw)| {
+        let margin = margins.get(i).copied().unwrap_or(0.0).clamp(0.0, 1.0);
+        let coverage = coverages.get(i).copied().unwrap_or(0.0).clamp(0.0, 1.0);
+        let activity = activities.get(i).copied().unwrap_or(1.0).clamp(0.0, 1.0);
+        (raw.clamp(0.0, 1.0)
+            * (0.70 + 0.30 * margin)
+            * (0.75 + 0.25 * coverage)
+            * (0.85 + 0.15 * activity)).clamp(0.0, 1.0)
+    }).collect()
 }
 
 fn perform_alignment_internal(
-    emission_probs: Array2<f32>,
+    emission_probs: &Array2<f32>,
     tokens_path: &Path,
     lyrics: &str,
+    line_ids: &[String],
+    vocal_activity_frames: &[f32],
     trans_p: f32,
     blank_p: f32,
     rep_p: f32,
     anchors: &[(usize, i64)],
+    time_offset_ms: i64,
+    emission_cache_hit: bool,
 ) -> Result<AlignmentResult, String> {
     let aligner = Aligner::new(tokens_path.to_str().unwrap())?;
     let frame_duration_ms = 20.0f32;
@@ -893,29 +1297,75 @@ fn perform_alignment_internal(
         anchors, &orig_to_pos, &line_spans, frame_duration_ms, emission_probs.nrows(),
     );
 
-    let path = if !anchor_pts.is_empty() {
+    let coarse_path = if !anchor_pts.is_empty() {
         // 앵커가 있으면 그 고정점으로 구간을 나눠 정렬한다 — 밀림이 앵커를 넘어
         // 전파되지 않는다. 사용자가 확정한 시각이므로 확신도 재정렬보다 강하다.
         sys_log(&format!("[Alignment] 사용자 앵커 {}개로 구간 분할 정렬", anchor_pts.len()));
         segmented_align_with_anchors(
-            &aligner, &emission_probs, &target_tokens, &anchor_pts, trans_p, blank_p, rep_p,
+            &aligner, emission_probs, &target_tokens, &anchor_pts, trans_p, blank_p, rep_p,
         )
     } else {
         // 앵커가 없으면 전역 1회 정렬 후, 확신도 높은 줄을 앵커로 그 사이만 재정렬.
-        let global = aligner.forced_align(&emission_probs, &target_tokens, trans_p, blank_p, rep_p);
+        let global = aligner.forced_align(emission_probs, &target_tokens, trans_p, blank_p, rep_p);
         refine_with_anchors(
-            &aligner, &emission_probs, &target_tokens, &line_spans,
+            &aligner, emission_probs, &target_tokens, &line_spans,
             &global, trans_p, blank_p, rep_p,
         )
         .unwrap_or(global)
     };
+    if CANCEL_ALIGNMENT.load(Ordering::SeqCst) {
+        return Err("작업이 사용자에 의해 취소되었습니다.".to_string());
+    }
+
+    // 한국어 1차도 전곡 경로를 그대로 신뢰하지 않고, coarse 경로에서 줄
+    // 사이의 긴 무성 구간을 찾아 phrase window를 만든다. 자동 경계는 수동
+    // 앵커보다 약하므로 모순되면 추가하지 않는다.
+    let coarse_timestamps = aligner.get_word_timestamps(
+        &coarse_path, &word_spans, frame_duration_ms,
+    );
+    let coarse_line_times = line_time_ranges(&lyric_lines, &coarse_timestamps);
+    let auto_phrase_anchors = detect_vad_phrase_anchors(
+        &line_spans,
+        &coarse_line_times,
+        vocal_activity_frames,
+        frame_duration_ms,
+    );
+    let phrase_anchors = merge_phrase_anchors(&anchor_pts, &auto_phrase_anchors);
+    let path = if phrase_anchors.len() > anchor_pts.len() {
+        sys_log(&format!(
+            "[Alignment] VAD phrase window {}개 추가 (수동 앵커 {}개, 자동 후보 {}개)",
+            phrase_anchors.len() - anchor_pts.len(),
+            anchor_pts.len(),
+            auto_phrase_anchors.len(),
+        ));
+        segmented_align_with_anchors(
+            &aligner, emission_probs, &target_tokens, &phrase_anchors,
+            trans_p, blank_p, rep_p,
+        )
+    } else {
+        coarse_path
+    };
+    if CANCEL_ALIGNMENT.load(Ordering::SeqCst) {
+        return Err("작업이 사용자에 의해 취소되었습니다.".to_string());
+    }
     let timestamps = aligner.get_word_timestamps(&path, &word_spans, frame_duration_ms);
 
     // 줄별 음향 확신도 — UI가 낮은 줄을 표시해 우선 검토를 유도한다(고친 줄은
     // 다음 정렬에서 앵커가 되어 선순환).
-    let confidences = line_confidences(&emission_probs, &target_tokens, &line_spans, &path);
+    let emission_confidences = line_confidences(emission_probs, &target_tokens, &line_spans, &path);
+    let coverages = line_token_coverages(&line_spans, &path);
+    let margins = line_acoustic_margins(emission_probs, &target_tokens, &line_spans, &path);
+    let final_line_times = line_time_ranges(&lyric_lines, &timestamps);
+    let activities: Vec<f32> = final_line_times.iter().map(|&(start_ms, end_ms)| {
+        let start_frame = (start_ms as f32 / frame_duration_ms) as usize;
+        let end_frame = (end_ms as f32 / frame_duration_ms) as usize;
+        line_vocal_activity(vocal_activity_frames, start_frame, end_frame)
+    }).collect();
+    let confidences = multi_evidence_confidences(
+        &emission_confidences, &margins, &coverages, &activities,
+    );
 
-    let greedy_path = aligner.greedy_decode(&emission_probs);
+    let greedy_path = aligner.greedy_decode(emission_probs);
 
     let mut all_line_alignments = Vec::new();
     let mut word_idx = 0;
@@ -945,29 +1395,45 @@ fn perform_alignment_internal(
             let extracted_text = aligner.get_text_from_path(&greedy_path, start_frame, end_frame);
 
             all_line_alignments.push(LineAlignment {
+                segment_id: line_ids.get(orig_of_line[li]).cloned().unwrap_or_default(),
+                input_index: orig_of_line[li],
                 text: line_text,
                 extracted_text,
-                start_ms: line_start_ms,
-                end_ms: line_end_ms,
-                words: line_words,
+                start_ms: line_start_ms + time_offset_ms,
+                end_ms: line_end_ms + time_offset_ms,
+                words: line_words.into_iter().map(|word| WordAlignment {
+                    word: word.word,
+                    start_ms: word.start_ms + time_offset_ms,
+                    end_ms: word.end_ms + time_offset_ms,
+                }).collect(),
                 confidence: confidences.get(li).copied().unwrap_or(0.0),
+                emission_confidence: emission_confidences.get(li).copied().unwrap_or(0.0),
+                acoustic_margin: margins.get(li).copied().unwrap_or(0.0),
+                token_coverage: coverages.get(li).copied().unwrap_or(0.0),
+                vocal_activity: activities.get(li).copied().unwrap_or(1.0),
             });
         }
     }
 
-    // 음향 근거가 약한 구간에서 한 줄이 과도하게 늘어나는 것을 잡아낸다.
-    let repaired = repair_implausible_durations(&mut all_line_alignments);
-    if repaired > 0 {
-        sys_log(&format!(
-            "[Alignment] 길이 타당성 보정: {}줄이 통상 속도를 크게 벗어나 잘라냄",
-            repaired
-        ));
-    }
+    // 결과 시간을 자동으로 잘라내지 않는다. CTC가 간주를 한 줄에 강제로
+    // 붙였을 수 있으므로, 원본 증거를 그대로 돌려주고 프런트 품질 게이트가
+    // 해당 줄만 미싱크/검토 대상으로 남긴다.
+
+    let diagnostics = AlignmentDiagnostics {
+        manual_anchor_count: anchor_pts.len(),
+        automatic_phrase_anchor_count: phrase_anchors.len().saturating_sub(anchor_pts.len()),
+        phrase_window_count: phrase_anchors.len().saturating_add(1),
+        phrase_boundary_ms: phrase_anchors.iter()
+            .map(|&(_, frame)| frame as i64 * frame_duration_ms as i64 + time_offset_ms)
+            .collect(),
+        emission_cache_hit,
+    };
 
     Ok(AlignmentResult {
         words: Vec::new(),
         lines: all_line_alignments,
         raw_segments: Vec::new(),
+        diagnostics,
     })
 }
 
@@ -1309,13 +1775,28 @@ impl Aligner {
         let n_frames = frame_end.saturating_sub(frame_start);
         let n_states = extended.len();
         if n_frames == 0 || n_states == 0 { return vec![]; }
+        let blank_path = || vec![usize::MAX; n_frames];
+        // At least one frame per target token is required, plus an intervening
+        // blank for consecutive identical CTC labels. Backtracking an
+        // unreachable final state otherwise follows zero-initialized pointers
+        // and fabricates a plausible-looking path.
+        let repeated_labels = target_tokens.windows(2).filter(|pair| pair[0] == pair[1]).count();
+        let min_required_frames = target_tokens.len().saturating_add(repeated_labels);
+        if n_frames < min_required_frames
+            || self.blank_id >= emission_probs.ncols()
+            || target_tokens.iter().any(|&token| token >= emission_probs.ncols())
+        {
+            return blank_path();
+        }
         let at = |t: usize, tok: usize| emission_probs[[frame_start + t, tok]];
         let mut dp = vec![vec![f32::NEG_INFINITY; n_states]; n_frames];
         let mut bp = vec![vec![0usize; n_states]; n_frames];
         dp[0][0] = at(0, extended[0]);
         if n_states > 1 { dp[0][1] = at(0, extended[1]); }
         for t in 1..n_frames {
-            if t % 50 == 0 && CANCEL_ALIGNMENT.load(Ordering::SeqCst) { break; } // Early exit for inner loops
+            if t % 50 == 0 && CANCEL_ALIGNMENT.load(Ordering::SeqCst) {
+                return blank_path();
+            }
             for s in 0..n_states {
                 let mut emit = at(t, extended[s]);
                 if extended[s] == self.blank_id {
@@ -1560,6 +2041,72 @@ impl Aligner {
 mod aligner_tests {
     use super::*;
 
+    // The production cache is process-global. Serialize only the cache tests
+    // so Rust's default parallel test runner cannot clear another test's data.
+    static EMISSION_CACHE_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn emission_cache_reuses_only_an_identical_audio_model_key() {
+        let _test_lock = EMISSION_CACHE_TEST_LOCK.lock();
+        EMISSION_CACHE.lock().clear();
+        let key = InferenceCacheKey {
+            audio_path: "song-vocal.wav".to_string(),
+            audio_size: 100,
+            audio_modified_ns: 10,
+            model_path: "korean-model.onnx".to_string(),
+            model_size: 200,
+            model_modified_ns: 20,
+        };
+        let emission = Arc::new(Array2::<f32>::zeros((4, 3)));
+        let activity = Arc::new(vec![0.2, 0.4, 0.6, 0.8]);
+        store_cached_inference(key.clone(), Arc::clone(&emission), Arc::clone(&activity));
+
+        let (cached_emission, cached_activity) = read_cached_inference(&key).expect("same key should hit");
+        assert!(Arc::ptr_eq(&cached_emission, &emission));
+        assert!(Arc::ptr_eq(&cached_activity, &activity));
+
+        let mut changed_model = key.clone();
+        changed_model.model_modified_ns += 1;
+        assert!(read_cached_inference(&changed_model).is_none());
+        EMISSION_CACHE.lock().clear();
+    }
+
+    #[test]
+    fn emission_cache_keeps_korean_and_english_models_for_the_same_song() {
+        let _test_lock = EMISSION_CACHE_TEST_LOCK.lock();
+        EMISSION_CACHE.lock().clear();
+        let korean = InferenceCacheKey {
+            audio_path: "song-vocal.wav".to_string(),
+            audio_size: 100,
+            audio_modified_ns: 10,
+            model_path: "korean-model.onnx".to_string(),
+            model_size: 200,
+            model_modified_ns: 20,
+        };
+        let mut english = korean.clone();
+        english.model_path = "english-model.onnx".to_string();
+
+        let korean_emission = Arc::new(Array2::<f32>::zeros((4, 3)));
+        let english_emission = Arc::new(Array2::<f32>::zeros((5, 3)));
+        let activity = Arc::new(vec![0.2, 0.4, 0.6, 0.8]);
+        store_cached_inference(
+            korean.clone(),
+            Arc::clone(&korean_emission),
+            Arc::clone(&activity),
+        );
+        store_cached_inference(
+            english.clone(),
+            Arc::clone(&english_emission),
+            Arc::clone(&activity),
+        );
+
+        let (cached_korean, _) = read_cached_inference(&korean).expect("Korean model should stay warm");
+        let (cached_english, _) = read_cached_inference(&english).expect("English model should stay warm");
+        assert!(Arc::ptr_eq(&cached_korean, &korean_emission));
+        assert!(Arc::ptr_eq(&cached_english, &english_emission));
+        EMISSION_CACHE.lock().clear();
+    }
+
     #[test]
     fn clean_lyrics_strips_structure_directives_only() {
         // 곡 구조 지시어는 통째로 제거.
@@ -1772,6 +2319,39 @@ mod aligner_tests {
         assert!(spans[2].tok_from >= spans[0].tok_to);
     }
 
+    #[test]
+    fn vad_phrase_anchors_use_only_long_silent_gaps() {
+        let spans = vec![
+            LineTokenSpan { tok_from: 0, tok_to: 3 },
+            LineTokenSpan { tok_from: 3, tok_to: 6 },
+        ];
+        let times = vec![(0, 200), (800, 1000)];
+        let mut activity = vec![0.8f32; 60];
+        for frame in 10..40 { activity[frame] = 0.0; }
+
+        let anchors = detect_vad_phrase_anchors(&spans, &times, &activity, 20.0);
+        assert_eq!(anchors, vec![(3, 25)], "300ms 이상의 무성 구간 중앙만 경계가 되어야 함");
+
+        for frame in 10..40 { activity[frame] = 0.3; }
+        assert!(detect_vad_phrase_anchors(&spans, &times, &activity, 20.0).is_empty());
+    }
+
+    #[test]
+    fn phrase_anchor_merge_never_moves_manual_anchors() {
+        let manual = vec![(2usize, 20usize), (8, 80)];
+        let automatic = vec![(5usize, 50), (2, 10), (7, 90)];
+        let merged = merge_phrase_anchors(&manual, &automatic);
+        assert_eq!(merged, vec![(2, 20), (5, 50), (8, 80)]);
+    }
+
+    #[test]
+    fn multi_evidence_confidence_penalizes_weak_margin_and_coverage() {
+        let strong = multi_evidence_confidences(&[0.8], &[0.9], &[1.0], &[1.0])[0];
+        let weak = multi_evidence_confidences(&[0.8], &[0.1], &[0.5], &[0.0])[0];
+        assert!(strong > weak);
+        assert!(strong <= 0.8 && weak > 0.0);
+    }
+
     /// 앵커 재정렬이 "구간을 가두는" 핵심 동작을 하는지: 뒤쪽 구간을 다시
     /// 정렬해도 앵커가 잡아둔 시간 범위를 벗어나지 않아야 한다.
     #[test]
@@ -1802,6 +2382,46 @@ mod aligner_tests {
         // 의미가 있다(같은 함수로 전체를 돌린 것과 길이가 다름).
         let full = aligner.forced_align(&e, &tokens, -0.05, 0.0, 0.0);
         assert_eq!(full.len(), 40);
+    }
+
+    #[test]
+    fn forced_align_rejects_infeasible_repeated_token_window() {
+        let vocab_path = write_test_vocab("shortrepeat");
+        let aligner = Aligner::new(vocab_path.to_str().unwrap()).unwrap();
+        std::fs::remove_file(&vocab_path).ok();
+
+        let token = *aligner.token_to_id.get("나").unwrap();
+        let emission = Array2::<f32>::from_elem((2, 10), -1.0);
+        // CTC needs 나-blank-나: two frames cannot represent this target.
+        let path = aligner.forced_align_range(
+            &emission,
+            &[token, token],
+            0,
+            2,
+            -0.05,
+            0.0,
+            0.0,
+        );
+        assert_eq!(path, vec![usize::MAX; 2]);
+    }
+
+    #[test]
+    fn forced_align_rejects_token_ids_outside_model_vocab() {
+        let vocab_path = write_test_vocab("badvocab");
+        let aligner = Aligner::new(vocab_path.to_str().unwrap()).unwrap();
+        std::fs::remove_file(&vocab_path).ok();
+
+        let emission = Array2::<f32>::from_elem((4, 3), -1.0);
+        let path = aligner.forced_align_range(
+            &emission,
+            &[99],
+            0,
+            4,
+            -0.05,
+            0.0,
+            0.0,
+        );
+        assert_eq!(path, vec![usize::MAX; 4]);
     }
 
     #[test]
@@ -1879,66 +2499,16 @@ mod aligner_tests {
         assert!(conf[0] > conf[1], "강한 줄이 약한 줄보다 확신도 높아야");
     }
 
-    fn mk_line(text: &str, start_ms: i64, end_ms: i64) -> LineAlignment {
-        LineAlignment {
-            text: text.to_string(),
-            extracted_text: String::new(),
-            start_ms,
-            end_ms,
-            words: vec![WordAlignment { word: text.to_string(), start_ms, end_ms }],
-            confidence: 1.0,
-        }
-    }
-
     #[test]
-    fn repairs_line_that_swallowed_a_foreign_or_instrumental_section() {
-        // 통상 6글자에 ~1.2초인 곡에서, 한 줄만 20초를 삼킨 상황.
-        let mut lines = vec![
-            mk_line("아무도안믿었던", 1_000, 2_200),
-            mk_line("사랑의종말론", 2_200, 3_400),
-            mk_line("왔다네정말로", 3_400, 23_400), // ← 20초, 비정상
-            mk_line("멸종위기사랑", 23_400, 24_600),
-            mk_line("내일이면인류가", 24_600, 25_800),
+    fn token_coverage_rejects_tokens_not_visited_by_the_path() {
+        let spans = vec![
+            LineTokenSpan { tok_from: 0, tok_to: 3 },
+            LineTokenSpan { tok_from: 3, tok_to: 5 },
         ];
-        let n = repair_implausible_durations(&mut lines);
-        assert_eq!(n, 1, "비정상 줄 1개만 보정돼야 함");
-
-        // 시작은 유지, 끝만 타당한 길이로 잘림.
-        assert_eq!(lines[2].start_ms, 3_400, "시작 시각은 건드리지 않음");
-        let dur = lines[2].end_ms - lines[2].start_ms;
-        assert!(dur < 5_000, "20초가 타당한 길이로 잘려야 함: {}ms", dur);
-        assert!(dur > 0);
-        // 단어 타임스탬프도 새 끝을 넘지 않아야 함.
-        assert!(lines[2].words[0].end_ms <= lines[2].end_ms);
-
-        // 정상 줄들은 그대로.
-        assert_eq!(lines[0].end_ms, 2_200);
-        assert_eq!(lines[4].end_ms, 25_800);
-    }
-
-    #[test]
-    fn repair_leaves_normal_alignment_untouched() {
-        // 길이가 글자 수에 비례해 자연스러운 경우 — 아무것도 건드리면 안 됨.
-        let mut lines = vec![
-            mk_line("가나다", 0, 600),
-            mk_line("가나다라마바", 600, 1_800),
-            mk_line("가나", 1_800, 2_200),
-            mk_line("가나다라", 2_200, 3_000),
-            mk_line("가나다라마", 3_000, 4_000),
-        ];
-        let before: Vec<_> = lines.iter().map(|l| (l.start_ms, l.end_ms)).collect();
-        let n = repair_implausible_durations(&mut lines);
-        assert_eq!(n, 0, "정상 정렬은 보정하지 않아야 함");
-        let after: Vec<_> = lines.iter().map(|l| (l.start_ms, l.end_ms)).collect();
-        assert_eq!(before, after);
-    }
-
-    #[test]
-    fn repair_skips_when_too_few_lines_to_judge() {
-        // 표본이 적으면 통상 속도를 신뢰할 수 없으므로 손대지 않는다.
-        let mut lines = vec![mk_line("가", 0, 30_000), mk_line("나", 30_000, 30_500)];
-        assert_eq!(repair_implausible_durations(&mut lines), 0);
-        assert_eq!(lines[0].end_ms, 30_000, "표본 부족 시 원본 유지");
+        // 첫 줄은 0, 2만 방문하고 1은 놓침; 둘째 줄은 모두 방문.
+        let coverage = line_token_coverages(&spans, &[0, 2, 3, 4, usize::MAX]);
+        assert!((coverage[0] - (2.0 / 3.0)).abs() < f32::EPSILON);
+        assert_eq!(coverage[1], 1.0);
     }
 
     /// 다른 언어 줄이 낀 혼합 곡에서, 그 구간을 CTC blank가 흡수해 자기 언어

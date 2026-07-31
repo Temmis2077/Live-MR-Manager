@@ -25,7 +25,48 @@ vi.mock('../src/js/ui/components.js', () => ({
 
 import { invoke } from '../src/js/tauri-bridge.js';
 import { state } from '../src/js/state.js';
-import { enqueueAlignment, isAlignmentBusy, onAlignmentItemComplete, collectAlignmentAnchors } from '../src/js/alignment-queue.js';
+import {
+  enqueueAlignment,
+  isAlignmentBusy,
+  onAlignmentItemComplete,
+  collectAlignmentAnchors,
+  buildEnglishFallbackWindows,
+  buildSecondPassWindows,
+  enforceAiTimelineOrder,
+} from '../src/js/alignment-queue.js';
+
+describe('English fallback windows', () => {
+  it('bounds a contiguous English block between nearby primary anchors', () => {
+    const entries = [0, 1, 2, 3, 4].map((segmentIndex) => ({ id: `segment:${segmentIndex}`, segmentIndex }));
+    const windows = buildEnglishFallbackWindows({
+      fallbackEntries: [entries[1], entries[2]],
+      primaryRawLines: [
+        { segment_id: 'segment:1', start_ms: 2000, end_ms: 3000 },
+        { segment_id: 'segment:2', start_ms: 3200, end_ms: 4000 },
+      ],
+      acceptedLines: [
+        { segment_id: 'segment:0', start_ms: 0, end_ms: 1000 },
+        { segment_id: 'segment:4', start_ms: 6000, end_ms: 7000 },
+      ],
+      entries,
+      segments: entries.map(() => ({ start: 0, end: 0 })),
+    });
+    expect(windows).toHaveLength(1);
+    expect(windows[0]).toMatchObject({ windowStartMs: 1000, windowEndMs: 6000 });
+    expect(windows[0].entries.map((entry) => entry.id)).toEqual(['segment:1', 'segment:2']);
+  });
+
+  it('infers a bounded fallback window when primary skips pure English lines', () => {
+    const windows = buildEnglishFallbackWindows({
+      fallbackEntries: [{ id: 'segment:1', segmentIndex: 1 }],
+      primaryRawLines: [],
+      acceptedLines: [],
+      entries: [{ id: 'segment:1', segmentIndex: 1 }],
+      segments: [{ start: 0, end: 0 }, { start: 0, end: 0 }],
+    });
+    expect(windows[0]).toMatchObject({ windowStartMs: 0, windowEndMs: 9000 });
+  });
+});
 
 describe('collectAlignmentAnchors', () => {
   it('makes synced lines into (index, ms) anchors and skips unsynced ones', () => {
@@ -39,20 +80,52 @@ describe('collectAlignmentAnchors', () => {
     expect(anchors).toEqual([[0, 3000], [2, 8500]]);
   });
 
-  it('uses vocalStart as the first-line anchor only when line 0 is unsynced', () => {
+  it('completely ignores vocalStart during alignment', () => {
     const segments = [
       { text: '첫 줄', start: 0, end: 0 },
       { text: '둘째 줄', start: 0, end: 0 },
     ];
     const { anchors } = collectAlignmentAnchors(segments, { vocalStartSec: 12.34 });
-    expect(anchors).toEqual([[0, 12340]]);
+    // 보컬 시작 마커는 재생/표시용일 뿐, AI 정렬의 하드 앵커가 아니다.
+    expect(anchors).toEqual([]);
   });
 
-  it('prefers a real synced line 0 over the vocalStart marker', () => {
+  it('keeps manual lyric anchors but ignores vocalStart', () => {
     const segments = [{ text: '첫 줄', start: 2, end: 4 }];
     const { anchors } = collectAlignmentAnchors(segments, { vocalStartSec: 12.34 });
-    // 첫 줄이 이미 싱크됐으므로 보컬시작 마커 앵커는 추가되지 않는다.
     expect(anchors).toEqual([[0, 2000]]);
+  });
+
+  it('does not promote an AI approx result to a hard manual anchor', () => {
+    const segments = [
+      { text: 'AI 결과', start: 2, end: 4, approx: true },
+      { text: '수동 확정', start: 6, end: 8 },
+    ];
+    const { anchors } = collectAlignmentAnchors(segments, {});
+    expect(anchors).toEqual([[1, 6000]]);
+  });
+
+  it('ignores interlude markers during alignment', () => {
+    const segments = [
+      { text: '첫 줄', start: 0, end: 0 },
+      { text: '둘째 줄', start: 0, end: 0 },
+    ];
+    const { allTexts, anchors } = collectAlignmentAnchors(segments, {
+      vocalStartSec: 4,
+      interludes: [{ start: 10, end: 30 }],
+    });
+    expect(allTexts).toEqual(['첫 줄', '둘째 줄']);
+    expect(anchors).toEqual([]);
+  });
+
+  it('does not treat a structure label as an alignment line', () => {
+    const segments = [
+      { text: '간주', start: 10, end: 20 },
+      { text: '첫 줄', start: 0, end: 0 },
+    ];
+    const { allTexts, anchors } = collectAlignmentAnchors(segments, {});
+    expect(allTexts).toEqual(['첫 줄']);
+    expect(anchors).toEqual([]);
   });
 
   it('skips empty sync-text lines when indexing anchors', () => {
@@ -63,6 +136,106 @@ describe('collectAlignmentAnchors', () => {
     const { allTexts, anchors } = collectAlignmentAnchors(segments, {});
     expect(allTexts).toEqual(['진짜 줄']);
     expect(anchors).toEqual([[0, 6000]]);
+  });
+
+  it('keeps pure English IDs but sends blank primary text for Korean pass', () => {
+    const { allTexts, entries } = collectAlignmentAnchors([
+      { text: '한국어 줄', start: 0, end: 0 },
+      { original: 'Oh drowning', pronunciation: '오 드라우닝', text: 'Oh drowning', start: 0, end: 0 },
+      { text: '다음 한국어', start: 0, end: 0 },
+    ], {}, { skipPureEnglish: true });
+    expect(allTexts).toEqual(['한국어 줄', '', '다음 한국어']);
+    expect(entries[1]).toMatchObject({ segmentIndex: 1, skipPrimary: true, fallbackCandidate: true });
+  });
+
+  it('keeps pure English text for English and dual-language passes', () => {
+    const { allTexts, entries } = collectAlignmentAnchors([
+      { text: '한국어 줄', start: 0, end: 0 },
+      { text: 'Oh drowning', start: 0, end: 0 },
+    ], {});
+    expect(allTexts).toEqual(['한국어 줄', 'Oh drowning']);
+    expect(entries[1]).toMatchObject({ skipPrimary: false, fallbackCandidate: false });
+  });
+});
+
+describe('post-merge timeline gate', () => {
+  it('drops only the weaker automatic line when starts reverse', () => {
+    const segments = [
+      { text: '앞줄', start: 10, end: 11, approx: true, confidence: 0.8 },
+      { text: '뒷줄', start: 9.9, end: 10.5, approx: true, confidence: 0.2 },
+    ];
+    const dropped = enforceAiTimelineOrder(segments);
+    expect(dropped.map((item) => item.id)).toEqual(['segment:1']);
+    expect(segments[0].start).toBe(10);
+    expect(segments[1].start).toBe(0);
+  });
+
+  it('preserves a manual line and drops a reversed automatic line', () => {
+    const segments = [
+      { text: '수동 줄', start: 10, end: 11, confidence: 1 },
+      { text: '자동 줄', start: 9.9, end: 10.5, approx: true, confidence: 0.9 },
+    ];
+    const dropped = enforceAiTimelineOrder(segments);
+    expect(dropped.map((item) => item.id)).toEqual(['segment:1']);
+    expect(segments[0].start).toBe(10);
+    expect(segments[1].start).toBe(0);
+  });
+});
+
+describe('second-pass rescue windows', () => {
+  it('keeps unsynced lines between accepted anchors in one bounded window', () => {
+    const entries = [0, 1, 2, 3].map((segmentIndex) => ({
+      id: `segment:${segmentIndex}`,
+      segmentIndex,
+    }));
+    const segments = [
+      { text: '앞 앵커', start: 10, end: 11, approx: true },
+      { text: '미싱크 하나', start: 0, end: 0 },
+      { text: '미싱크 둘', start: 0, end: 0 },
+      { text: '뒤 앵커', start: 20, end: 21, approx: true },
+    ];
+    const windows = buildSecondPassWindows({
+      rescueEntries: [entries[1], entries[2]],
+      segments,
+      entries,
+      markers: {},
+      paddingMs: 2_000,
+    });
+
+    expect(windows).toHaveLength(1);
+    expect(windows[0]).toMatchObject({
+      language: 'ko',
+      windowStartMs: 9_000,
+      windowEndMs: 20_000,
+      windowSource: 'accepted_anchor_window',
+    });
+    expect(windows[0].entries.map((entry) => entry.id)).toEqual([
+      'segment:1',
+      'segment:2',
+    ]);
+    expect(windows[0].windowContext.previousAnchor).toMatchObject({ segmentIndex: 0 });
+    expect(windows[0].windowContext.nextAnchor).toMatchObject({ segmentIndex: 3 });
+  });
+
+  it('splits contiguous rescue lines when their language changes', () => {
+    const entries = [0, 1, 2].map((segmentIndex) => ({
+      id: `segment:${segmentIndex}`,
+      segmentIndex,
+    }));
+    const windows = buildSecondPassWindows({
+      rescueEntries: [
+        { ...entries[0], language: 'ko' },
+        { ...entries[1], language: 'en' },
+        { ...entries[2], language: 'en' },
+      ],
+      segments: entries.map(() => ({ start: 0, end: 0 })),
+      entries,
+      markers: { vocalStartSec: 3 },
+    });
+
+    expect(windows.map((window) => window.language)).toEqual(['ko', 'en']);
+    expect(windows.map((window) => window.entries.length)).toEqual([1, 2]);
+    expect(windows.every((window) => window.windowEndMs > window.windowStartMs)).toBe(true);
   });
 });
 
@@ -176,6 +349,22 @@ describe('mergeAlignmentResult', () => {
     expect(segments[0].start).toBeCloseTo(1);
     expect(segments[1].start).toBeCloseTo(9);
   });
+
+  it('never text-rematches an ID result onto another repeated lyric block', () => {
+    const segments = [
+      { text: '후렴', start: 5, end: 6 },
+      { text: '후렴', start: 0, end: 0 },
+    ];
+    const entries = [
+      { id: 'segment:0', segmentIndex: 0 },
+      { id: 'segment:1', segmentIndex: 1 },
+    ];
+    const lines = [
+      { segment_id: 'segment:0', text: '후렴', start_ms: 1000, end_ms: 2000 },
+    ];
+    expect(mergeAlignmentResult(segments, lines, entries)).toBe(0);
+    expect(segments[1]).toMatchObject({ start: 0, end: 0 });
+  });
 });
 
 describe('alignment queue sequential processor', () => {
@@ -263,6 +452,150 @@ describe('alignment queue sequential processor', () => {
     const item = state.alignmentQueue.find((i) => i.path === 'song-x');
     expect(item.status).toBe('error');
     expect(item.error).toContain('모델');
+  });
+
+  it('saves timing onto the original English LRC without persisting temporary phonetics', async () => {
+    lsStore.alignmentLanguage = 'en-ko';
+    let saved = '';
+    invoke.mockImplementation(async (cmd, args) => {
+      switch (cmd) {
+        case 'load_lrc_file':
+          return '[00:00.00]Oh drowning';
+        case 'get_model_list':
+          return ['한국어 모델|/models/wav2vec2-korean-lyrics'];
+        case 'run_forced_alignment':
+          return { lines: [{ text: '오 드라우닝', start_ms: 1000, end_ms: 2000 }] };
+        case 'save_lrc_file':
+          saved = args.content;
+          return 'ok';
+        default:
+          return null;
+      }
+    });
+
+    enqueueAlignment(['english-original']);
+    await flushQueue();
+    expect(saved).toContain('Oh drowning');
+    expect(saved).not.toContain('[pron]');
+    expect(saved).not.toContain('오 드라우닝');
+  });
+
+  it('sends original English text to the English-only model', async () => {
+    lsStore.alignmentLanguage = 'en';
+    let saved = '';
+    const alignmentCalls = [];
+    invoke.mockImplementation(async (cmd, args) => {
+      switch (cmd) {
+        case 'load_lrc_file':
+          return '[00:00.00]Oh drowning';
+        case 'get_model_list':
+          return ['English model|/models/wav2vec2-english-lyrics'];
+        case 'run_forced_alignment':
+          alignmentCalls.push(args);
+          return {
+            lines: [{
+              segment_id: 'segment:0',
+              text: 'Oh drowning',
+              start_ms: 1000,
+              end_ms: 2000,
+              confidence: 0.8,
+              token_coverage: 1,
+            }],
+          };
+        case 'save_lrc_file':
+          saved = args.content;
+          return 'ok';
+        default:
+          return null;
+      }
+    });
+
+    enqueueAlignment(['english-only']);
+    await flushQueue();
+
+    expect(alignmentCalls).toHaveLength(1);
+    expect(alignmentCalls[0]).toMatchObject({ language: 'en', lyrics: 'Oh drowning' });
+    expect(saved).toContain('[00:01.00]Oh drowning');
+  });
+
+  it('continues through the English fallback diagnostic stage without changing source text', async () => {
+    lsStore.alignmentLanguage = 'en-ko';
+    let saved = '';
+    const alignmentCalls = [];
+    invoke.mockImplementation(async (cmd, args) => {
+      switch (cmd) {
+        case 'load_lrc_file':
+          return '[00:00.00]Oh drowning';
+        case 'get_model_list':
+          return [
+            '한국어 모델|/models/wav2vec2-korean-lyrics',
+            'English model|/models/wav2vec2-english-lyrics',
+          ];
+        case 'run_forced_alignment':
+          alignmentCalls.push({ language: args.language, lyrics: args.lyrics });
+          return args.language === 'ko'
+            ? { lines: [{ text: '오 드라우닝', start_ms: 1000, end_ms: 2000, confidence: 0, token_coverage: 0 }] }
+            : { lines: [{ text: 'Oh drowning', start_ms: 2000, end_ms: 2800, confidence: 0.8, token_coverage: 1 }] };
+        case 'save_lrc_file':
+          saved = args.content;
+          return 'ok';
+        default:
+          return null;
+      }
+    });
+
+    enqueueAlignment(['english-fallback']);
+    await flushQueue();
+    expect(state.alignmentQueue.find((i) => i.path === 'english-fallback').status).toBe('done');
+    expect(alignmentCalls.map((call) => call.language)).toEqual(['ko', 'ko', 'en']);
+    expect(alignmentCalls[0].lyrics).toBe('');
+    expect(alignmentCalls[1].lyrics).toContain('오 드라우닝');
+    expect(saved).toContain('Oh drowning');
+    expect(saved).not.toContain('[pron]');
+  });
+
+  it('rescues only the remaining unsynced lines in a second local pass', async () => {
+    lsStore.alignmentLanguage = 'ko';
+    let saved = '';
+    const alignmentCalls = [];
+    invoke.mockImplementation(async (cmd, args) => {
+      switch (cmd) {
+        case 'load_lrc_file':
+          return '[00:00.00]첫 번째 줄\n[00:00.00]두 번째 줄';
+        case 'get_model_list':
+          return ['한국어 모델|/models/wav2vec2-korean-lyrics'];
+        case 'run_forced_alignment':
+          alignmentCalls.push(args);
+          if (alignmentCalls.length === 1) {
+            return {
+              lines: [
+                { segment_id: 'segment:0', text: '첫 번째 줄', start_ms: 1000, end_ms: 2000, confidence: 0.9 },
+                { segment_id: 'segment:1', text: '두 번째 줄', start_ms: 2000, end_ms: 3000, confidence: 0 },
+              ],
+            };
+          }
+          return {
+            lines: [{ segment_id: 'segment:1', text: '두 번째 줄', start_ms: 2400, end_ms: 3400, confidence: 0.9 }],
+          };
+        case 'save_lrc_file':
+          saved = args.content;
+          return 'ok';
+        default:
+          return null;
+      }
+    });
+
+    enqueueAlignment(['second-pass-ko']);
+    await flushQueue();
+
+    expect(state.alignmentQueue.find((item) => item.path === 'second-pass-ko').status).toBe('done');
+    expect(alignmentCalls).toHaveLength(2);
+    expect(alignmentCalls[1].language).toBe('ko');
+    expect(alignmentCalls[1].lyrics).toBe('두 번째 줄');
+    expect(alignmentCalls[1].windowStartMs).toBe(0);
+    expect(alignmentCalls[1].windowEndMs).toBe(10000);
+    expect(saved).toContain('[00:01.00]첫 번째 줄');
+    expect(saved).toContain('[00:02.40]두 번째 줄');
   });
 
   it('dedupes paths already queued', () => {

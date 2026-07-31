@@ -204,6 +204,7 @@ pub fn run() {
             alignment::get_separated_audio_list, alignment::run_forced_alignment,
             alignment::cancel_forced_alignment, alignment::read_audio_file,
             alignment::apply_alignment_tuning,
+            alignment::write_alignment_debug_trace,
             alignment::get_waveform_summary, alignment::get_model_list,
             alignment::download_alignment_model, alignment::list_downloadable_alignment_models,
             alignment::save_lrc_file, alignment::load_lrc_file,

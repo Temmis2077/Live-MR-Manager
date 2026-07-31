@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseLrc, parseMarkers, formatMarkerLine, isTriplet, getSyncText, encodeLrc, suggestVocalStartFromSegments, getIntroSkipTargetSec, parseTimeInput, formatTimeInput, groupTripletLines, isHangulDominant } from '../src/js/lrc-parser.js';
+import { parseLrc, parseMarkers, formatMarkerLine, isTriplet, getSyncText, encodeLrc, normalizeLyricTimeline, suggestVocalStartFromSegments, getIntroSkipTargetSec, parseTimeInput, formatTimeInput, groupTripletLines, isHangulDominant } from '../src/js/lrc-parser.js';
 
 describe('encodeLrc', () => {
   it('preserves segment order for partially-synced lyrics (no time-sorting)', () => {
@@ -41,6 +41,17 @@ describe('encodeLrc', () => {
     expect(roundTripped[0].pronunciation).toBe('차음');
     expect(roundTripped[0].start).toBeCloseTo(5);
   });
+
+  it('preserves completed lyric order before writing', () => {
+    const content = encodeLrc([
+      { text: '늦게 입력된 앞 가사', start: 20, end: 0 },
+      { text: '먼저 불린 뒷 가사', start: 10, end: 0 },
+      { text: '마지막 가사', start: 30, end: 0 },
+    ]);
+    expect(parseLrc(content, 40).map((s) => s.text)).toEqual([
+      '늦게 입력된 앞 가사', '먼저 불린 뒷 가사', '마지막 가사',
+    ]);
+  });
 });
 
 describe('parseLrc', () => {
@@ -66,6 +77,38 @@ describe('parseLrc', () => {
     const segments = parseLrc(lrc, 10);
     expect(segments[0].text).toBe('[후렴]가사');
     expect(isTriplet(segments[0])).toBe(false);
+  });
+
+  it('preserves lyric order even when imported timestamps are reverse', () => {
+    const segments = parseLrc([
+      '[00:20.00]둘째로 입력됐지만 늦은 가사',
+      '[00:10.00]먼저 불린 가사',
+      '[00:30.00]마지막 가사',
+    ].join('\n'), 40);
+    expect(segments.map((s) => s.start)).toEqual([20, 10, 30]);
+    expect(segments.map((s) => s.text)).toEqual([
+      '둘째로 입력됐지만 늦은 가사', '먼저 불린 가사', '마지막 가사',
+    ]);
+  });
+
+  it('never moves cues across unsynced lyrics', () => {
+    const normalized = normalizeLyricTimeline([
+      { text: '늦은 싱크', start: 20 },
+      { text: '아직 미싱크', start: 0 },
+      { text: '이른 싱크', start: 10 },
+    ]);
+    expect(normalized.map((s) => s.text)).toEqual(['늦은 싱크', '아직 미싱크', '이른 싱크']);
+  });
+
+  it('keeps cue ordering and timing values untouched', () => {
+    const normalized = normalizeLyricTimeline([
+      { text: '늦은 가사', start: 20, end: 30 },
+      { text: '빠른 가사', start: 10, end: 25 },
+      { text: '동시 보컬', start: 10, end: 22 },
+      { text: '마지막', start: 30, end: 35 },
+    ]);
+    expect(normalized.map((s) => s.start)).toEqual([20, 10, 10, 30]);
+    expect(normalized.map((s) => s.end)).toEqual([30, 25, 22, 35]);
   });
 });
 

@@ -172,10 +172,10 @@ export class ForcedAlignmentViewer {
                         </div>
                         <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px; flex-wrap:wrap;">
                             <button id="ai-align-btn" class="sync-reset-btn" style="background:var(--align-item-active-bg); color:var(--accent-primary); border-color:var(--align-item-active-border);" title="AI 음성인식 모델로 가사와 오디오를 자동 정렬합니다. 노래 음성 특성상 완벽하지 않을 수 있어 결과는 직접 다듬어야 합니다.">AI 자동 정렬</button>
-                            <select id="ai-align-language" title="정렬에 사용할 음성 인식 언어. 가사 언어에 맞게 선택하세요. 랩/혼합은 한국어·영어 모델을 모두 사용해 줄마다 우세 언어 결과를 채택합니다 (정렬 시간 2배)." style="font-size:0.75rem; padding:4px 6px; border-radius:6px; background:var(--align-surface-input); color:var(--align-text-soft); border:1px solid var(--align-item-border);">
+                            <select id="ai-align-language" title="정렬에 사용할 음성인식 방식. 영어 차음 모드는 영어 줄을 한글 발음으로 바꿔 한국어 모델 1회로 정렬합니다." style="font-size:0.75rem; padding:4px 6px; border-radius:6px; background:var(--align-surface-input); color:var(--align-text-soft); border:1px solid var(--align-item-border);">
                                 <option value="ko">한국어/일본어(차음)</option>
                                 <option value="en">English</option>
-                                <option value="rap">랩/혼합 (한+영)</option>
+                                <option value="en-ko">영어 차음 + 한국어 모델 (추천)</option>
                             </select>
                             <button id="ai-align-cancel-btn" class="sync-reset-btn" style="display:none;">취소</button>
                             <span id="ai-align-status" style="font-size:0.75rem; color:var(--align-text-soft);"></span>
@@ -258,7 +258,7 @@ export class ForcedAlignmentViewer {
         // 정렬 대기열이 어떤 곡을 끝내면, 그 곡이 지금 에디터에 열려 있을 때
         // 결과(정렬 라인)를 즉시 in-memory 반영해 approx 표시까지 살린다.
         import('./alignment-queue.js').then(({ onAlignmentItemComplete }) => {
-            onAlignmentItemComplete((path, lines) => this.onQueueAlignmentDone(path, lines));
+            onAlignmentItemComplete((path, lines, segments) => this.onQueueAlignmentDone(path, lines, segments));
         }).catch(() => {});
         get('toggle-translation-btn').onclick = () => {
             setShowTranslation(!getShowTranslation());
@@ -1974,11 +1974,17 @@ export class ForcedAlignmentViewer {
      * 그 곡이 지금 에디터에 열려 있으면 정렬 결과를 in-memory 세그먼트에 병합해
      * approx(점선) 표시까지 그대로 반영한다. 다른 곡이면 무시(파일은 이미 저장됨).
      */
-    onQueueAlignmentDone(path, lines) {
+    onQueueAlignmentDone(path, lines, preparedSegments = null) {
         if (!path || path !== this.state.currentPath) return;
         if (!Array.isArray(lines) || lines.length === 0) return;
+        if (Array.isArray(preparedSegments) && preparedSegments.length > 0) {
+            // The queue returns the original LRC representation with timing
+            // only; temporary phonetic alignment text is never persisted.
+            this.state.segments = preparedSegments.map((s) => ({ ...s }));
+        }
+        const adoptedPrepared = Array.isArray(preparedSegments) && preparedSegments.length > 0;
         const applied = mergeAlignmentResult(this.state.segments, lines);
-        if (applied > 0) {
+        if (applied > 0 || adoptedPrepared) {
             this.renderLyricList();
             this.drawWaveform();
             // 대기열이 이미 LRC로 저장했으므로 여기서 다시 dirty로 만들지 않음.

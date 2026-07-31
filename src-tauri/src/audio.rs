@@ -61,6 +61,49 @@ impl AudioProcessor {
         Ok(Array1::from_vec(final_samples))
     }
 
+    /// Alignment-quality VAD용: 음성 전처리(ZMUV/강조) 이전의 16 kHz mono를
+    /// 반환한다. 분리 보컬의 짧은 RMS가 실제 무성 구간을 구분하는 보조 신호가
+    /// 되므로, 진폭 정보를 없애는 ZMUV 전 단계가 필요하다.
+    pub fn load_mono_resampled_raw<P: AsRef<Path>>(&self, path: P) -> Result<Vec<f32>, String> {
+        let file = File::open(path).map_err(|e| format!("파일을 열 수 없습니다: {}", e))?;
+        let decoder = rodio::Decoder::new(BufReader::new(file))
+            .map_err(|e| format!("오디오 디코딩 실패: {}", e))?;
+        let source_sample_rate = decoder.sample_rate().get();
+        let channels = decoder.channels().get() as usize;
+        let samples = convert_to_f32_vec(decoder);
+        let mut mono = if channels > 1 {
+            samples.chunks_exact(channels)
+                .map(|chunk: &[f32]| chunk.iter().sum::<f32>() / channels as f32)
+                .collect::<Vec<f32>>()
+        } else {
+            samples
+        };
+        if source_sample_rate != self.target_sample_rate {
+            mono = self.resample(&mono, source_sample_rate, self.target_sample_rate)?;
+        }
+        Ok(mono)
+    }
+
+    /// 20ms 단위의 보컬 활동도(0~1). RMS의 90백분위에 대해 상대 임계값을
+    /// 사용하므로, 곡별 마스터링 볼륨 차이에 덜 민감하다.
+    pub fn vocal_activity_frames(&self, raw_samples: &[f32], frame_count: usize) -> Vec<f32> {
+        if raw_samples.is_empty() || frame_count == 0 { return vec![0.0; frame_count]; }
+        let samples_per_frame = (self.target_sample_rate as f32 * 0.020) as usize;
+        let mut rms: Vec<f32> = raw_samples.chunks(samples_per_frame.max(1))
+            .map(|chunk| (chunk.iter().map(|x| x * x).sum::<f32>() / chunk.len().max(1) as f32).sqrt())
+            .collect();
+        if rms.is_empty() { return vec![0.0; frame_count]; }
+        let mut sorted = rms.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let p90 = sorted[((sorted.len() - 1) as f32 * 0.90).round() as usize].max(1e-5);
+        let floor = (p90 * 0.08).max(0.0008);
+        rms.iter_mut().for_each(|v| *v = ((*v - floor) / (p90 - floor).max(1e-5)).clamp(0.0, 1.0));
+        (0..frame_count).map(|i| {
+            let source = i * rms.len() / frame_count;
+            rms[source.min(rms.len() - 1)]
+        }).collect()
+    }
+
     /// 시각화용 파형 데이터를 생성합니다.
     pub fn create_waveform_summary<P: AsRef<Path>>(&self, path: P, n_buckets: usize) -> Result<(Vec<(f32, f32)>, f32), String> {
         let file = File::open(path).map_err(|e| format!("파일을 열 수 없습니다: {}", e))?;

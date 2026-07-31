@@ -294,7 +294,7 @@ const STRUCTURE_DIRECTIVES = new Set([
   '애드립', '간주중', '반복',
 ]);
 
-function isStructureDirective(inner) {
+export function isStructureDirective(inner) {
   // 뒤에 붙는 숫자/공백 허용("verse 2", "후렴 1") — 백엔드와 동일 규칙.
   const base = (inner || '').trim().toLowerCase().replace(/[\s\d]+$/, '');
   return STRUCTURE_DIRECTIVES.has(base);
@@ -326,11 +326,37 @@ function normalizeForMatch(s) {
     .replace(/\s+/g, ' ');
 }
 
-export function mergeAlignmentResult(segments, lines) {
+export function mergeAlignmentResult(segments, lines, entries = null) {
   if (!Array.isArray(segments) || !Array.isArray(lines) || lines.length === 0) return 0;
   const used = new Array(lines.length).fill(false);
   const lineKeys = lines.map((l) => normalizeForMatch(l.text));
+  const indexById = new Map((entries || []).map((entry) => [entry.id, entry.segmentIndex]));
   let appliedCount = 0;
+  const apply = (seg, line, lineIndex) => {
+    if (!seg || !(seg.start === 0 && seg.end === 0)) return false;
+    seg.start = Math.max(0, line.start_ms / 1000);
+    seg.end = Math.max(seg.start + 0.05, line.end_ms / 1000);
+    seg.approx = true;
+    // 정렬 신뢰도(0~1, 표시 전용). UI가 낮은 줄을 "검토 필요"로 강조한다.
+    if (typeof line.confidence === 'number') seg.confidence = line.confidence;
+    if (lineIndex != null) used[lineIndex] = true;
+    return true;
+  };
+
+  // ID가 있는 결과는 텍스트 매칭을 절대 거치지 않는다. 반복 후렴·동일 문장도
+  // 원래 세그먼트에만 돌아가므로 원문 블록 순서가 흔들리지 않는다.
+  lines.forEach((line, lineIndex) => {
+    const segmentIndex = indexById.get(line.segment_id);
+    if (segmentIndex == null) return;
+    if (apply(segments[segmentIndex], line, lineIndex)) appliedCount++;
+  });
+
+  // 요청 ID 매핑이 제공된 호출은 여기서 끝낸다. ID가 없거나 이미 싱크된
+  // 세그먼트를 가리킨 결과를 텍스트로 다시 찾으면, 동일 후렴의 다른 미싱크
+  // 블록에 잘못 재사용되어 원문 순서가 무너질 수 있다.
+  if (entries != null) return appliedCount;
+
+  // ID 계약이 없던 구버전 호출·에디터 수동 경로에만 텍스트 매칭을 남긴다.
   segments.forEach((seg) => {
     if (!(seg.start === 0 && seg.end === 0)) return; // 이미 싱크된 줄은 보존
     const text = getSyncText(seg).trim();
@@ -339,25 +365,29 @@ export function mergeAlignmentResult(segments, lines) {
     if (!key) return;
     const idx = lineKeys.findIndex((lk, i) => !used[i] && lk === key);
     if (idx === -1) return;
-    used[idx] = true;
     const line = lines[idx];
-    seg.start = Math.max(0, line.start_ms / 1000);
-    seg.end = Math.max(seg.start + 0.05, line.end_ms / 1000);
-    seg.approx = true;
-    // 정렬 신뢰도(0~1, 표시 전용). UI가 낮은 줄을 "검토 필요"로 강조한다.
-    if (typeof line.confidence === 'number') seg.confidence = line.confidence;
-    appliedCount++;
+    if (apply(seg, line, idx)) appliedCount++;
   });
   return appliedCount;
 }
 
 /**
+ * Returns cloned lyric segments without altering authorial cue order.
+ *
+ * The written lyric order is the source of truth: timestamps may be wrong,
+ * but reordering cue objects makes original/phonetic pairs attach to the
+ * wrong lyric block. Timing quality must therefore be repaired in the
+ * alignment result, never by moving stored lyric text.
+ */
+export function normalizeLyricTimeline(segments) {
+  return (segments || []).map((segment) => ({ ...segment }));
+}
+
+/**
  * Serializes lyric segments (+ optional standalone marker lines) to LRC text.
  *
- * 가사 줄은 **세그먼트 순서 그대로** 기록한다 — 시간순으로 정렬하면 미싱크
- * 줄(전부 00:00.00)이 저장할 때마다 파일 맨 위로 몰려서, 부분 싱크된 곡의
- * 가사 순서가 저장·재로드 시 뒤섞이는 버그가 있었음. parseLrc는 파일 순서를
- * 세그먼트 순서로 쓰므로 원래 텍스트 순서가 그대로 보존된다.
+ * 가사 줄은 원문 세그먼트 순서 그대로 기록한다. 타임스탬프 필터는 원문 블록을
+ * 재배치하지 않으며, 잘못된 정렬은 해당 타임스탬프만 검토·교정 대상으로 남긴다.
  * 마커 줄([vocalstart]/[ilstart]/[ilend])은 파싱이 위치와 무관하므로
  * (parseMarkers는 전체 스캔, parseLrc는 마커 전용 줄을 무시) 파일 끝에
  * 시간순으로 붙인다.
@@ -367,7 +397,7 @@ export function mergeAlignmentResult(segments, lines) {
  */
 export function encodeLrc(segments, markerLines = []) {
   const lines = [];
-  (segments || []).forEach((s) => {
+  normalizeLyricTimeline(segments).forEach((s) => {
     const min = Math.floor(s.start / 60).toString().padStart(2, '0');
     const sec = (s.start % 60).toFixed(2).padStart(5, '0');
     const ts = `[${min}:${sec}]`;
@@ -424,16 +454,21 @@ export function parseLrc(lrcContent, duration = 0) {
       }
 
       flushTriplet();
-      const text = normalizeLyricText(rest);
-      if (text) {
-        segments.push({ text, start, end: 0 });
-      }
-    } else if (line.trim()) {
-      flushTriplet();
-      const normalized = normalizeLyricText(line);
-      if (!normalized) return;
-      if (metadataRegex.test(normalized)) return;
-      segments.push({ text: normalized, start: 0, end: 0 });
+            const text = normalizeLyricText(rest);
+            // 구조 지시어(간주, Chorus, Verse 등)는 실제 가사가 아니므로 건너뛴다.
+            // parseLrc 단계에서 제거해야 segments에 포함되지 않고,
+            // collectAlignmentAnchors → AI 정렬 입력으로도 전달되지 않는다.
+            if (text && !isStructureDirective(text)) {
+              segments.push({ text, start, end: 0 });
+            }
+          } else if (line.trim()) {
+            flushTriplet();
+            const normalized = normalizeLyricText(line);
+            if (!normalized) return;
+            if (metadataRegex.test(normalized)) return;
+            // 시간 없는 구조 지시어도 건너뛴다 (예: "간주"만 있는 줄).
+            if (isStructureDirective(normalized)) return;
+            segments.push({ text: normalized, start: 0, end: 0 });
     }
   });
   flushTriplet();

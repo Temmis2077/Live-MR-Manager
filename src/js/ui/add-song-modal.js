@@ -479,7 +479,7 @@ export async function openAddSongModal(prefillLocalPaths = null) {
                         <select id="addsong-align-lang" class="addsong-input" style="width:auto;">
                             <option value="ko">한국어/일본어(차음)</option>
                             <option value="en">English</option>
-                            <option value="rap">랩/혼합 (한+영)</option>
+                            <option value="en-ko">영어 차음 + 한국어 모델 (추천)</option>
                         </select>
                         <span class="addsong-hint">※ 가사 정렬은 한 번에 한 곡일 때만 실행됩니다.</span>
                     </div>
