@@ -42,6 +42,7 @@ target_old/
 .vscode/*
 !.vscode/extensions.json
 .idea
+.cursor/
 .DS_Store
 *.suo
 *.ntvs*
@@ -49,6 +50,12 @@ target_old/
 *.sln
 *.sw?
 _기획안
+
+# Local AI agent and workspace tooling
+.agents/
+.claude/
+.codex/
+.worktrees/
 
 # Audio Models (Large dependencies)
 src-tauri/models/
