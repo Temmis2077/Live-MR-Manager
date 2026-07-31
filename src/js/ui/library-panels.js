@@ -13,6 +13,7 @@ import { elements } from './elements.js';
 import { invoke } from '../tauri-bridge.js';
 import { getSongCategoryFromMetadata, getLyricSyncStatus } from '../library-filters.js';
 import { parentGenre } from '../taxonomy.js';
+import { durationToSeconds } from '../duration.js';
 import { getThumbnailUrl, showNotification } from '../utils.js';
 
 const $ = (id) => document.getElementById(id);
@@ -314,7 +315,12 @@ export function renderInspector() {
       </div>
       <div class="insp-actions">
         <button type="button" class="insp-btn primary" id="insp-save">저장</button>
+        <button type="button" class="insp-btn" id="insp-autofill"
+                title="장르·태그는 Last.fm에서, 키·BPM은 음원을 직접 분석해 채웁니다. 비어 있는 항목만 채웁니다.">
+          자동 채우기
+        </button>
       </div>
+      <div class="insp-note" id="insp-autofill-note" hidden></div>
     </div>
 
     <div class="insp-section">
@@ -326,6 +332,13 @@ export function renderInspector() {
       <div class="insp-meta-row" style="margin-top:10px">
         <span>가사</span><span>${syncText}</span>
       </div>
+      <div class="insp-actions">
+        <button type="button" class="insp-btn" id="insp-fetch-lyrics"
+                title="LRCLIB에서 타임코드가 붙은 가사를 찾아 이 곡 옆에 저장합니다. 곡 길이가 맞는 것만 받습니다.">
+          싱크 가사 가져오기
+        </button>
+      </div>
+      <div class="insp-note" id="insp-lyrics-note" hidden></div>
     </div>
 
     <div class="insp-section" style="border-bottom:none">
@@ -344,6 +357,127 @@ export function renderInspector() {
   wireInspector(song);
 }
 
+function setNote(id, text, tone) {
+  const el = $(id);
+  if (!el) return;
+  el.hidden = !text;
+  el.textContent = text || '';
+  el.className = 'insp-note' + (tone ? ' ' + tone : '');
+}
+
+/** LRCLIB에서 싱크된 가사를 받아 곡 옆에 저장한다. 가사 본문은 백엔드가
+ *  바로 파일로 쓰고, 여기로는 매칭 요약만 돌아온다. */
+function wireFetchLyrics(song, idx) {
+  const btn = $('insp-fetch-lyrics');
+  if (!btn) return;
+
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    const original = btn.textContent;
+    btn.textContent = '찾는 중…';
+    setNote('insp-lyrics-note', '', '');
+
+    try {
+      const res = await invoke('fetch_synced_lyrics', {
+        path: song.path,
+        artist: song.artist || '',
+        title: song.title || '',
+        durationSec: durationToSeconds(song.duration),
+      });
+
+      if (!res || !res.saved) {
+        setNote('insp-lyrics-note', res?.reason || '가사를 찾지 못했습니다.', 'warn');
+        return;
+      }
+
+      // 길이 차이를 함께 보여준다 — 매칭이 미덥지 않을 때 판단할 근거가 된다.
+      const diff = res.durationDiff;
+      const diffText = (diff == null)
+        ? '곡 길이를 몰라 대조하지 못했습니다'
+        : `길이 차이 ${diff.toFixed(1)}초`;
+      setNote(
+        'insp-lyrics-note',
+        `${res.synced ? '싱크 가사' : '가사(타임코드 없음)'}를 저장했습니다 · ${res.matched} · ${diffText}`,
+        res.synced ? 'ok' : 'warn',
+      );
+
+      // 표의 가사 상태 배지가 바로 바뀌게 로컬 상태도 갱신.
+      if (idx >= 0) {
+        state.songLibrary[idx] = {
+          ...state.songLibrary[idx],
+          hasLyrics: true,
+          lyricSyncStatus: res.synced ? 'synced' : 'unsynced',
+        };
+      }
+      const { renderLibrary } = await import('./library.js');
+      renderLibrary();
+      showNotification(res.synced ? '싱크 가사를 가져왔습니다.' : '가사를 가져왔습니다 (정렬 필요).', 'success');
+    } catch (err) {
+      setNote('insp-lyrics-note', '가사를 가져오지 못했습니다: ' + err, 'warn');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
+    }
+  });
+}
+
+/** 장르·태그(Last.fm)와 키·BPM(음원 분석)을 채운다.
+ *  입력란이 비어 있는 항목만 채우고, 저장은 사용자가 확인 후 누르게 둔다. */
+function wireAutofill(song, idx) {
+  const btn = $('insp-autofill');
+  if (!btn) return;
+
+  btn.addEventListener('click', async () => {
+    const genreIn = $('insp-genre-in');
+    const keyIn = $('insp-key-in');
+    const bpmIn = $('insp-bpm-in');
+    const tagsIn = $('insp-tags-in');
+
+    const wantGenre = !((genreIn?.value || '').trim());
+    const wantKeyBpm = !((keyIn?.value || '').trim()) || !((bpmIn?.value || '').trim());
+    if (!wantGenre && !wantKeyBpm) {
+      setNote('insp-autofill-note', '이미 다 채워져 있습니다. 바꾸려면 직접 지우고 다시 눌러 주세요.', 'warn');
+      return;
+    }
+
+    btn.disabled = true;
+    const original = btn.textContent;
+    // 키·BPM은 음원을 실제로 분석해서 몇 초 걸린다 — 뭘 하는 중인지 알린다.
+    btn.textContent = wantKeyBpm ? '분석 중…' : '찾는 중…';
+    setNote('insp-autofill-note', '', '');
+
+    try {
+      const res = await invoke('autofill_song_info', {
+        path: song.path,
+        artist: song.artist || '',
+        title: song.title || '',
+        wantGenre,
+        wantKeyBpm,
+      });
+
+      const filled = [];
+      if (res.genre && genreIn && !genreIn.value.trim()) { genreIn.value = res.genre; filled.push('장르'); }
+      if (res.songKey && keyIn && !keyIn.value.trim()) { keyIn.value = res.songKey; filled.push('키'); }
+      if (res.bpm && bpmIn && !bpmIn.value.trim()) { bpmIn.value = String(res.bpm); filled.push('BPM'); }
+      if (res.tags?.length && tagsIn && !tagsIn.value.trim()) {
+        tagsIn.value = res.tags.join(', ');
+        filled.push('태그');
+      }
+
+      const parts = [];
+      if (filled.length) parts.push(`${filled.join(' · ')} 채움 — 확인 후 저장을 눌러 주세요.`);
+      else parts.push('채울 수 있는 항목을 찾지 못했습니다.');
+      if (res.notes?.length) parts.push(res.notes.join(' / '));
+      setNote('insp-autofill-note', parts.join(' '), filled.length ? 'ok' : 'warn');
+    } catch (err) {
+      setNote('insp-autofill-note', '자동 채우기 실패: ' + err, 'warn');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
+    }
+  });
+}
+
 function wireInspector(song) {
   const idx = (state.songLibrary || []).findIndex((s) => s.path === song.path);
 
@@ -359,6 +493,9 @@ function wireInspector(song) {
       await startMrSeparation(song.path, null);
     } catch (_) { /* startMrSeparation이 자체 알림을 띄운다 */ }
   });
+
+  wireFetchLyrics(song, idx);
+  wireAutofill(song, idx);
 
   $('insp-save')?.addEventListener('click', async () => {
     const bpmRaw = ($('insp-bpm-in')?.value || '').trim();

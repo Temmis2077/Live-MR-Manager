@@ -655,3 +655,30 @@
 .library-selection-bar .selection-actions {
   align-items: center;
 }
+
+/* 인스펙터 안내문 — 자동 채우기·가사 가져오기 결과.
+   성공/주의를 색만이 아니라 왼쪽 막대와 문장으로도 구분한다. */
+.insp-note {
+  margin-top: 9px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 0.7rem;
+  line-height: 1.55;
+  color: var(--text-muted);
+  background: var(--surface-1);
+  border-left: 2px solid var(--text-dim);
+  word-break: break-word;
+}
+
+.insp-note[hidden] {
+  display: none;
+}
+
+.insp-note.ok {
+  border-left-color: #22c55e;
+  color: var(--text-main);
+}
+
+.insp-note.warn {
+  border-left-color: #f59e0b;
+}

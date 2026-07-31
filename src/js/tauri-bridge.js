@@ -108,6 +108,20 @@ export async function invoke(command, args = {}) {
         { id: 'bbb44455566', url: 'https://youtu.be/bbb44455566', title: `[LIVE] ${args.query} 무대 영상`,
           channel: '샘플 방송', duration: 258, thumbnail: 'https://i.ytimg.com/vi/bbb44455566/mqdefault.jpg', official: false },
       ];
+    case 'fetch_synced_lyrics':
+      return {
+        saved: true, synced: true, matched: '샘플 가수 — 샘플 곡',
+        matchedDuration: 218.0, durationDiff: 0.8,
+        savedPath: 'C:/샘플/샘플 곡.lrc', reason: '',
+      };
+    case 'autofill_song_info':
+      return {
+        genre: args.wantGenre ? '발라드' : null,
+        tags: args.wantGenre ? ['서정적', '이별'] : null,
+        songKey: args.wantKeyBpm ? 'A minor' : null,
+        bpm: args.wantKeyBpm ? 128 : null,
+        notes: [],
+      };
     case 'search_lyrics_sites':
       return [
         { title: `${args.query} 가사`, url: 'https://music.bugs.co.kr/track/1804107',

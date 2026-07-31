@@ -11,6 +11,7 @@ pub mod audio_player;
 mod separation;
 pub mod state;
 mod alignment;
+mod lyrics_db;
 mod metadata_fetcher;
 pub mod audio;
 pub mod onnx_engine;
@@ -190,6 +191,8 @@ pub fn run() {
             dereverb::open_dereverb_dir,
             search::search_youtube,
             search::search_lyrics_sites,
+            lyrics_db::fetch_synced_lyrics,
+            lyrics_db::autofill_song_info,
             system::export_backup, 
             system::import_backup,
             system::export_library_spreadsheet,
