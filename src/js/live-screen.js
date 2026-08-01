@@ -177,6 +177,16 @@ function tick() {
     tempoEl.classList.toggle('changed', tempoPct !== 100);
   }
 
+  // 보컬 음원 on/off — 도크의 '보컬' 토글이 진실의 원본이다.
+  const vocalOn = $('toggle-vocal')?.checked !== false;
+  const vocalBtn = $('live-vocal-toggle');
+  if (vocalBtn) {
+    vocalBtn.classList.toggle('on', vocalOn);
+    vocalBtn.setAttribute('aria-checked', vocalOn ? 'true' : 'false');
+  }
+  // 보컬이 꺼져 있으면 믹스 막대는 소리에 영향을 주지 않는다 — 흐리게 알린다.
+  $('live-mix-track')?.classList.toggle('muted', !vocalOn);
+
   // 반주 ↔ 가이드 보컬 믹스 (0 = 반주만, 100 = 보컬 100)
   const savedMix = Number(localStorage.getItem(MIX_KEY));
   const mix = Number.isFinite(savedMix) ? Math.max(0, Math.min(100, savedMix)) : 0;
@@ -321,6 +331,16 @@ export function initLiveScreen() {
   $('live-key-down')?.addEventListener('click', () => stepSlider('pitch-slider', -1, {}));
   $('live-key-up')?.addEventListener('click', () => stepSlider('pitch-slider', +1, {}));
   $('live-key-val')?.addEventListener('click', () => driveSlider('pitch-slider', 0));
+
+  // 보컬 음원 on/off — 도크의 '보컬' 체크박스를 그대로 움직인다.
+  // 새 상태를 만들지 않아야 두 화면이 어긋나지 않는다.
+  $('live-vocal-toggle')?.addEventListener('click', () => {
+    const box = $('toggle-vocal');
+    if (!box) return;
+    box.checked = !box.checked;
+    box.dispatchEvent(new Event('change', { bubbles: true }));
+    tick();
+  });
 
   $('live-tempo-down')?.addEventListener('click', () => stepSlider('tempo-slider', -0.05, { decimals: 2 }));
   $('live-tempo-up')?.addEventListener('click', () => stepSlider('tempo-slider', +0.05, { decimals: 2 }));

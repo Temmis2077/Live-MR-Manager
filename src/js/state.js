@@ -54,6 +54,9 @@ export const state = {
   
   // Real-time Lyrics
   currentLyrics: [],
+  /** 현재 곡의 구간 마커 — 전주·간주에서 오버레이 가사를 비우는 데 쓴다.
+   *  { vocalStartSec: number|null, interludes: [{start, end}] } */
+  currentMarkers: { vocalStartSec: null, interludes: [] },
   currentLyricIndex: -1,
 };
 

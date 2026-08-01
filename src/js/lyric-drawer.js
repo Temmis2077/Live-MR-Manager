@@ -279,6 +279,26 @@ function displayText(seg, scope = 'app') {
  * Highlights and scrolls to the active lyric line
  * @param {number} currentTime 
  */
+/**
+ * 지금이 노래가 없는 구간(전주 또는 간주)인가.
+ *
+ * `vocalstart` 마커 앞은 전주, `ilstart`~`ilend` 사이는 간주다. 이 구간에서는
+ * 다음 줄을 미리 띄우지 않는다 — 노래가 한참 뒤에 시작하는데 가사만 먼저
+ * 떠 있으면 시청자가 따라 부를 타이밍을 놓친다.
+ */
+function isInInstrumental(currentTime) {
+    const markers = state.currentMarkers;
+    if (!markers) return false;
+
+    const vs = markers.vocalStartSec;
+    if (Number.isFinite(vs) && currentTime < vs) return true;
+
+    for (const il of markers.interludes || []) {
+        if (currentTime >= il.start && currentTime < il.end) return true;
+    }
+    return false;
+}
+
 function syncLyricsWithTime(currentTime) {
     const lyrics = state.currentLyrics;
     if (!lyrics || lyrics.length === 0) {
@@ -295,10 +315,17 @@ function syncLyricsWithTime(currentTime) {
         }
     }
 
+    // 전주·간주 구간에서는 오버레이를 비운다. 세그먼트만 봐서는 "아직 첫 줄
+    // 전"과 "간주 중"을 구분할 수 없어, 노래가 없는 동안에도 다음 줄이 계속
+    // 떠 있었다. 편집기에서 찍어 둔 구간 마커를 기준으로 삼는다.
+    const inInstrumental = isInInstrumental(currentTime);
+
     const current = (playingIndex !== -1) ? displayText(lyrics[playingIndex], 'overlay') : "";
-    const next = (playingIndex !== -1)
-        ? ((playingIndex + 1 < lyrics.length) ? displayText(lyrics[playingIndex + 1], 'overlay') : "")
-        : ((lyrics.length > 0) ? displayText(lyrics[0], 'overlay') : "");
+    const next = inInstrumental
+        ? ""
+        : (playingIndex !== -1)
+            ? ((playingIndex + 1 < lyrics.length) ? displayText(lyrics[playingIndex + 1], 'overlay') : "")
+            : ((lyrics.length > 0) ? displayText(lyrics[0], 'overlay') : "");
 
     // IMPORTANT: Don't skip overlay update only because index didn't change.
     // At song start, index can stay -1 for a while but first line still needs to appear in "next".

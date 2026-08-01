@@ -1194,3 +1194,26 @@ canvas#waveform-canvas {
     accent-color: var(--accent-primary);
     cursor: pointer;
 }
+
+/* ── 원문 목록: 지금 부르는 줄 표시 + 인라인 편집 ─────────────────
+   파형에서 위치는 보여도 "어느 원문 줄인지"는 세어 봐야 알 수 있었다.
+   색만이 아니라 왼쪽 막대로도 구분한다. */
+.lyric-line-item.now-playing {
+  background: rgb(var(--accent-rgb) / 0.14);
+  box-shadow: inset 2px 0 0 0 var(--accent-primary);
+}
+
+.lyric-line-item.now-playing .lyric-text {
+  color: var(--text-main);
+  font-weight: 700;
+}
+
+/* 편집 중인 칸 — 입력 가능하다는 걸 테두리로 알린다 */
+.lyric-text.editing {
+  outline: 2px solid var(--accent-secondary);
+  outline-offset: 2px;
+  border-radius: 4px;
+  background: var(--input-bg, rgba(255, 255, 255, 0.05));
+  cursor: text;
+  white-space: pre-wrap;
+}

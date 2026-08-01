@@ -5,6 +5,10 @@ import { parseLrc } from './lyrics.js';
 import { parseMarkers, formatMarkerLine, isTriplet, getSyncText, getDisplayLines, getShowTranslation, setShowTranslation, mergeAlignmentResult, encodeLrc, suggestVocalStartFromSegments, parseTimeInput, formatTimeInput, groupTripletLines } from './lrc-parser.js';
 import { getLyricSyncStatus } from './library-filters.js';
 
+/** Enter로 줄을 찍었을 때 임시로 줄 끝에 주는 길이(초). 다음 줄을 찍으면
+ *  그 시각으로 정리된다. 곡 끝까지 늘리지 않기 위한 값. */
+const TAP_PROVISIONAL_SEC = 4;
+
 export class ForcedAlignmentViewer {
     constructor(containerId) {
         this.container = document.getElementById(containerId);
@@ -400,22 +404,21 @@ export class ForcedAlignmentViewer {
                 const idx = this.state.resizeTarget.index;
                 const seg = this.state.segments[idx];
                 
+                // 잡은 경계 하나만 움직인다. 예전에는 이웃 블럭의 경계까지
+                // 같이 끌고 가서, 줄 사이에 간격을 둘 수 없었고 블럭들이 항상
+                // 붙어 있었다(간주에서도 앞 줄이 계속 떠 있는 원인).
+                // 이웃을 넘어가지 않도록 범위만 제한한다.
+                const MIN_LEN = 0.05;
                 if (this.state.resizeTarget.type === 'start') {
-                    const finalTime = Math.min(newTime, seg.end - 0.05);
-                    seg.start = finalTime;
-
-                    // 앞 가사의 종료 지점도 함께 이동
-                    if (idx > 0) {
-                        this.state.segments[idx - 1].end = finalTime;
-                    }
+                    const prev = idx > 0 ? this.state.segments[idx - 1] : null;
+                    const lo = prev ? Math.max(0, prev.end) : 0;
+                    seg.start = Math.max(lo, Math.min(newTime, seg.end - MIN_LEN));
                 } else {
-                    const finalTime = Math.max(newTime, seg.start + 0.05);
-                    seg.end = finalTime;
-
-                    // 다음 가사의 시작 지점도 함께 이동
-                    if (idx < this.state.segments.length - 1) {
-                        this.state.segments[idx + 1].start = finalTime;
-                    }
+                    const next = idx < this.state.segments.length - 1
+                        ? this.state.segments[idx + 1]
+                        : null;
+                    const hi = next && next.start > 0 ? next.start : this.state.duration;
+                    seg.end = Math.min(hi, Math.max(newTime, seg.start + MIN_LEN));
                 }
                 // 사용자가 직접 조정했으니 "대략적 배치" 표시 해제
                 seg.approx = false;
@@ -519,7 +522,16 @@ export class ForcedAlignmentViewer {
                     this.togglePlayback();
                 } else if (e.code === 'Enter') {
                     e.preventDefault();
-                    this.handleTap();
+                    // Shift+Enter는 방금 찍은 줄을 다시 찍는다 — 한 박자 늦게
+                    // 눌렀을 때 전체를 다시 하지 않고 그 줄만 고칠 수 있게.
+                    if (e.shiftKey) this.retapPrevious();
+                    else this.handleTap();
+                } else if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
+                    // 선택한 경계의 미세조정. 드래그로는 10ms를 집을 수 없다.
+                    // Shift를 누르면 더 크게(100ms) 움직인다.
+                    const dir = e.code === 'ArrowRight' ? 1 : -1;
+                    const step = e.shiftKey ? 0.1 : 0.01;
+                    if (this.nudgeSelectedBoundary(dir * step)) e.preventDefault();
                 } else if (e.code === 'KeyV') {
                     // 현재 재생 위치에 보컬 시작 지점 지정
                     e.preventDefault();
@@ -629,6 +641,8 @@ export class ForcedAlignmentViewer {
             this.updateTimeDisplay();
             // 재생이 진행되면 현재 시각의 가사 블럭으로 선택이 따라간다.
             this.setSelectedSegmentByTime(this.state.currentTime);
+            // 원문 목록에서도 지금 부르는 줄을 표시한다.
+            this.highlightPlayingLyric();
             this.drawWaveform();
             this.syncSidebar();
         });
@@ -1408,16 +1422,72 @@ export class ForcedAlignmentViewer {
         this.state.currentSyncIndex = idx;
         if (idx < 0 || idx >= this.state.segments.length) return;
 
-        this.state.segments[idx].start = this.state.currentTime;
-        this.state.segments[idx].approx = false;
-        if (idx > 0 && this.state.segments[idx - 1].start > 0) {
-            // If the previous segment has a valid start time, set its end time
-            this.state.segments[idx - 1].end = this.state.currentTime;
+        const now = this.state.currentTime;
+        const seg = this.state.segments[idx];
+        seg.start = now;
+        seg.approx = false;
+
+        // 앞 줄이 이 줄과 겹칠 때만 끝을 당긴다. 예전에는 조건 없이
+        // prev.end = now 로 붙여서 줄 사이 간격을 만들 수 없었다.
+        const prev = idx > 0 ? this.state.segments[idx - 1] : null;
+        if (prev && prev.start > 0 && (prev.end <= prev.start || prev.end > now)) {
+            prev.end = now;
         }
-        this.state.segments[idx].end = this.state.duration;
-        this.state.currentSyncIndex++;
+
+        // 끝 시각을 곡 끝으로 밀지 않는다. 예전에는 end = duration 이라, 여기서
+        // 그만두면 마지막으로 찍은 줄이 노래가 끝날 때까지 화면에 남았다.
+        // 다음 줄이 이미 찍혀 있으면 그 앞까지, 아니면 짧은 기본 길이만 준다.
+        const next = this.state.segments[idx + 1];
+        const hardLimit = (next && next.start > now) ? next.start : this.state.duration;
+        const provisional = Math.min(now + TAP_PROVISIONAL_SEC, hardLimit);
+        if (seg.end <= now || seg.end > hardLimit) {
+            seg.end = provisional;
+        }
+
+        this.state.currentSyncIndex = idx + 1;
         this.renderLyricList();
+        this.drawWaveform();
         this.markDirtyAndScheduleSave();
+    }
+
+    /**
+     * 방금 찍은 줄을 다시 찍는다(Shift+Enter). 한 박자 늦게 눌렀을 때 전체를
+     * 다시 하지 않고 그 줄만 고칠 수 있어야 한다 — Enter는 항상 다음 줄로
+     * 넘어가므로 되돌아올 방법이 없었다.
+     */
+    retapPrevious() {
+        const idx = this.state.currentSyncIndex - 1;
+        if (idx < 0 || idx >= this.state.segments.length) return;
+        this.state.currentSyncIndex = idx;
+        this.handleTap();
+    }
+
+    /**
+     * 선택한 경계를 아주 조금 움직인다(방향키). 드래그로는 10ms 단위를 집을 수
+     * 없어서, 실제 미세조정은 키보드로 해야 한다.
+     */
+    nudgeSelectedBoundary(deltaSec) {
+        const target = this.state.selectedTarget;
+        if (!target) return false;
+        const idx = target.index;
+        const seg = this.state.segments[idx];
+        if (!seg) return false;
+
+        const MIN_LEN = 0.05;
+        if (target.type === 'start') {
+            const prev = idx > 0 ? this.state.segments[idx - 1] : null;
+            const lo = prev ? Math.max(0, prev.end) : 0;
+            seg.start = Math.max(lo, Math.min(seg.start + deltaSec, seg.end - MIN_LEN));
+        } else {
+            const next = this.state.segments[idx + 1];
+            const hi = (next && next.start > 0) ? next.start : this.state.duration;
+            seg.end = Math.min(hi, Math.max(seg.end + deltaSec, seg.start + MIN_LEN));
+        }
+        seg.approx = false;
+        this.renderLyricList();
+        this.drawWaveform();
+        this.markDirtyAndScheduleSave();
+        return true;
     }
 
     markVocalStart() {
@@ -1703,6 +1773,41 @@ export class ForcedAlignmentViewer {
         return s?.alignmentSource === 'anchor_interpolation';
     }
 
+    /** 지금 재생 위치가 걸쳐 있는 줄의 인덱스. 없으면 -1. */
+    _playingIndex() {
+        const t = this.state.currentTime;
+        const segs = this.state.segments || [];
+        for (let i = 0; i < segs.length; i++) {
+            const s = segs[i];
+            if (s.start > 0 && t >= s.start && (s.end === 0 || t < s.end)) return i;
+        }
+        return -1;
+    }
+
+    /**
+     * 원문 목록에서 지금 부르는 줄을 표시한다.
+     *
+     * 파형에서는 위치를 알 수 있어도 "어느 원문 줄인지"는 세어 봐야 알 수 있어,
+     * 가사를 고쳐야 할 때 찾기가 어려웠다. 목록 전체를 다시 그리지 않고 클래스만
+     * 옮긴다 — 재생 중 매 프레임 innerHTML을 갈아끼우면 편집 중인 칸이 날아간다.
+     */
+    highlightPlayingLyric() {
+        const container = document.getElementById('lyric-lines-container');
+        if (!container) return;
+        const idx = this._playingIndex();
+        if (idx === this._lastPlayingIdx) return;
+        this._lastPlayingIdx = idx;
+
+        container.querySelectorAll('.lyric-line-item').forEach((el, i) => {
+            el.classList.toggle('now-playing', i === idx);
+        });
+        // 편집 중이 아닐 때만 따라 스크롤한다 — 고치는 중에 화면이 움직이면 안 된다.
+        if (idx >= 0 && !container.querySelector('.lyric-text[contenteditable="true"]')) {
+            container.querySelectorAll('.lyric-line-item')[idx]
+                ?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+    }
+
     renderLyricList() {
         const container = document.getElementById('lyric-lines-container');
         if (!container) return;
@@ -1737,6 +1842,43 @@ export class ForcedAlignmentViewer {
             </div>
         `;
         }).join('');
+
+        // 원문 고치기 — 더블클릭하면 그 자리에서 바로 편집한다.
+        // 파형에서 위치는 보이는데 원문을 고치려면 다른 화면으로 나가야 했다.
+        container.querySelectorAll('.lyric-line-item').forEach((item) => {
+            const textEl = item.querySelector('.lyric-text');
+            if (!textEl || textEl.classList.contains('triplet-text')) return; // 3줄 모드는 제외
+            textEl.ondblclick = (e) => {
+                e.stopPropagation();
+                const idx = parseInt(item.getAttribute('data-index'), 10);
+                textEl.contentEditable = 'true';
+                textEl.spellcheck = false;
+                textEl.classList.add('editing');
+                textEl.focus();
+                document.getSelection()?.selectAllChildren(textEl);
+
+                const commit = (save) => {
+                    textEl.contentEditable = 'false';
+                    textEl.classList.remove('editing');
+                    const seg = this.state.segments[idx];
+                    if (!seg) return;
+                    if (save) {
+                        const next = (textEl.textContent || '').trim();
+                        if (next !== (seg.text || '')) {
+                            seg.text = next;
+                            this.markDirtyAndScheduleSave();
+                        }
+                    }
+                    this.renderLyricList();
+                };
+                textEl.onblur = () => commit(true);
+                textEl.onkeydown = (ev) => {
+                    ev.stopPropagation();       // 편집 중에는 Enter=싱크 찍기가 돌면 안 된다
+                    if (ev.key === 'Enter') { ev.preventDefault(); commit(true); }
+                    else if (ev.key === 'Escape') { ev.preventDefault(); commit(false); }
+                };
+            };
+        });
 
         // 클릭 이벤트 추가 (기능 분리: 이동 vs 타겟 지정)
         container.querySelectorAll('.lyric-line-item').forEach((item) => {

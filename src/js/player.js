@@ -11,7 +11,7 @@ import {
   setVolume, setPitch, setTempo, saveLibrary, seekTo, checkMrSeparated,
   stopPlayback as apiStopPlayback
 } from './audio.js';
-import { loadLyricsForTrack } from './lyrics.js';
+import { loadLyricsForTrack, loadLyricsAndMarkers } from './lyrics.js';
 import { emit, invoke, convertFileSrc as bridgeConvertFileSrc } from './tauri-bridge.js';
 
 function isYoutubePath(path) {
@@ -248,13 +248,15 @@ export async function selectTrack(index) {
   // Guarded by mySequence: if the user switches tracks again before this
   // resolves, applying it here would overwrite the newer track's lyrics
   // with the previous song's (a stale response arriving after a later one).
-  loadLyricsForTrack(song.path, parseDurationToMs(song.duration) / 1000).then(lyrics => {
+  loadLyricsAndMarkers(song.path, parseDurationToMs(song.duration) / 1000).then(({ segments, markers }) => {
     if (mySequence !== state.playbackSequence) return;
-    state.currentLyrics = lyrics;
+    state.currentLyrics = segments;
+    // 전주·간주에서 오버레이를 비우려면 마커도 함께 들고 있어야 한다.
+    state.currentMarkers = markers;
     state.currentLyricIndex = -1;
     // Trigger drawer update if it's initialized
     import('./lyric-drawer.js').then(m => {
-      if (m.updateLyrics) m.updateLyrics(lyrics);
+      if (m.updateLyrics) m.updateLyrics(segments);
       if (m.syncLyricDrawerHeader) m.syncLyricDrawerHeader();
     });
   });

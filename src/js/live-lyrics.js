@@ -9,6 +9,8 @@
  * 한 곳에서 담당하고(그래야 오버레이와 어긋나지 않는다), 여기서는 그 결과를
  * 받아 그리기만 한다.
  */
+import { getDisplayLines } from './lrc-parser.js';
+
 const $ = (id) => document.getElementById(id);
 
 const SIDE_KEY = 'liveLyricsSide';     // 'left' | 'right'
@@ -27,11 +29,27 @@ function esc(s) {
   return d.innerHTML;
 }
 
-/** 세그먼트에서 화면에 쓸 텍스트. 3줄 모드(원문/차음/번역)는 줄바꿈으로 합쳐진다. */
-function lineText(seg) {
+/**
+ * 한 줄에 표시할 HTML. 3줄 모드(원문/차음/번역)는 설정에 따라 함께 보여준다.
+ *
+ * 예전에는 seg.text만 읽어서, 일본어 곡처럼 3줄로 저장된 가사는 원문(한자)만
+ * 나오고 차음·번역이 사라졌다. 어떤 줄을 보여줄지는 lrc-parser의
+ * getDisplayLines가 인앱 표시 설정('app' 스코프)을 보고 정한다 — 드로어·
+ * 오버레이와 같은 규칙을 써야 화면마다 다르게 보이지 않는다.
+ */
+function lineHtml(seg) {
   if (seg == null) return '';
-  if (typeof seg === 'string') return seg;
-  return seg.text ?? '';
+  if (typeof seg === 'string') return esc(seg);
+
+  const lines = getDisplayLines(seg, 'app').filter(Boolean);
+  if (lines.length === 0) return '';
+  const [first, ...rest] = lines;
+  if (rest.length === 0) return esc(first);
+  // 원문을 크게, 차음·번역은 작고 흐리게 — 부를 때 눈이 원문으로 먼저 간다.
+  const restHtml = rest
+    .map((l) => `<span class="live-lyric-sub">${esc(l)}</span>`)
+    .join('');
+  return `${esc(first)}${restHtml}`;
 }
 
 export function getSide() {
@@ -84,7 +102,7 @@ export function renderLiveLyrics(list) {
   }
 
   body.innerHTML = segments
-    .map((s, i) => `<div class="live-lyric-line" data-index="${i}">${esc(lineText(s))}</div>`)
+    .map((s, i) => `<div class="live-lyric-line" data-index="${i}">${lineHtml(s)}</div>`)
     .join('');
 }
 

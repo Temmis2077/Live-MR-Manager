@@ -440,7 +440,15 @@
                 <div class="live-card">
                   <div class="live-vol-head">
                     <div class="live-vol-name">가이드 보컬</div>
-                    <div class="live-vol-val" id="live-mix-val">0</div>
+                    <div class="live-vol-head-right">
+                      <!-- 보컬 음원 자체를 끄고 켠다. 도크의 '보컬' 토글과 같은 값이며
+                           끄면 아래 믹스는 소리에 영향을 주지 않는다. -->
+                      <button type="button" class="live-vocal-toggle" id="live-vocal-toggle"
+                              role="switch" aria-checked="true" aria-label="보컬 음원">
+                        <span class="live-vocal-knob"></span>
+                      </button>
+                      <div class="live-vol-val" id="live-mix-val">0</div>
+                    </div>
                   </div>
                   <div class="live-vol-track" id="live-mix-track" role="slider" tabindex="0"
                        aria-label="가이드 보컬" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"

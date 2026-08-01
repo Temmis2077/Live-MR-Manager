@@ -207,10 +207,11 @@ export async function openAlignmentForTrack(path, options = {}) {
       if (idx >= 0) state.selectedTrackIndex = idx;
 
       // 길이는 "3:47" 형태라 초로 바꿔 넘긴다(가사 파서가 끝 시각 보정에 쓴다).
-      const { loadLyricsForTrack } = await import('../lyrics.js');
+      const { loadLyricsAndMarkers } = await import('../lyrics.js');
       const { durationToSeconds } = await import('../duration.js');
-      const lyrics = await loadLyricsForTrack(path, durationToSeconds(track.duration) || 0);
+      const { segments: lyrics, markers } = await loadLyricsAndMarkers(path, durationToSeconds(track.duration) || 0);
       state.currentLyrics = lyrics;
+      state.currentMarkers = markers;
       const drawer = await import('../lyric-drawer.js');
       drawer.updateLyrics?.(lyrics);
       drawer.syncLyricDrawerHeader?.();
