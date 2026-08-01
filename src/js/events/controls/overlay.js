@@ -268,11 +268,21 @@ export function initOverlayListeners() {
             config = { ...migrated, isForceVisible: config.isForceVisible };
           }
 
-          // 통합 설정 — info/lyrics 탭 구분 없이 하나의 값만 저장
+          // 색·글씨체는 두 오버레이가 같은 톤을 유지해야 하므로 공용으로 둔다
+          // (백엔드도 색은 대상 간에 맞춰 준다).
           Object.assign(config, {
-            scale, font, color, textColor, bgOpacity, rounding, bgColor, animationDirection, fontSize, effectFloat, effectGlow, visibility
+            scale, font, color, textColor, bgOpacity, rounding, bgColor, animationDirection
           });
           config.isForceVisible = isForceVisible;
+
+          // 대상별 설정 — 곡 정보와 가사는 화면에서 하는 일이 달라 효과·글자
+          // 크기·표시 항목이 같을 이유가 없다. 예전에는 하나로 묶여 있어서
+          // 가사에 글로우를 주면 곡 정보 카드까지 같이 빛났다.
+          config.byTarget = config.byTarget || {};
+          config.byTarget[currentTarget] = {
+            ...(config.byTarget[currentTarget] || {}),
+            fontSize, effectFloat, effectGlow, visibility,
+          };
 
           localStorage.setItem('overlay-settings', JSON.stringify(config));
         }
@@ -418,7 +428,9 @@ export function initOverlayListeners() {
     // 스타일 키만 제거 — isForceVisible 등 나머지는 사용자의 방송 상태라 보존.
     const styleKeys = ['scale', 'font', 'color', 'textColor', 'bgOpacity', 'rounding',
                        'bgColor', 'animationDirection', 'fontSize', 'effectFloat', 'effectGlow',
-                       'info', 'lyrics'];
+                       'info', 'lyrics',
+                       // 대상별(곡 정보/가사) 효과·글자 크기·표시 항목도 스타일이다.
+                       'byTarget', 'visibility', 'preset'];
     styleKeys.forEach((k) => delete config[k]);
     localStorage.setItem('overlay-settings', JSON.stringify(config));
 
@@ -470,9 +482,11 @@ export function initOverlayListeners() {
           overlayIframe.src = `overlay-info.html?preview=true&cb=${OVERLAY_CACHE_BUST}`;
           await updateOverlayLyrics({ current: "", next: "" }).catch(err => console.error(err));
         }
-        // 대상이 바뀌었으니 설정 UI도 다시 맞춘다 — 표시 항목 목록은 곡 정보
-        // 전용/가사 전용 행이 나뉘어 있어, 이걸 안 부르면 이전 탭의 행이 남는다.
-        updateOverlaySettings(true);
+        // 대상이 바뀌었으니 그 대상의 저장값을 다시 불러온다.
+        // updateOverlaySettings를 바로 부르면 안 된다 — 그건 지금 UI 값을
+        // 새 대상에 '쓰는' 동작이라, 이전 탭의 효과·표시 항목이 그대로
+        // 옮겨 붙는다. 읽기(load)가 먼저고 쓰기는 그다음이다.
+        loadOverlaySettings();
         requestAnimationFrame(resizeOverlayPreview);
       };
     });
@@ -541,8 +555,19 @@ export function initOverlayListeners() {
       setDropdownValue('overlay-animation-direction-dropdown', 'overlay-animation-direction', final.animationDirection);
     }
 
-    if (overlayEffectFloat) overlayEffectFloat.checked = !!final.effectFloat;
-    if (overlayEffectGlow) overlayEffectGlow.checked = !!final.effectGlow;
+    // 효과·글자 크기·표시 항목은 대상별로 저장된다. 지금 보고 있는 탭의 값을
+    // 읽되, 없으면 예전 통합 저장값(final)으로 넘어간다.
+    const activeTabNow = document.querySelector('.preview-tab.active');
+    const targetNow = (activeTabNow && activeTabNow.dataset.previewMode === 'lyrics') ? 'lyrics' : 'info';
+    const perTarget = (config.byTarget && config.byTarget[targetNow]) || {};
+    const effFloat = perTarget.effectFloat !== undefined ? perTarget.effectFloat : final.effectFloat;
+    const effGlow = perTarget.effectGlow !== undefined ? perTarget.effectGlow : final.effectGlow;
+
+    if (overlayEffectFloat) overlayEffectFloat.checked = !!effFloat;
+    if (overlayEffectGlow) overlayEffectGlow.checked = !!effGlow;
+
+    const fsInput = document.getElementById('overlay-font-size');
+    if (fsInput && perTarget.fontSize) fsInput.value = perTarget.fontSize;
 
     if (config.preset && OVERLAY_PRESETS[config.preset]) {
       setDropdownValue('overlay-preset-dropdown', 'overlay-preset', config.preset);
@@ -550,7 +575,7 @@ export function initOverlayListeners() {
 
     // 표시 항목 — 저장값이 없는 항목은 HTML의 기본 checked 상태를 그대로 둔다
     // (예전 사용자는 이 설정 자체가 없으므로 예전과 같은 화면이 되어야 한다).
-    const savedVis = final.visibility || {};
+    const savedVis = perTarget.visibility || final.visibility || {};
     document.querySelectorAll('.ov-vis-toggle').forEach((el) => {
       const key = el.dataset.vis;
       if (key && savedVis[key] !== undefined) el.checked = savedVis[key] === true;
@@ -574,7 +599,7 @@ export function initOverlayListeners() {
       const themeMode = document.documentElement.getAttribute('data-theme') || 'dark';
       const targets = ['info', 'lyrics'];
 
-      // 통합 설정 — info/lyrics 모두 같은 값으로 동기화
+      // 색·글씨체는 공용, 효과·글자 크기·표시 항목은 대상별.
       const defaults = {
         scale: 1.0,
         color: '8b5cf6',
@@ -591,6 +616,8 @@ export function initOverlayListeners() {
       const final = { ...defaults, ...config };
 
       for (const target of targets) {
+        // 대상별 저장값이 있으면 그것을, 없으면 예전 통합값을 쓴다.
+        const perTarget = (config.byTarget && config.byTarget[target]) || {};
         try {
           await updateOverlayStyle({
             target,
@@ -604,10 +631,10 @@ export function initOverlayListeners() {
             isForceVisible,
             animationDirection: final.animationDirection || 'left',
             themeMode,
-            fontSize: final.fontSize || 22,
-            effectFloat: !!final.effectFloat,
-            effectGlow: !!final.effectGlow,
-            visibility: final.visibility
+            fontSize: perTarget.fontSize || final.fontSize || 22,
+            effectFloat: perTarget.effectFloat !== undefined ? !!perTarget.effectFloat : !!final.effectFloat,
+            effectGlow: perTarget.effectGlow !== undefined ? !!perTarget.effectGlow : !!final.effectGlow,
+            visibility: perTarget.visibility || final.visibility
           });
         } catch (err) {
           console.error(`Failed to sync ${target} overlay style:`, err);
