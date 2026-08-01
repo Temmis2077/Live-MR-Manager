@@ -967,9 +967,16 @@ pub async fn set_tempo(ratio: f64) -> Result<(), String> {
 #[tauri::command]
 pub async fn seek_to(window: WebviewWindow, position_ms: u64) -> Result<(), String> {
     let handler = AUDIO_HANDLER.as_ref().map_err(|e| e.clone())?.clone();
-    let (path, duration_ms) = {
+    // 탐색은 재생 상태를 바꾸지 않는다. 예전에는 play_now를 무조건 true로 넘겨서
+    // 멈춰 둔 채 파형을 만지기만 해도 음악이 시작됐고, 프런트가 그때마다
+    // toggle_playback으로 되돌리는 보정을 넣어야 했다(경합에 취약했다).
+    let (path, duration_ms, was_playing) = {
         let state = handler.state.lock();
-        (state.current_track.clone(), handler.total_duration_ms.load(Ordering::Relaxed))
+        (
+            state.current_track.clone(),
+            handler.total_duration_ms.load(Ordering::Relaxed),
+            state.is_playing,
+        )
     };
 
     if let Some(p) = path {
@@ -986,7 +993,7 @@ pub async fn seek_to(window: WebviewWindow, position_ms: u64) -> Result<(), Stri
         handler.instrumental_volume.store(current_instrumental, Ordering::Relaxed);
         handler.vocal_volume.store(current_vocal, Ordering::Relaxed);
         
-        match play_track_internal(window.clone(), p.clone(), Some(duration_ms), Some(position_ms), true).await {
+        match play_track_internal(window.clone(), p.clone(), Some(duration_ms), Some(position_ms), was_playing).await {
             Ok(_) => {},
             Err(e) => {
                 sys_log(&format!("[AUDIO] Seek-Play failed: {}", e));

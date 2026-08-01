@@ -322,14 +322,13 @@ export class ForcedAlignmentViewer {
 
         this.canvas.addEventListener('mousedown', (e) => {
             if (e.button === 0) {
-                // 파형 클릭은 탐색만 — 일시정지 중이었다면 재생을 시작하지
-                // 않는다(resume:false). 마커/경계 지점을 찍기 위한 클릭이 매번
-                // 재생으로 이어지던 문제 방지.
+                // 파형 클릭은 탐색만 한다. 재생 상태는 백엔드 seek_to가 그대로
+                // 유지하므로, 멈춰 놓고 경계를 만져도 음악이 시작되지 않는다.
                 if (this.state.interludeHoverTarget) {
                     this.state.isResizingInterlude = true;
                     this.state.interludeResizeTarget = this.state.interludeHoverTarget;
                     const il = this.state.interludes[this.state.interludeHoverTarget.index];
-                    this.seekTo(this.state.interludeHoverTarget.type === 'start' ? il.start : il.end, { resume: false });
+                    this.seekTo(this.state.interludeHoverTarget.type === 'start' ? il.start : il.end);
                 } else if (this.state.hoveringTarget) {
                     this.state.isResizing = true;
                     this.state.resizeTarget = this.state.hoveringTarget;
@@ -337,13 +336,13 @@ export class ForcedAlignmentViewer {
 
                     const seg = this.state.segments[this.state.selectedTarget.index];
                     const targetTime = this.state.selectedTarget.type === 'start' ? seg.start : seg.end;
-                    this.seekTo(targetTime, { resume: false });
+                    this.seekTo(targetTime);
                 } else {
                     if (this.state.duration <= 0) return;
                     const rect = this.canvas.getBoundingClientRect();
                     const x = e.clientX - rect.left;
                     const targetTime = this.xToTime(x);
-                    this.seekTo(targetTime, { resume: false });
+                    this.seekTo(targetTime);
                     this.state.selectedTarget = null;
                 }
                 this.drawWaveform();
@@ -890,14 +889,16 @@ export class ForcedAlignmentViewer {
     }
 
     /**
-     * @param resume 백엔드 seek_to는 항상 재생을 재개하므로, 마커를 찍으려고
-     *   파형을 클릭할 때(resume=false)는 원래 일시정지 상태였다면 탐색 후
-     *   즉시 다시 멈춘다 — 클릭할 때마다 재생돼서 지점 잡기가 어려웠던 문제.
+     * 재생 위치만 옮긴다. 재생 중이면 계속 재생되고, 멈춰 있으면 멈춘 채다.
+     *
+     * `resume` 옵션은 더 이상 필요 없다 — 예전에는 백엔드 seek_to가 항상
+     * 재생을 시작해서, 프런트가 toggle_playback으로 되돌리는 보정을 넣어야
+     * 했다. 그 보정이 비동기 경합에 걸리면 오히려 재생이 시작돼, 파형을
+     * 만질 때마다 음악이 튀어나왔다. 이제 백엔드가 상태를 유지한다.
      */
-    async seekTo(time, { resume = true } = {}) {
+    async seekTo(time) {
         if (!this.state.currentPath || this.state.duration <= 0) return;
 
-        const wasPlaying = this.state.isPlaying;
         this.state.currentTime = Math.max(0, Math.min(this.state.duration, time));
         this.updateTimeDisplay();
         // 파형·플레이바 등으로 시간을 옮기면 그 시각의 가사 블럭이 선택되게 한다.
@@ -911,9 +912,6 @@ export class ForcedAlignmentViewer {
             await this.invoke('seek_to', {
                 positionMs: Math.floor(this.state.currentTime * 1000)
             });
-            if (!resume && !wasPlaying) {
-                await this.invoke('toggle_playback');
-            }
         } catch (err) {
             console.error("[Alignment] seekTo error:", err);
         } finally {
