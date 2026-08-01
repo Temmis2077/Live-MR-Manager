@@ -73,6 +73,7 @@ function restructureIntoPanes(tab) {
   // 각 카드는 "안에 무엇이 있는가"로 찾는다 — 구조가 바뀌어도 덜 깨진다.
   const urlCard = tab.querySelector('#overlay-url-display')?.closest('.ai-model-card');
   const designCard = tab.querySelector('#overlay-preset-row')?.closest('.ai-model-card');
+  const visibilityCard = tab.querySelector('.ov-visibility-card');
   const forceVisibleRow = tab.querySelector('#toggle-overlay-force-visible')?.closest('.group-header');
 
   const container = tab.querySelector('.overlay-tab-container') || tab;
@@ -108,9 +109,12 @@ function restructureIntoPanes(tab) {
     </div>`;
   right.appendChild(guide);
 
-  // 좌측 — 연결·URL이 맨 위(시안 순서), 그 아래 디자인 설정
+  // 좌측 — 상시 표시 → 연결·URL → 화면에 보여줄 것 → 디자인 세부 (시안 순서).
+  // 표시 항목이 디자인 세부보다 위인 이유: "무엇을 띄울지"를 먼저 정하고
+  // "어떻게 보일지"를 다듬는 순서가 실제 사용 흐름이다.
   if (forceVisibleRow) left.appendChild(forceVisibleRow);
   if (urlCard) left.appendChild(urlCard);
+  if (visibilityCard) left.appendChild(visibilityCard);
   if (designCard) left.appendChild(designCard);
 
   tab.dataset.paned = '1';

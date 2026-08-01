@@ -174,6 +174,27 @@
       overflow: hidden;
     }
 
+    /* ── 표시 항목 끄기 (설정의 '화면에 보여줄 것') ──────────────────
+       카드를 끄면 배경 없이 가사 글자만 나간다. 방송 배경이 밝아도 읽히도록
+       글자 그림자를 준다. */
+    .overlay-container.no-card {
+      background: transparent !important;
+      backdrop-filter: none !important;
+      -webkit-backdrop-filter: none !important;
+      border-color: transparent !important;
+      box-shadow: none !important;
+    }
+
+    .overlay-container.no-card .lyric-line {
+      text-shadow: 0 2px 12px rgba(0, 0, 0, 0.9), 0 0 4px rgba(0, 0, 0, 0.9);
+    }
+
+    /* 다음 줄을 끄면 자리까지 없애 카드가 그만큼 낮아진다
+       (높이만 0으로 두면 빈 줄이 남아 어색하다) */
+    .overlay-container.no-next .lyric-line.next {
+      display: none;
+    }
+
     .lyric-line.next {
       color: var(--text-sub);
       font-size: calc(var(--lyric-font-size) * 0.73);
@@ -338,6 +359,13 @@
       // 특수효과 — 플로팅(fx-wrapper 이동)·글로우(컨테이너 그림자 펄스)
       overlay.classList.toggle('fx-float', style.effect_float === true || style.effectFloat === true);
       overlay.classList.toggle('fx-glow', style.effect_glow === true || style.effectGlow === true);
+
+      // 화면에 무엇을 보여줄지. 필드가 없는 예전 설정은 예전과 같은 화면이 되게
+      // 기본 true로 본다.
+      const vis = style.visibility || {};
+      const on = (v) => v !== false;
+      overlay.classList.toggle('no-card', !on(vis.card));
+      overlay.classList.toggle('no-next', !on(vis.nextLine ?? vis.next_line));
 
       let duration = '0.85s';
       if (direction === 'right' || direction === 'left') duration = '1.5s';

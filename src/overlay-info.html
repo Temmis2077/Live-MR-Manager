@@ -185,6 +185,48 @@
       margin-bottom: 5px;
     }
 
+    /* ── 표시 항목 끄기 (설정의 '화면에 보여줄 것') ──────────────────
+       카드를 끄면 유리 배경·테두리·그림자를 걷어내 글자만 남는다. 이때
+       방송 배경이 밝아도 읽히도록 글자에 그림자를 준다. */
+    .overlay-container.no-card {
+      background: transparent !important;
+      backdrop-filter: none !important;
+      -webkit-backdrop-filter: none !important;
+      border-color: transparent !important;
+      box-shadow: none !important;
+      padding: 8px 10px;
+    }
+
+    .overlay-container.no-card .label,
+    .overlay-container.no-card #title,
+    .overlay-container.no-card #artist,
+    .overlay-container.no-card .key-bpm {
+      text-shadow: 0 2px 10px rgba(0, 0, 0, 0.85), 0 0 3px rgba(0, 0, 0, 0.9);
+    }
+
+    .overlay-container.no-label .label,
+    .overlay-container.no-artist #artist {
+      display: none;
+    }
+
+    /* 키·빠르기 배지 — 원곡과 다르게 부를 때만 의미가 있어 기본은 꺼져 있다 */
+    .key-bpm {
+      display: none;
+      margin-top: 5px;
+      align-self: flex-start;
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: rgba(var(--accent-rgb), 0.2);
+      color: var(--accent-color);
+      font-size: 11px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .key-bpm.on {
+      display: block;
+    }
+
     .scroll-window {
       width: 100%;
       min-width: 0;
@@ -226,6 +268,7 @@
         <div class="label">NOW PLAYING</div>
         <div class="scroll-window"><div class="scroll-text" id="title">Title</div></div>
         <div class="scroll-window"><div class="scroll-text" id="artist">Artist</div></div>
+        <div class="key-bpm" id="key-bpm"></div>
       </div>
     </div>
   </div>
@@ -237,7 +280,28 @@
     const { hexToRgb, connectWS } = window.OverlayShared;
     const thumbWrap = document.getElementById('thumb-wrap');
     const thumb = document.getElementById('thumb');
+    const keyBpmEl = document.getElementById('key-bpm');
     const activeAnimations = {};
+
+    /**
+     * 키·빠르기 배지. `data`가 null이면 끈다.
+     * 원곡 그대로(키 0 · 1.00배)면 알릴 내용이 없으므로 켜져 있어도 숨긴다 —
+     * 화면에 늘 붙어 있는 "키 0"은 정보가 아니라 잡음이다.
+     */
+    function renderKeyBpm(data) {
+      if (!keyBpmEl) return;
+      if (!data) {
+        keyBpmEl.classList.remove('on');
+        return;
+      }
+      const key = Number(data.song_key ?? data.songKey ?? 0) || 0;
+      const bpm = Number(data.bpm ?? 0) || 0;
+      const parts = [];
+      if (key !== 0) parts.push(`키 ${key > 0 ? '+' : ''}${key}`);
+      if (bpm > 0) parts.push(`${Math.round(bpm)} BPM`);
+      keyBpmEl.textContent = parts.join(' · ');
+      keyBpmEl.classList.toggle('on', parts.length > 0);
+    }
     const pendingMarqueeFrames = {};
     let pendingHideTimer = null;
     let lastDisplayTitle = "Ready";
@@ -370,12 +434,21 @@
         container.classList.remove('dir-left', 'dir-right', 'dir-top', 'dir-bottom');
         container.classList.add(`dir-${dir}`);
 
+        // 화면에 무엇을 보여줄지 — 설정에서 항목별로 끄고 켠다.
+        // 필드가 없는 예전 설정은 "예전과 같은 화면"이 되도록 기본 true.
+        const vis = style.visibility || {};
+        const on = (v) => v !== false;
+        container.classList.toggle('no-card', !on(vis.card));
+        container.classList.toggle('no-label', !on(vis.label));
+        container.classList.toggle('no-artist', !on(vis.artist));
+        renderKeyBpm(on(vis.keyBpm ?? vis.key_bpm) ? data : null);
+
         // Content layout first (thumbnail affects available text width)
         const hasThumb = !!(data.thumbnail && data.thumbnail.length > 20);
-        const shouldShowThumb = true;
+        const shouldShowThumb = on(vis.cover);
         const thumbVisibilityChanged = shouldShowThumb !== lastThumbVisible;
-        thumbWrap.style.display = 'block';
-        thumb.src = hasThumb ? data.thumbnail : DEFAULT_THUMB_URL;
+        thumbWrap.style.display = shouldShowThumb ? 'block' : 'none';
+        if (shouldShowThumb) thumb.src = hasThumb ? data.thumbnail : DEFAULT_THUMB_URL;
         lastThumbVisible = shouldShowThumb;
 
         const titleChanged = displayTitle !== lastRenderedTitle;

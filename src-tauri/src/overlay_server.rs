@@ -31,6 +31,55 @@ pub struct OverlayStyle {
     /// 액센트 색 글로우 펄스 효과. 대상별 독립 설정.
     #[serde(default)]
     pub effect_glow: bool,
+    /// 화면에 무엇을 보여줄지 (카드·커버·라벨·가수·키/BPM·다음 줄).
+    #[serde(default)]
+    pub visibility: OverlayVisibility,
+}
+
+/// 오버레이에 무엇을 보여줄지. 방송마다 화면에 남길 정보량이 다르고(가사만
+/// 크게 띄우는 사람, 곡 정보까지 다 띄우는 사람), 카드 배경 없이 글자만
+/// 얹고 싶은 경우도 흔해서 항목별로 끄고 켤 수 있어야 한다.
+///
+/// 기존 사용자의 저장값에는 이 필드가 없으므로 전부 `#[serde(default)]`이며,
+/// 기본값은 "예전과 같은 화면"이 되도록 잡았다(끄면 사라지는 쪽이 안전하다).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct OverlayVisibility {
+    /// 카드(유리 배경 박스). 끄면 배경 없이 글자만 나간다.
+    #[serde(default = "yes")]
+    pub card: bool,
+    /// 앨범 커버 이미지 (곡 정보 오버레이).
+    #[serde(default = "yes")]
+    pub cover: bool,
+    /// "NOW PLAYING" 라벨.
+    #[serde(default = "yes")]
+    pub label: bool,
+    /// 가수명.
+    #[serde(default = "yes")]
+    pub artist: bool,
+    /// 키·빠르기 배지. 원곡과 다르게 부를 때만 의미가 있어 기본은 꺼둔다.
+    #[serde(default)]
+    pub key_bpm: bool,
+    /// 가사 오버레이의 다음 줄 미리 보여주기.
+    #[serde(default = "yes")]
+    pub next_line: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+impl Default for OverlayVisibility {
+    fn default() -> Self {
+        Self {
+            card: true,
+            cover: true,
+            label: true,
+            artist: true,
+            key_bpm: false,
+            next_line: true,
+        }
+    }
 }
 
 impl Default for OverlayStyle {
@@ -47,6 +96,7 @@ impl Default for OverlayStyle {
             font_size: 0.0,
             effect_float: false,
             effect_glow: false,
+            visibility: OverlayVisibility::default(),
         }
     }
 }
@@ -430,8 +480,15 @@ pub async fn update_overlay_state(title: String, artist: String, thumbnail: Stri
 }
 
 #[tauri::command]
-pub async fn update_overlay_style(target: String, scale: f32, font: String, color: String, text_color: String, bg_color: String, bg_opacity: f32, rounding: f32, is_force_visible: bool, animation_direction: String, theme_mode: String, font_size: Option<f32>, effect_float: Option<bool>, effect_glow: Option<bool>) {
+pub async fn update_overlay_style(target: String, scale: f32, font: String, color: String, text_color: String, bg_color: String, bg_opacity: f32, rounding: f32, is_force_visible: bool, animation_direction: String, theme_mode: String, font_size: Option<f32>, effect_float: Option<bool>, effect_glow: Option<bool>, visibility: Option<OverlayVisibility>) {
     let mut state = CURRENT_STATE.lock().await.clone();
+    // 표시 항목은 프런트가 안 보내면 지금 값을 유지한다 — 색만 바꾸는 호출이
+    // 표시 항목을 조용히 기본값으로 되돌리면 안 된다.
+    let kept_visibility = if target == "lyrics" {
+        state.lyrics_style.visibility.clone()
+    } else {
+        state.info_style.visibility.clone()
+    };
     let style = OverlayStyle {
         scale,
         font,
@@ -444,6 +501,7 @@ pub async fn update_overlay_style(target: String, scale: f32, font: String, colo
         font_size: font_size.unwrap_or(0.0),
         effect_float: effect_float.unwrap_or(false),
         effect_glow: effect_glow.unwrap_or(false),
+        visibility: visibility.unwrap_or(kept_visibility),
     };
     let shared_color = style.color.clone();
     let shared_text_color = style.text_color.clone();

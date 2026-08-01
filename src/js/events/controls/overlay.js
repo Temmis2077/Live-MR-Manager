@@ -155,6 +155,15 @@ export function initOverlayListeners() {
   const updateTextPalette = setupPalette('text-palette', overlayTextColor, overlayTextColorHex);
   const updateBgPalette = setupPalette('bg-palette', overlayBgColor, overlayBgColorHex);
 
+  /** 표시 항목 체크박스를 백엔드가 받는 모양으로 읽는다. */
+  const readVisibilityToggles = () => {
+    const vis = {};
+    document.querySelectorAll('.ov-vis-toggle').forEach((el) => {
+      if (el.dataset.vis) vis[el.dataset.vis] = el.checked;
+    });
+    return vis;
+  };
+
   const updateOverlaySettings = async (skipSave = false) => {
     if (!overlayScale || !overlayFont || !overlayColor || !overlayTextColor || !overlayUrlDisplay || !overlayIframe || !overlayBgOpacity || !overlayRounding || !overlayBgColor || !toggleOverlayForceVisible) return;
 
@@ -189,6 +198,15 @@ export function initOverlayListeners() {
     const effectFloat = !!(overlayEffectFloat && overlayEffectFloat.checked);
     const effectGlow = !!(overlayEffectGlow && overlayEffectGlow.checked);
 
+    // 화면에 보여줄 것 — 항목별 표시 토글. 대상(곡 정보/가사)에 해당하지 않는
+    // 항목은 아래에서 행 자체를 숨기지만, 값은 그대로 보내 다른 탭의 설정이
+    // 초기화되지 않게 한다.
+    const visibility = readVisibilityToggles();
+    document.querySelectorAll('#ov-vis-list .ov-vis-item').forEach((row) => {
+      const scope = row.dataset.for;
+      row.style.display = (scope === 'both' || scope === currentTarget) ? 'flex' : 'none';
+    });
+
     if (!skipSave) {
           const saved = localStorage.getItem('overlay-settings');
           let config = {};
@@ -202,7 +220,7 @@ export function initOverlayListeners() {
 
           // 통합 설정 — info/lyrics 탭 구분 없이 하나의 값만 저장
           Object.assign(config, {
-            scale, font, color, textColor, bgOpacity, rounding, bgColor, animationDirection, fontSize, effectFloat, effectGlow
+            scale, font, color, textColor, bgOpacity, rounding, bgColor, animationDirection, fontSize, effectFloat, effectGlow, visibility
           });
           config.isForceVisible = isForceVisible;
 
@@ -271,7 +289,8 @@ export function initOverlayListeners() {
               themeMode,
               fontSize,
               effectFloat,
-              effectGlow
+              effectGlow,
+              visibility
             });
           }
         } catch (err) {
@@ -384,6 +403,9 @@ export function initOverlayListeners() {
           overlayIframe.src = `overlay-info.html?preview=true&cb=${OVERLAY_CACHE_BUST}`;
           await updateOverlayLyrics({ current: "", next: "" }).catch(err => console.error(err));
         }
+        // 대상이 바뀌었으니 설정 UI도 다시 맞춘다 — 표시 항목 목록은 곡 정보
+        // 전용/가사 전용 행이 나뉘어 있어, 이걸 안 부르면 이전 탭의 행이 남는다.
+        updateOverlaySettings(true);
         requestAnimationFrame(resizeOverlayPreview);
       };
     });
@@ -455,6 +477,14 @@ export function initOverlayListeners() {
     if (overlayEffectFloat) overlayEffectFloat.checked = !!final.effectFloat;
     if (overlayEffectGlow) overlayEffectGlow.checked = !!final.effectGlow;
 
+    // 표시 항목 — 저장값이 없는 항목은 HTML의 기본 checked 상태를 그대로 둔다
+    // (예전 사용자는 이 설정 자체가 없으므로 예전과 같은 화면이 되어야 한다).
+    const savedVis = final.visibility || {};
+    document.querySelectorAll('.ov-vis-toggle').forEach((el) => {
+      const key = el.dataset.vis;
+      if (key && savedVis[key] !== undefined) el.checked = savedVis[key] === true;
+    });
+
     updateOverlaySettings(true);
   };
 
@@ -505,13 +535,19 @@ export function initOverlayListeners() {
             themeMode,
             fontSize: final.fontSize || 22,
             effectFloat: !!final.effectFloat,
-            effectGlow: !!final.effectGlow
+            effectGlow: !!final.effectGlow,
+            visibility: final.visibility
           });
         } catch (err) {
           console.error(`Failed to sync ${target} overlay style:`, err);
         }
       }
     };
+
+  // 표시 항목 토글 — 바꾸면 바로 미리보기·방송에 반영된다
+  document.querySelectorAll('.ov-vis-toggle').forEach((el) => {
+    el.addEventListener('change', () => updateOverlaySettings());
+  });
 
   [overlayScale, overlayBgOpacity, overlayRounding, toggleOverlayForceVisible, overlayEffectFloat, overlayEffectGlow].forEach(el => {
     if (!el) return;

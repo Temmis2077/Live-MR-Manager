@@ -214,3 +214,65 @@
     position: static;
   }
 }
+
+/* ── 화면에 보여줄 것 (표시 항목 토글) ─────────────────────────────
+   시안의 토글 목록. 대상(곡 정보/가사)에 해당하지 않는 행은 overlay.js가
+   숨기므로, 지금 보고 있는 미리보기에 실제로 영향을 주는 항목만 남는다. */
+.ov-vis-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 12px;
+}
+
+.ov-vis-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 9px 8px;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.ov-vis-item:hover {
+  background: var(--surface-1);
+}
+
+.ov-vis-item input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  margin-top: 2px;
+  cursor: pointer;
+}
+
+.ov-vis-item:focus-within {
+  outline: 2px solid var(--accent-secondary);
+  outline-offset: 2px;
+}
+
+.ov-vis-text {
+  min-width: 0;
+  flex: 1;
+}
+
+.ov-vis-name {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+/* 꺼진 항목은 이름을 흐리게 — 체크박스 외에 상태를 한 번 더 알린다 */
+.ov-vis-item:has(input:not(:checked)) .ov-vis-name {
+  color: var(--text-dim);
+}
+
+.ov-vis-hint {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
