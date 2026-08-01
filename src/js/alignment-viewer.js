@@ -1942,13 +1942,22 @@ export class ForcedAlignmentViewer {
     }
 
     async cancelAiAlignment() {
-        // 에디터 정렬도 대기열을 통해 실행되므로, 현재 곡의 대기열 항목을 취소.
+        // 중지는 즉시 끝나지 않는다(추론 중이면 청크 경계까지 기다린다). 누른
+        // 순간 화면이 그대로면 눌렸는지 알 수 없어 계속 누르게 되므로, 먼저
+        // 버튼을 잠그고 '중지 중'을 띄운 뒤 실제 취소를 보낸다.
+        this.cancelPending = true;
+        this.updateAiAlignButtonState();
+
         try {
             const { cancelAlignmentQueueItem } = await import('./alignment-queue.js');
             await cancelAlignmentQueueItem(this.state.currentPath);
         } catch (err) {
             console.error('cancelAlignmentQueueItem failed:', err);
+            // 취소 요청 자체가 실패하면 잠가둘 이유가 없다 — 다시 누를 수 있게.
+            this.cancelPending = false;
+            showNotification('중지 요청을 보내지 못했습니다.', 'error');
         }
+        this.updateAiAlignButtonState();
     }
 
     /**
@@ -1961,12 +1970,21 @@ export class ForcedAlignmentViewer {
         if (!btn) return;
         const item = (state.alignmentQueue || []).find((i) => i.path === this.state.currentPath);
         const busy = !!item && (item.status === 'queued' || item.status === 'processing');
+
+        // 대기열에서 빠졌으면 중지가 끝난 것 — 잠금을 푼다.
+        if (!busy) this.cancelPending = false;
+
         btn.disabled = busy;
         btn.textContent = busy
-            ? (item.status === 'queued' ? '대기열 등록됨…' : '변환 중…')
+            ? (this.cancelPending ? '중지 중…' : (item.status === 'queued' ? '대기 중' : '정렬 중'))
             : 'AI 자동 정렬';
+
         const cancelBtn = document.getElementById('ai-align-cancel-btn');
-        if (cancelBtn) cancelBtn.style.display = busy ? '' : 'none';
+        if (cancelBtn) {
+            cancelBtn.style.display = busy ? '' : 'none';
+            cancelBtn.disabled = this.cancelPending;
+            cancelBtn.textContent = this.cancelPending ? '중지 중…' : '중지';
+        }
     }
 
     /**
@@ -2163,13 +2181,19 @@ export class ForcedAlignmentViewer {
                 import('./ui/library.js').then(m => { if (m.renderLibrary) m.renderLibrary(); }).catch(() => {});
             }
 
-            // Refresh currently loaded lyric data for drawer/overlay right away.
-            const parsedLyrics = parseLrc(content, this.state.duration || 0);
-            state.currentLyrics = parsedLyrics;
-            state.currentLyricIndex = -1;
-            import('./lyric-drawer.js').then(m => {
-                if (m.updateLyrics) m.updateLyrics(parsedLyrics);
-            });
+            // 방금 저장한 곡이 지금 재생 중인 곡일 때만 표시용 가사를 갈아끼운다.
+            // 다른 곡을 틀어둔 채 편집하면 재생 중인 곡의 가사·오버레이가 편집
+            // 중인 곡 것으로 바뀌어, 방송에 엉뚱한 가사가 나간다.
+            const editedIsPlaying = !!state.currentTrack
+                && state.currentTrack.path === this.state.currentPath;
+            if (editedIsPlaying) {
+                const parsedLyrics = parseLrc(content, this.state.duration || 0);
+                state.currentLyrics = parsedLyrics;
+                state.currentLyricIndex = -1;
+                import('./lyric-drawer.js').then(m => {
+                    if (m.updateLyrics) m.updateLyrics(parsedLyrics);
+                });
+            }
             import('./ui/components.js').then(m => {
                 if (m.updateAiTogglesState) m.updateAiTogglesState();
             });

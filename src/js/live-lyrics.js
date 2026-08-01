@@ -77,9 +77,8 @@ export function renderLiveLyrics(list) {
   if (segments.length === 0) {
     body.innerHTML = `
       <div class="live-lyrics-empty">
-        이 곡에는 싱크된 가사가 없습니다.<br>
-        음원 관리에서 <strong>싱크 가사 가져오기</strong>를 누르거나,
-        가사 싱크 화면에서 직접 맞출 수 있습니다.
+        싱크된 가사 없음<br>
+        음원 관리의 <strong>싱크 가사 가져오기</strong> 또는 가사 싱크 화면에서 맞춥니다.
       </div>`;
     return;
   }

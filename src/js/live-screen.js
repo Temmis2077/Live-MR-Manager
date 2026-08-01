@@ -113,8 +113,8 @@ function tick() {
   if (titleEl) titleEl.textContent = track ? (track.title || '제목 없음') : '재생 중인 곡 없음';
   if (artistEl) {
     artistEl.textContent = track
-      ? [track.artist, track.genre].filter(Boolean).join(' · ') || '가수 정보 없음'
-      : '라이브러리에서 곡을 골라 주세요';
+      ? [track.artist, track.genre].filter(Boolean).join(' · ') || '가수 미상'
+      : '라이브러리에서 곡 선택';
   }
   if (artEl) {
     const thumb = track ? getThumbnailUrl(track.thumbnail) : null;
@@ -132,7 +132,7 @@ function tick() {
       parts.push('<div class="live-badge">멈춤</div>');
     }
     if (track && (track.hasMr || track.has_mr || track.mrReady)) {
-      parts.push('<div class="live-badge">보컬 지움 · MR 준비됨</div>');
+      parts.push('<div class="live-badge">MR</div>');
     }
     const html = parts.join('');
     if (badges.innerHTML !== html) badges.innerHTML = html;
@@ -237,7 +237,7 @@ export function renderLiveQueue() {
         <div class="live-q-num">${isCur ? '▶' : i}</div>
         <div class="live-q-body">
           <div class="live-q-title">${esc(t.title)}</div>
-          <div class="live-q-sub">${esc(t.artist || '가수 정보 없음')}</div>
+          <div class="live-q-sub">${esc(t.artist || '가수 미상')}</div>
         </div>
         <div class="live-q-badge${ready ? ' ready' : ''}">${ready ? 'MR' : '원곡'}</div>
       </div>`;
@@ -524,7 +524,7 @@ function renderPicker() {
               data-path="${esc(s.path)}"${already ? ' aria-disabled="true"' : ''}>
         <span class="live-picker-info">
           <span class="live-picker-name">${esc(s.title || '제목 없음')}</span>
-          <span class="live-picker-meta">${esc(s.artist || '가수 정보 없음')}${s.duration ? ' · ' + esc(s.duration) : ''}</span>
+          <span class="live-picker-meta">${esc(s.artist || '가수 미상')}${s.duration ? ' · ' + esc(s.duration) : ''}</span>
         </span>
         <span class="live-picker-tags">
           ${ready ? '<span class="live-picker-chip on">MR</span>' : '<span class="live-picker-chip">원곡만</span>'}
@@ -552,7 +552,7 @@ function syncOverlayChip() {
   chip.classList.toggle('on', on);
   chip.setAttribute('aria-pressed', on ? 'true' : 'false');
   // 색만이 아니라 문구로도 상태를 알린다(기준서 3 · 7).
-  text.textContent = on ? '가사 화면 켜짐' : '가사 화면 꺼짐';
+  text.textContent = on ? '오버레이 ON' : '오버레이 OFF';
 }
 
 /* ── 소리 보내는 곳 (출력 장치) ────────────────────────────
@@ -602,10 +602,10 @@ async function toggleDeviceMenu() {
       </span>
     </button>`;
 
-  menu.innerHTML = `<div class="live-device-label">소리 보내는 곳</div>`
-    + row('', '시스템 기본 장치', '윈도우에서 고른 장치를 따라갑니다', !anyActive)
+  menu.innerHTML = `<div class="live-device-label">출력 장치</div>`
+    + row('', '시스템 기본 장치', '', !anyActive)
     + devices.map((d) => row(d.name, d.name, d.config || '', !!d.isActive)).join('')
-    + `<div class="live-device-note">재생 중에도 바로 바뀝니다.</div>`;
+    + '';
 
   menu.querySelectorAll('[data-device]').forEach((item) => {
     item.addEventListener('click', () => selectDevice(item.dataset.device));
@@ -624,7 +624,7 @@ async function selectDevice(name) {
     // 설정 화면의 <select>도 같은 값으로 — 두 곳이 어긋나면 안 된다.
     import('./audio-devices.js').then((m) => m.refreshOutputDevices()).catch(() => {});
     const { showNotification } = await import('./utils.js');
-    showNotification(`소리 보내는 곳: ${resolved}`, 'success');
+    showNotification(`출력: ${resolved}`, 'success');
   } catch (err) {
     const { showNotification } = await import('./utils.js');
     showNotification('장치를 바꾸지 못했습니다: ' + err, 'error');

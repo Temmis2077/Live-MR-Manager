@@ -196,7 +196,7 @@ export function renderCollections() {
           <button type="button" class="lib-tag${act === name ? ' active' : ''}" data-tag="${esc(name)}" title="${esc(name)} · ${n}곡">
             ${esc(name)}
           </button>`).join('')
-      : '<div class="lib-side-empty">아직 태그가 없습니다. 곡을 고른 뒤 오른쪽에서 태그를 넣어 보세요.</div>';
+      : '<div class="lib-side-empty">태그 없음 — 인스펙터에서 넣을 수 있습니다.</div>';
 
     tagList.querySelectorAll('.lib-tag').forEach((btn) => {
       btn.onclick = async () => {
@@ -316,7 +316,7 @@ export function renderInspector() {
       <div class="insp-actions">
         <button type="button" class="insp-btn primary" id="insp-save">저장</button>
         <button type="button" class="insp-btn" id="insp-autofill"
-                title="장르·태그는 Last.fm에서, 키·BPM은 음원을 직접 분석해 채웁니다. 비어 있는 항목만 채웁니다.">
+                title="빈 칸만 채웁니다 · 장르는 Last.fm, 키·BPM은 음원 분석">
           자동 채우기
         </button>
       </div>
@@ -334,7 +334,7 @@ export function renderInspector() {
       </div>
       <div class="insp-actions">
         <button type="button" class="insp-btn" id="insp-fetch-lyrics"
-                title="LRCLIB에서 타임코드가 붙은 가사를 찾아 이 곡 옆에 저장합니다. 곡 길이가 맞는 것만 받습니다.">
+                title="LRCLIB에서 싱크 가사 · 곡 길이가 맞는 것만">
           싱크 가사 가져오기
         </button>
       </div>
@@ -436,7 +436,7 @@ function wireAutofill(song, idx) {
     const wantGenre = !((genreIn?.value || '').trim());
     const wantKeyBpm = !((keyIn?.value || '').trim()) || !((bpmIn?.value || '').trim());
     if (!wantGenre && !wantKeyBpm) {
-      setNote('insp-autofill-note', '이미 다 채워져 있습니다. 바꾸려면 직접 지우고 다시 눌러 주세요.', 'warn');
+      setNote('insp-autofill-note', '이미 채워져 있습니다. 바꾸려면 지우고 다시 누르세요.', 'warn');
       return;
     }
 
@@ -465,8 +465,8 @@ function wireAutofill(song, idx) {
       }
 
       const parts = [];
-      if (filled.length) parts.push(`${filled.join(' · ')} 채움 — 확인 후 저장을 눌러 주세요.`);
-      else parts.push('채울 수 있는 항목을 찾지 못했습니다.');
+      if (filled.length) parts.push(`${filled.join(' · ')} 채움 — 확인 후 저장`);
+      else parts.push('찾은 값이 없습니다.');
       if (res.notes?.length) parts.push(res.notes.join(' / '));
       setNote('insp-autofill-note', parts.join(' '), filled.length ? 'ok' : 'warn');
     } catch (err) {

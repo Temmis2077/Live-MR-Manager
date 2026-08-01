@@ -59,7 +59,7 @@
     </div>
 
     <!-- 주요 액션: 노래 추가 (로고 바로 아래 고정, 눈에 띄는 채움 버튼) -->
-    <div class="nav-item nav-add-song" id="nav-add-song" title="유튜브 URL이나 로컬 파일로 곡을 추가하고, 곡 정보·MR 분리·가사 정렬까지 한 번에 설정합니다.">
+    <div class="nav-item nav-add-song" id="nav-add-song" title="유튜브 URL 또는 로컬 파일로 곡 추가">
       <i>
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
           <line x1="12" y1="5" x2="12" y2="19"></line>
@@ -71,7 +71,7 @@
 
     <div class="nav-group">
       <label class="nav-label">미디어</label>
-      <div class="nav-item" id="nav-live" title="공연·방송 중 쓰는 리모컨 화면 — 키·빠르기·볼륨을 크게 조작합니다.">
+      <div class="nav-item" id="nav-live" title="공연 중 조작 화면">
         <i>
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path>
@@ -118,7 +118,7 @@
       </div>
 
       <!-- 탭 전환이 아니라 별도 가사 창(호버창)을 여는 액션 -->
-      <div class="nav-item" id="nav-lyrics-window" title="현재 재생 곡의 가사를 별도 창으로 띄웁니다 (항상 위·투명도·크기 조절 가능).">
+      <div class="nav-item" id="nav-lyrics-window" title="가사를 별도 창으로 — 항상 위, 투명도 조절">
         <i>
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <rect x="3" y="4" width="18" height="16" rx="2"></rect>
@@ -351,7 +351,7 @@
             <div id="song-grid" class="song-grid"></div>
 
             <div class="lib-dropzone-hint">
-              <div class="lib-dropzone-title">여기로 음원 파일을 끌어다 놓으면 바로 분리 대기열에 들어갑니다</div>
+              <div class="lib-dropzone-title">음원 파일을 끌어다 놓으면 분리 대기열에 들어갑니다</div>
               <div class="lib-dropzone-sub">mp3 · wav · flac · m4a · 유튜브 링크 붙여넣기도 지원</div>
             </div>
           </div>
@@ -369,16 +369,16 @@
               <!-- 소리 보내는 곳 — 라이브 중에는 화면을 떠나지 않고 여기서 바로 바꾼다 -->
               <div class="live-device-wrap">
                 <button type="button" class="live-chip is-button" id="live-device" aria-haspopup="menu"
-                        aria-expanded="false" title="소리를 내보낼 장치를 바꿉니다 (재생 중에도 즉시 전환)">
+                        aria-expanded="false" title="출력 장치 — 재생 중에도 즉시 전환">
                   <span class="live-dot on"></span>
-                  <span>소리 보내는 곳</span>
+                  <span>출력</span>
                   <span class="live-chip-value" id="live-device-name">기본 장치</span>
                   <span class="live-caret" aria-hidden="true"></span>
                 </button>
                 <div class="live-device-menu" id="live-device-menu" role="menu" hidden></div>
               </div>
               <button type="button" class="live-chip is-button live-ov-toggle" id="live-ov-toggle"
-                      aria-pressed="false" title="OBS 가사 오버레이를 항상 보이게 할지 켜고 끕니다">
+                      aria-pressed="false" title="오버레이 상시 표시">
                 <span class="live-dot"></span>
                 <span class="live-ov-text" id="live-ov-text">가사 화면 꺼짐</span>
               </button>
@@ -402,7 +402,7 @@
               <div>
                 <div class="live-wave" id="live-wave" role="slider" tabindex="0"
                      aria-label="재생 위치" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"
-                     title="클릭하면 그 위치로 이동 · ←→ 키로 5초씩 이동"></div>
+                     title="←→ 5초"></div>
                 <div class="live-time">
                   <span class="live-pos" id="live-pos">0:00</span>
                   <span class="live-dur" id="live-dur">0:00</span>
@@ -418,10 +418,10 @@
               <div class="live-steppers">
                 <div class="live-card">
                   <div class="live-card-title">노래 키</div>
-                  <div class="live-card-hint">내 목에 맞게 높낮이 조절</div>
+                  <div class="live-card-hint">키</div>
                   <div class="live-stepper">
                     <button type="button" class="live-step-btn" id="live-key-down" aria-label="노래 키 한 음 내리기">−</button>
-                    <button type="button" class="live-step-val" id="live-key-val" aria-label="노래 키 기본값(0)으로 되돌리기" title="클릭하면 0으로 되돌립니다">0</button>
+                    <button type="button" class="live-step-val" id="live-key-val" aria-label="노래 키 기본값(0)으로 되돌리기" title="클릭 → 0">0</button>
                     <button type="button" class="live-step-btn" id="live-key-up" aria-label="노래 키 한 음 올리기">＋</button>
                   </div>
                 </div>
@@ -430,7 +430,7 @@
                   <div class="live-card-hint">원래 속도는 100</div>
                   <div class="live-stepper">
                     <button type="button" class="live-step-btn" id="live-tempo-down" aria-label="노래 빠르기 낮추기">−</button>
-                    <button type="button" class="live-step-val" id="live-tempo-val" aria-label="노래 빠르기 기본값(100)으로 되돌리기" title="클릭하면 100으로 되돌립니다">100</button>
+                    <button type="button" class="live-step-val" id="live-tempo-val" aria-label="노래 빠르기 기본값(100)으로 되돌리기" title="클릭 → 100">100</button>
                     <button type="button" class="live-step-btn" id="live-tempo-up" aria-label="노래 빠르기 올리기">＋</button>
                   </div>
                 </div>
@@ -439,24 +439,24 @@
               <div class="live-volumes">
                 <div class="live-card">
                   <div class="live-vol-head">
-                    <div class="live-vol-name">반주 ↔ 가이드 보컬</div>
+                    <div class="live-vol-name">가이드 보컬</div>
                     <div class="live-vol-val" id="live-mix-val">0</div>
                   </div>
                   <div class="live-vol-track" id="live-mix-track" role="slider" tabindex="0"
-                       aria-label="반주와 가이드 보컬 믹스" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"
-                       title="끌어서 조절 · ←→ 키로 5씩">
+                       aria-label="가이드 보컬" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"
+                       title="←→ 5씩">
                     <div class="live-vol-fill" id="live-mix-fill" style="width: 0%"></div>
                   </div>
                   <div class="live-vol-scale"><span>반주만</span><span>보컬 100</span></div>
                 </div>
                 <div class="live-card">
                   <div class="live-vol-head">
-                    <div class="live-vol-name">내 귀에 들리는 소리</div>
+                    <div class="live-vol-name">모니터</div>
                     <div class="live-vol-val" id="live-mon-val">100</div>
                   </div>
                   <div class="live-vol-track" id="live-mon-track" role="slider" tabindex="0"
-                       aria-label="내 귀에 들리는 소리" aria-valuemin="0" aria-valuemax="120" aria-valuenow="100"
-                       title="끌어서 조절 · ←→ 키로 5씩">
+                       aria-label="모니터 볼륨" aria-valuemin="0" aria-valuemax="120" aria-valuenow="100"
+                       title="←→ 5씩">
                     <div class="live-vol-fill" id="live-mon-fill" style="width: 100%"></div>
                   </div>
                 </div>
@@ -481,7 +481,7 @@
                 <!-- 저장된 곡에서 골라 '다음 곡'에 담는다. 새 곡을 받아오는
                      '노래 추가'(상단 앱바)와는 하는 일이 다르다. -->
                 <button type="button" class="live-add-btn" id="live-queue-add"
-                        aria-haspopup="dialog" aria-expanded="false">＋ 다음 곡 담기</button>
+                        aria-haspopup="dialog" aria-expanded="false">＋ 대기열</button>
               </div>
             </aside>
 
@@ -508,8 +508,8 @@
               <div class="live-picker-panel" role="dialog" aria-modal="true" aria-labelledby="live-picker-title">
                 <div class="live-picker-head">
                   <div>
-                    <div class="live-picker-title" id="live-picker-title">다음 곡 담기</div>
-                    <div class="live-picker-sub">저장된 곡에서 골라 담습니다.</div>
+                    <div class="live-picker-title" id="live-picker-title">대기열 추가</div>
+                    <div class="live-picker-sub">라이브러리에서 고릅니다.</div>
                   </div>
                   <button type="button" class="live-picker-close" data-picker-close aria-label="닫기">✕</button>
                 </div>
@@ -539,7 +539,7 @@
               </div>
               <div class="overlay-live-state" id="overlay-live-state" data-on="false">
                 <span class="overlay-live-dot"></span>
-                <span id="overlay-live-state-text">지금은 시청자에게 안 보임</span>
+                <span id="overlay-live-state-text">송출 안 됨</span>
               </div>
             </div>
             <!-- 배경은 .ov-preview-canvas(체커보드 = 투명 영역)가 정한다.
@@ -584,7 +584,7 @@
               <div class="ai-model-card" style="margin-top: 16px;">
                 <div class="ai-info-left" style="width: 100%;">
                   <div class="ai-title-large">오버레이 디자인 커스텀</div>
-                  <div class="ai-model-desc">설정 변경 내용이 미리보기에 바로 반영됩니다.</div>
+                  
 
                   <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 18px;">
                     <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px;">
@@ -801,49 +801,49 @@
               <div class="ai-model-card ov-visibility-card" style="margin-top: 16px;">
                 <div class="ai-info-left" style="width: 100%;">
                   <div class="ai-title-large">화면에 보여줄 것</div>
-                  <div class="ai-model-desc">끄면 방송 화면에서 사라집니다. 미리보기에 바로 반영됩니다.</div>
+                  <div class="ai-model-desc">끄면 방송 화면에서 사라집니다.</div>
 
                   <div class="ov-vis-list" id="ov-vis-list">
                     <label class="ov-vis-item" data-for="both">
                       <input type="checkbox" class="ov-vis-toggle" id="ov-vis-card" data-vis="card" checked>
                       <span class="ov-vis-text">
                         <span class="ov-vis-name">카드 배경</span>
-                        <span class="ov-vis-hint">끄면 배경 없이 글자만 나갑니다 (글자에 그림자가 붙습니다)</span>
+                        <span class="ov-vis-hint">끄면 글자만 · 그림자가 붙습니다</span>
                       </span>
                     </label>
                     <label class="ov-vis-item" data-for="info">
                       <input type="checkbox" class="ov-vis-toggle" id="ov-vis-cover" data-vis="cover" checked>
                       <span class="ov-vis-text">
                         <span class="ov-vis-name">커버 이미지</span>
-                        <span class="ov-vis-hint">앨범 커버 썸네일</span>
+                        
                       </span>
                     </label>
                     <label class="ov-vis-item" data-for="info">
                       <input type="checkbox" class="ov-vis-toggle" id="ov-vis-label" data-vis="label" checked>
                       <span class="ov-vis-text">
                         <span class="ov-vis-name">NOW PLAYING 라벨</span>
-                        <span class="ov-vis-hint">곡 제목 위의 작은 머리글</span>
+                        
                       </span>
                     </label>
                     <label class="ov-vis-item" data-for="info">
                       <input type="checkbox" class="ov-vis-toggle" id="ov-vis-artist" data-vis="artist" checked>
                       <span class="ov-vis-text">
                         <span class="ov-vis-name">가수 이름</span>
-                        <span class="ov-vis-hint">제목만 크게 띄우고 싶을 때 끕니다</span>
+                        
                       </span>
                     </label>
                     <label class="ov-vis-item" data-for="info">
                       <input type="checkbox" class="ov-vis-toggle" id="ov-vis-keybpm" data-vis="keyBpm">
                       <span class="ov-vis-text">
                         <span class="ov-vis-name">키 · 빠르기</span>
-                        <span class="ov-vis-hint">원곡과 다르게 부를 때만 표시됩니다 (원곡 그대로면 자동으로 숨김)</span>
+                        <span class="ov-vis-hint">원곡과 다를 때만 표시</span>
                       </span>
                     </label>
                     <label class="ov-vis-item" data-for="lyrics">
                       <input type="checkbox" class="ov-vis-toggle" id="ov-vis-nextline" data-vis="nextLine" checked>
                       <span class="ov-vis-text">
                         <span class="ov-vis-name">다음 줄 미리 보기</span>
-                        <span class="ov-vis-hint">지금 줄 아래에 다음 가사를 흐리게 보여줍니다</span>
+                        
                       </span>
                     </label>
                   </div>
@@ -860,8 +860,8 @@
                 <!-- Network scope toggle -->
                 <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; background: var(--surface-1); border-radius: 8px; border: 1px solid var(--glass-border);">
                   <label for="toggle-overlay-lan" style="font-size: 0.8rem; color: var(--text-main); display: flex; flex-direction: column; gap: 2px; cursor: pointer;">
-                    <span style="font-weight: 700;">다른 PC(같은 네트워크)에서 접속</span>
-                    <span style="font-size: 0.72rem; color: var(--text-muted);" id="overlay-lan-status">끄면 이 PC(localhost) 주소만 표시됩니다.</span>
+                    <span style="font-weight: 700;">같은 네트워크의 다른 PC에서 접속</span>
+                    <span style="font-size: 0.72rem; color: var(--text-muted);" id="overlay-lan-status">끄면 localhost 주소만 표시</span>
                   </label>
                   <input type="checkbox" id="toggle-overlay-lan" style="width: 18px; height: 18px; flex-shrink: 0;">
                 </div>
@@ -1633,7 +1633,7 @@
           <div class="dock-menu-item" id="dock-menu-separate">MR 분리</div>
           <div class="dock-menu-item" id="dock-menu-lyric-sync">가사 싱크 열기</div>
           <div class="dock-menu-item" id="dock-menu-lyrics-window">가사 창 띄우기</div>
-          <div class="dock-menu-item" id="dock-menu-mr-folder" title="이 곡의 분리 결과(보컬/MR)가 저장된 폴더를 엽니다.">MR 폴더 열기</div>
+          <div class="dock-menu-item" id="dock-menu-mr-folder" title="분리 결과 폴더">MR 폴더 열기</div>
         </div>
       </div>
     </div>

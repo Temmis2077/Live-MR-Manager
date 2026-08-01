@@ -196,6 +196,25 @@ export async function openAlignmentForTrack(path, options = {}) {
     if (nameEl) {
       nameEl.innerText = (track && track.title) ? track.title : "Unknown Title";
     }
+    // 편집기에서 연 곡을 앱의 현재 곡으로 맞춘다. 재생 → 편집기 방향은
+    // player.js가 이미 따라가는데 반대가 없어서, 다른 곡을 틀어둔 채 편집하면
+    // 가사 드로어·라이브 패널·오버레이가 편집 중인 곡과 계속 어긋났다.
+    // loadAudio가 playNow:false로 이미 로드했으므로 재생을 시작하지는 않는다.
+    if (track && state.currentTrack?.path !== path) {
+      state.currentTrack = track;
+      state.currentLyricIndex = -1;
+      const idx = (state.songLibrary || []).findIndex(t => t.path === path);
+      if (idx >= 0) state.selectedTrackIndex = idx;
+
+      // 길이는 "3:47" 형태라 초로 바꿔 넘긴다(가사 파서가 끝 시각 보정에 쓴다).
+      const { loadLyricsForTrack } = await import('../lyrics.js');
+      const { durationToSeconds } = await import('../duration.js');
+      const lyrics = await loadLyricsForTrack(path, durationToSeconds(track.duration) || 0);
+      state.currentLyrics = lyrics;
+      const drawer = await import('../lyric-drawer.js');
+      drawer.updateLyrics?.(lyrics);
+      drawer.syncLyricDrawerHeader?.();
+    }
   }
 }
 
