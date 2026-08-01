@@ -14,30 +14,80 @@ let cachedLanAddress = null;
 const OVERLAY_CACHE_BUST = Date.now();
 
 /**
- * 오버레이 기본 스타일 3종 — 기존 조절값(크기·폰트·색·투명도·둥글기·방향)을
- * 한 번에 세팅한다. 새 CSS 변수는 만들지 않고 이미 있는 커스터마이징 축만
- * 조합해서 서로 다른 룩을 만든다(글래스=OBS 오버레이 표준형, 미니멀=박스 없이
- * 텍스트만 두는 최근 가사 영상 트렌드, 스테이지=굵고 선명한 클래식 노래방
- * 캡션). 적용 후에도 아래 세부 컨트롤로 얼마든지 더 다듬을 수 있다.
+ * 오버레이 기본 스타일 — 모양(크기·폰트·색·투명도·둥글기·방향·효과)과
+ * 표시 항목(카드·커버·라벨·가수·키/BPM·다음 줄)을 한 번에 세팅한다.
+ *
+ * 새 CSS 변수는 만들지 않고 이미 있는 커스터마이징 축만 조합해서 서로 다른
+ * 룩을 만든다. 표시 항목까지 프리셋에 넣은 이유는, 실제로 "박스 없이 가사만"
+ * 같은 룩은 색·투명도만으로는 안 되고 커버·라벨을 함께 꺼야 완성되기 때문이다.
+ *
+ * 적용 후에도 아래 세부 컨트롤로 얼마든지 더 다듬을 수 있다.
+ *
+ * 슬라이더 step(scale·투명도는 0.1 단위)에 정확히 맞춘 값만 쓴다 — 안 맞는
+ * 값(예: 0.85, 1.15)은 브라우저가 프로그램적 할당에도 가까운 스텝으로
+ * 조용히 스냅해, 프리셋이 실제로 뭘 저장할지 브라우저 구현에 기대게 된다.
  */
-/* 슬라이더 step(scale·투명도는 0.1 단위)에 정확히 맞춘 값만 쓴다 — 안 맞는
-   값(예: 0.85, 1.15)은 브라우저가 프로그램적 할당에도 가까운 스텝으로
-   조용히 스냅해, 프리셋이 실제로 뭘 저장할지 브라우저 구현에 기대게 된다. */
+const ALL_ON = { card: true, cover: true, label: true, artist: true, keyBpm: false, nextLine: true };
+
 const OVERLAY_PRESETS = {
   glass: {
+    label: '글래스', desc: '투명 유리 카드 · 방송 기본형',
     scale: 1.0, font: 'Pretendard', color: '8b5cf6', textColor: 'ffffff',
     bgOpacity: 0.6, rounding: 20, bgColor: '0f0f14', animationDirection: 'left', fontSize: 22,
     effectFloat: true, effectGlow: false,
+    visibility: { ...ALL_ON },
   },
   minimal: {
+    label: '미니멀', desc: '박스 없이 텍스트만 · 담백하게',
     scale: 1.0, font: 'Inter', color: 'a78bfa', textColor: 'ffffff',
     bgOpacity: 0.1, rounding: 10, bgColor: '000000', animationDirection: 'top', fontSize: 24,
     effectFloat: false, effectGlow: false,
+    // 카드를 끄면 라벨까지 남기는 건 지저분하다 — 제목·가수만 남긴다.
+    visibility: { ...ALL_ON, card: false, label: false },
   },
   stage: {
+    label: '스테이지', desc: '굵고 선명하게 · 노래방 감성',
     scale: 1.2, font: 'SUITE', color: 'ec4899', textColor: 'ffffff',
     bgOpacity: 0.9, rounding: 30, bgColor: '1a0b2e', animationDirection: 'bottom', fontSize: 27,
     effectFloat: false, effectGlow: true,
+    visibility: { ...ALL_ON },
+  },
+  lyricsOnly: {
+    label: '가사 집중', desc: '가사만 큼직하게 · 곡 정보는 최소',
+    scale: 1.1, font: 'SUITE', color: 'ffffff', textColor: 'ffffff',
+    bgOpacity: 0.0, rounding: 10, bgColor: '000000', animationDirection: 'top', fontSize: 30,
+    effectFloat: false, effectGlow: false,
+    // 화면을 가사에 내주는 프리셋 — 커버·라벨·가수·다음 줄을 모두 접는다.
+    visibility: { card: false, cover: false, label: false, artist: false, keyBpm: false, nextLine: false },
+  },
+  titleOnly: {
+    label: '제목만', desc: '커버·라벨 없이 곡 제목 한 줄',
+    scale: 1.0, font: 'Pretendard', color: '8b5cf6', textColor: 'ffffff',
+    bgOpacity: 0.5, rounding: 14, bgColor: '0f0f14', animationDirection: 'left', fontSize: 22,
+    effectFloat: false, effectGlow: false,
+    visibility: { card: true, cover: false, label: false, artist: false, keyBpm: false, nextLine: true },
+  },
+  practice: {
+    label: '연습용', desc: '키·빠르기를 함께 표시 · 커버 연습에',
+    scale: 1.0, font: 'Inter', color: '22c55e', textColor: 'ffffff',
+    bgOpacity: 0.7, rounding: 12, bgColor: '0b1410', animationDirection: 'left', fontSize: 22,
+    effectFloat: false, effectGlow: false,
+    // 원곡과 다르게 부를 때 시청자에게 알려주는 용도.
+    visibility: { ...ALL_ON, keyBpm: true },
+  },
+  neon: {
+    label: '네온', desc: '진한 배경에 빛나는 글자 · 어두운 화면에',
+    scale: 1.1, font: 'SUITE', color: '38bdf8', textColor: 'ffffff',
+    bgOpacity: 0.8, rounding: 24, bgColor: '020617', animationDirection: 'bottom', fontSize: 26,
+    effectFloat: true, effectGlow: true,
+    visibility: { ...ALL_ON },
+  },
+  paper: {
+    label: '페이퍼', desc: '밝은 카드에 검은 글자 · 밝은 화면에',
+    scale: 1.0, font: 'Pretendard', color: '9a6b3f', textColor: '1a1a1a',
+    bgOpacity: 0.9, rounding: 16, bgColor: 'f6f1e9', animationDirection: 'right', fontSize: 23,
+    effectFloat: false, effectGlow: false,
+    visibility: { ...ALL_ON },
   },
 };
 
@@ -328,11 +378,32 @@ export function initOverlayListeners() {
     if (overlayEffectFloat) overlayEffectFloat.checked = !!preset.effectFloat;
     if (overlayEffectGlow) overlayEffectGlow.checked = !!preset.effectGlow;
 
+    // 표시 항목도 프리셋의 일부다 — "박스 없이 가사만" 같은 룩은 색·투명도만
+    // 바꿔서는 안 되고 커버·라벨을 함께 꺼야 완성된다.
+    if (preset.visibility) {
+      document.querySelectorAll('.ov-vis-toggle').forEach((el) => {
+        const key = el.dataset.vis;
+        if (key && preset.visibility[key] !== undefined) {
+          el.checked = preset.visibility[key] === true;
+        }
+      });
+    }
+
+    setDropdownValue('overlay-preset-dropdown', 'overlay-preset', name);
+    // 어떤 프리셋에서 출발했는지 기억한다. 이후 세부 조정을 해도 라벨은
+    // 그대로 두는데, 이 칸은 "시작점"이지 현재 상태의 요약이 아니기 때문이다
+    // (라벨 자체가 "한 번에 적용, 이후 아래서 세부 조정 가능"이라고 알린다).
+    try {
+      const saved = JSON.parse(localStorage.getItem('overlay-settings') || '{}');
+      saved.preset = name;
+      localStorage.setItem('overlay-settings', JSON.stringify(saved));
+    } catch (_) {}
     updateOverlaySettings();
   };
 
-  document.querySelectorAll('.overlay-preset-btn').forEach((btn) => {
-    btn.addEventListener('click', () => applyPreset(btn.dataset.preset));
+  // 프리셋 선택 — 드롭다운(커스텀 셀렉트)의 항목 클릭
+  document.querySelectorAll('#overlay-preset-dropdown .option-item').forEach((opt) => {
+    opt.addEventListener('click', () => applyPreset(opt.dataset.value));
   });
 
   /** 기본값 복원 — 기준서 5: "기본값을 쉽게 복원할 수 있어야 합니다".
@@ -476,6 +547,10 @@ export function initOverlayListeners() {
 
     if (overlayEffectFloat) overlayEffectFloat.checked = !!final.effectFloat;
     if (overlayEffectGlow) overlayEffectGlow.checked = !!final.effectGlow;
+
+    if (config.preset && OVERLAY_PRESETS[config.preset]) {
+      setDropdownValue('overlay-preset-dropdown', 'overlay-preset', config.preset);
+    }
 
     // 표시 항목 — 저장값이 없는 항목은 HTML의 기본 checked 상태를 그대로 둔다
     // (예전 사용자는 이 설정 자체가 없으므로 예전과 같은 화면이 되어야 한다).

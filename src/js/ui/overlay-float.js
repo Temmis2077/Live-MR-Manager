@@ -72,7 +72,7 @@ function restructureIntoPanes(tab) {
   const previewBox = tab.querySelector('.overlay-preview-wrapper');
   // 각 카드는 "안에 무엇이 있는가"로 찾는다 — 구조가 바뀌어도 덜 깨진다.
   const urlCard = tab.querySelector('#overlay-url-display')?.closest('.ai-model-card');
-  const designCard = tab.querySelector('#overlay-preset-row')?.closest('.ai-model-card');
+  const designCard = tab.querySelector('#overlay-preset-dropdown')?.closest('.ai-model-card');
   const visibilityCard = tab.querySelector('.ov-visibility-card');
   const forceVisibleRow = tab.querySelector('#toggle-overlay-force-visible')?.closest('.group-header');
 

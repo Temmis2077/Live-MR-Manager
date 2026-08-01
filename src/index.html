@@ -576,21 +576,23 @@
                               style="height: 28px; padding: 0 12px; font-size: 0.72rem;"
                               title="이 오버레이의 모든 세부 설정을 처음 상태로 되돌립니다">기본값 복원</button>
                     </div>
-                    <div class="overlay-preset-row" id="overlay-preset-row">
-                      <button type="button" class="overlay-preset-btn" data-preset="glass">
-                        <span class="overlay-preset-name">글래스</span>
-                        <span class="overlay-preset-desc">투명 유리 카드 · 방송 기본형</span>
-                      </button>
-                      <button type="button" class="overlay-preset-btn" data-preset="minimal">
-                        <span class="overlay-preset-name">미니멀</span>
-                        <span class="overlay-preset-desc">박스 없이 텍스트만 · 담백하게</span>
-                      </button>
-                      <button type="button" class="overlay-preset-btn" data-preset="stage">
-                        <span class="overlay-preset-name">스테이지</span>
-                        <span class="overlay-preset-desc">굵고 선명하게 · 노래방 감성</span>
-                      </button>
-                    </div>
-                  </div>
+                    <div class="custom-select overlay-preset-select" id="overlay-preset-dropdown">
+                        <div class="select-trigger">
+                          <span class="selected-text">글래스 — 투명 유리 카드 · 방송 기본형</span>
+                          <span class="select-arrow"></span>
+                        </div>
+                        <div class="select-options">
+                          <div class="option-item selected" data-value="glass">글래스 — 투명 유리 카드 · 방송 기본형</div>
+                          <div class="option-item" data-value="minimal">미니멀 — 박스 없이 텍스트만 · 담백하게</div>
+                          <div class="option-item" data-value="stage">스테이지 — 굵고 선명하게 · 노래방 감성</div>
+                          <div class="option-item" data-value="lyricsOnly">가사 집중 — 가사만 큼직하게 · 곡 정보는 최소</div>
+                          <div class="option-item" data-value="titleOnly">제목만 — 커버·라벨 없이 곡 제목 한 줄</div>
+                          <div class="option-item" data-value="practice">연습용 — 키·빠르기를 함께 표시 · 커버 연습에</div>
+                          <div class="option-item" data-value="neon">네온 — 진한 배경에 빛나는 글자 · 어두운 화면에</div>
+                          <div class="option-item" data-value="paper">페이퍼 — 밝은 카드에 검은 글자 · 밝은 화면에</div>
+                        </div>
+                        <input type="hidden" id="overlay-preset" value="glass">
+                      </div>
 
                   <!-- 세부 옵션은 접을 수 있는 고급 영역으로 분리 (UI 기준서 5) -->
                   <details class="overlay-advanced" id="overlay-advanced">
@@ -705,10 +707,12 @@
                               <span class="hex-hash">#</span>
                               <input type="text" id="overlay-color-hex" value="8b5cf6" maxlength="6" class="hex-text-input">
                             </div>
-                            <button class="btn-custom-color-picker" onclick="document.getElementById('overlay-color').click()" title="시스템 색상 선택기">
+                            <span class="color-picker-slot">
+                              <button class="btn-custom-color-picker" onclick="document.getElementById('overlay-color').click()" title="시스템 색상 선택기">
                               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19l9 2-2-9-9-9-9 9 2 9 9-2zM9 12l2 2m4-8l2 2"></path></svg>
                             </button>
-                            <input type="color" id="overlay-color" value="#8b5cf6" style="display: none;">
+                            <input type="color" id="overlay-color" value="#8b5cf6" class="color-picker-native">
+                            </span>
                           </div>
                         </div>
                       </div>
@@ -733,10 +737,12 @@
                               <span class="hex-hash">#</span>
                               <input type="text" id="overlay-text-color-hex" value="ffffff" maxlength="6" class="hex-text-input">
                             </div>
-                            <button class="btn-custom-color-picker" onclick="document.getElementById('overlay-text-color').click()" title="시스템 색상 선택기">
+                            <span class="color-picker-slot">
+                              <button class="btn-custom-color-picker" onclick="document.getElementById('overlay-text-color').click()" title="시스템 색상 선택기">
                               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19l9 2-2-9-9-9-9 9 2 9 9-2zM9 12l2 2m4-8l2 2"></path></svg>
                             </button>
-                            <input type="color" id="overlay-text-color" value="#ffffff" style="display: none;">
+                            <input type="color" id="overlay-text-color" value="#ffffff" class="color-picker-native">
+                            </span>
                           </div>
                         </div>
                       </div>
@@ -758,10 +764,12 @@
                               <span class="hex-hash">#</span>
                               <input type="text" id="overlay-bg-color-hex" value="0f0f14" maxlength="6" class="hex-text-input">
                             </div>
-                            <button class="btn-custom-color-picker" onclick="document.getElementById('overlay-bg-color').click()" title="시스템 색상 선택기">
+                            <span class="color-picker-slot">
+                              <button class="btn-custom-color-picker" onclick="document.getElementById('overlay-bg-color').click()" title="시스템 색상 선택기">
                               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19l9 2-2-9-9-9-9 9 2 9 9-2zM9 12l2 2m4-8l2 2"></path></svg>
                             </button>
-                            <input type="color" id="overlay-bg-color" value="#0f0f14" style="display: none;">
+                            <input type="color" id="overlay-bg-color" value="#0f0f14" class="color-picker-native">
+                            </span>
                           </div>
                         </div>
                       </div>
