@@ -58,6 +58,8 @@ function traceGateSummary(gate) {
         reasonCounts,
         acceptedCount: gate?.accepted?.length || 0,
         rejectedCount: gate?.rejected?.length || 0,
+        softAcceptedIds: (gate?.softAccepted || []).map((line) => line.segment_id),
+        softAcceptedCount: gate?.softAccepted?.length || 0,
         confidenceFloor: gate?.confidenceFloor ?? null,
     };
 }
@@ -563,6 +565,260 @@ export function buildSecondPassWindows({ rescueEntries, segments, entries, marke
     });
 }
 
+function singableWeight(text) {
+    const units = Array.from(String(text || '')).filter((char) => /[\p{L}\p{N}]/u.test(char)).length;
+    return Math.max(1, units);
+}
+
+/** 2차까지 남은 실제 가사를 원문 순서의 연속 그룹으로 묶고 앵커 경계를 고정한다. */
+export function buildFinalEstimateGroups(segments, entries, markers = {}) {
+    const orderedEntries = [...(entries || [])].sort((a, b) => a.segmentIndex - b.segmentIndex);
+    const anchors = orderedEntries.map((entry) => {
+        const segment = segments?.[entry.segmentIndex];
+        if (!segment || !(segment.end > segment.start)) return null;
+        return {
+            id: entry.id,
+            segmentIndex: entry.segmentIndex,
+            startMs: Math.round(segment.start * 1000),
+            endMs: Math.round(segment.end * 1000),
+            manual: segment.approx !== true,
+        };
+    }).filter(Boolean);
+    const missing = orderedEntries.filter((entry) => {
+        const segment = segments?.[entry.segmentIndex];
+        return segment && !(segment.end > segment.start);
+    });
+    const groups = [];
+    for (const entry of missing) {
+        const previous = groups.at(-1);
+        if (previous && entry.segmentIndex === previous.entries.at(-1).segmentIndex + 1) {
+            previous.entries.push(entry);
+        } else {
+            groups.push({ entries: [entry] });
+        }
+    }
+    const vocalStartMs = Number.isFinite(markers?.vocalStartSec)
+        ? Math.max(0, Math.round(markers.vocalStartSec * 1000))
+        : 0;
+    const interludes = (markers?.interludes || [])
+        .filter((region) => Number.isFinite(region?.start) && Number.isFinite(region?.end) && region.end > region.start)
+        .map((region) => ({ startMs: Math.round(region.start * 1000), endMs: Math.round(region.end * 1000) }));
+
+    return groups.map((group) => {
+        const firstIndex = group.entries[0].segmentIndex;
+        const lastIndex = group.entries.at(-1).segmentIndex;
+        const previousAnchor = anchors.filter((anchor) => anchor.segmentIndex < firstIndex).at(-1) || null;
+        const nextAnchor = anchors.find((anchor) => anchor.segmentIndex > lastIndex) || null;
+        return {
+            ...group,
+            previousAnchor,
+            nextAnchor,
+            lowerBoundMs: previousAnchor?.endMs ?? vocalStartMs,
+            upperBoundMs: nextAnchor?.startMs ?? null,
+            interludes,
+        };
+    });
+}
+
+function subtractBlockedIntervals(startMs, endMs, blocked) {
+    let intervals = [{ startMs, endMs, activity: 1 }];
+    for (const block of [...(blocked || [])].sort((a, b) => a.startMs - b.startMs)) {
+        const next = [];
+        for (const interval of intervals) {
+            if (block.endMs <= interval.startMs || block.startMs >= interval.endMs) {
+                next.push(interval);
+                continue;
+            }
+            if (block.startMs > interval.startMs) {
+                next.push({ ...interval, endMs: Math.min(block.startMs, interval.endMs) });
+            }
+            if (block.endMs < interval.endMs) {
+                next.push({ ...interval, startMs: Math.max(block.endMs, interval.startMs) });
+            }
+        }
+        intervals = next.filter((interval) => interval.endMs > interval.startMs);
+    }
+    return intervals;
+}
+
+function intersectVocalIntervals(available, vocalRegions) {
+    const result = [];
+    for (const interval of available) {
+        for (const region of vocalRegions) {
+            const startMs = Math.max(interval.startMs, region.startMs);
+            const endMs = Math.min(interval.endMs, region.endMs);
+            if (endMs > startMs) {
+                result.push({ startMs, endMs, activity: Math.max(0.01, Number(region.activity) || 0.01) });
+            }
+        }
+    }
+    return result;
+}
+
+/** 긴 무성 구간으로 나뉜 VAD 후보 중 현재 미싱크 줄 수에 맞는 연속 구간을 고른다. */
+function selectVocalIntervalsForGroup(intervals, lineCount) {
+    if (intervals.length < 2) return intervals;
+    const sorted = [...intervals].sort((a, b) => a.startMs - b.startMs);
+    const clusters = [];
+    for (const interval of sorted) {
+        const previous = clusters.at(-1);
+        if (previous && interval.startMs - previous.at(-1).endMs <= 800) {
+            previous.push(interval);
+        } else {
+            clusters.push([interval]);
+        }
+    }
+    if (clusters.length < 2) return sorted;
+
+    const targetDurationMs = Math.max(1, lineCount) * 3_400;
+    let best = sorted;
+    let bestScore = Infinity;
+    for (let from = 0; from < clusters.length; from++) {
+        let candidate = [];
+        for (let to = from; to < clusters.length; to++) {
+            candidate = candidate.concat(clusters[to]);
+            const activeDurationMs = candidate.reduce((sum, interval) => sum + interval.endMs - interval.startMs, 0);
+            const score = Math.abs(activeDurationMs - targetDurationMs);
+            if (score < bestScore) {
+                best = candidate;
+                bestScore = score;
+            }
+        }
+    }
+    return best;
+}
+
+function pointAtWeightedRatio(intervals, ratio) {
+    const masses = intervals.map((interval) => (interval.endMs - interval.startMs) * (interval.activity || 1));
+    const total = masses.reduce((sum, mass) => sum + mass, 0);
+    if (!(total > 0)) return intervals[0]?.startMs ?? 0;
+    let target = Math.max(0, Math.min(1, ratio)) * total;
+    for (let index = 0; index < intervals.length; index++) {
+        const interval = intervals[index];
+        const mass = masses[index];
+        if (target <= mass || index === intervals.length - 1) {
+            return Math.round(interval.startMs + Math.min(interval.endMs - interval.startMs, target / (interval.activity || 1)));
+        }
+        target -= mass;
+    }
+    return intervals.at(-1)?.endMs ?? 0;
+}
+
+function intervalEndAt(intervals, pointMs) {
+    return intervals.find((interval) => pointMs >= interval.startMs && pointMs < interval.endMs)?.endMs
+        ?? intervals.find((interval) => interval.startMs >= pointMs)?.endMs
+        ?? intervals.at(-1)?.endMs
+        ?? pointMs;
+}
+
+/** 앵커 구간 안에서 VAD 누적량(없으면 시간)을 가사 길이 비율로 분배한다. */
+export function estimateUnsyncedTimings(groups, diagnostics = {}) {
+    const audioDurationMs = Number(diagnostics.audio_duration_ms ?? diagnostics.audioDurationMs) || 0;
+    const vocalRegions = (diagnostics.vocal_regions ?? diagnostics.vocalRegions ?? [])
+        .map((region) => ({
+            startMs: Number(region.start_ms ?? region.startMs),
+            endMs: Number(region.end_ms ?? region.endMs),
+            activity: Number(region.activity),
+        }))
+        .filter((region) => Number.isFinite(region.startMs) && Number.isFinite(region.endMs) && region.endMs > region.startMs);
+    const estimates = [];
+
+    for (const group of groups || []) {
+        if (!group.entries?.length) continue;
+        let lowerBoundMs = Math.max(0, Number(group.lowerBoundMs) || 0);
+        const lastVocalEndMs = vocalRegions.at(-1)?.endMs || 0;
+        let upperBoundMs = Number(group.upperBoundMs);
+        if (!Number.isFinite(upperBoundMs)) {
+            upperBoundMs = audioDurationMs > lowerBoundMs
+                ? audioDurationMs
+                : (lastVocalEndMs > lowerBoundMs
+                    ? lastVocalEndMs
+                    : lowerBoundMs + Math.max(800, group.entries.length * 4_500));
+        }
+        if (upperBoundMs <= lowerBoundMs) {
+            if (group.nextAnchor) {
+                // 실제 동시 보컬 때문에 앞줄 end가 다음 줄 start를 넘은 경우에는
+                // 앞 앵커의 start 이후를 사용한다. 수동/채택 시각은 이동하지 않는다.
+                lowerBoundMs = Math.max(0, Math.min(
+                    Number(group.previousAnchor?.startMs) + 1 || 0,
+                    upperBoundMs - group.entries.length - 1,
+                ));
+            } else {
+                upperBoundMs = lowerBoundMs + Math.max(800, group.entries.length * 200);
+            }
+        }
+
+        const available = subtractBlockedIntervals(lowerBoundMs, upperBoundMs, group.interludes);
+        const fallbackIntervals = available.length ? available : [{ startMs: lowerBoundMs, endMs: upperBoundMs, activity: 1 }];
+        const activeIntervals = intersectVocalIntervals(fallbackIntervals, vocalRegions);
+        const selectedVocalIntervals = selectVocalIntervalsForGroup(activeIntervals, group.entries.length);
+        const allocationIntervals = selectedVocalIntervals.length ? selectedVocalIntervals : fallbackIntervals;
+        const method = activeIntervals.length ? 'vad_weighted' : 'time_weighted';
+        const weights = group.entries.map((entry) => singableWeight(entry.text));
+        const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+        const availableDuration = allocationIntervals.reduce((sum, interval) => sum + interval.endMs - interval.startMs, 0);
+        const minimumGapMs = Math.max(20, Math.min(200, Math.floor(availableDuration / Math.max(1, group.entries.length * 4))));
+        const effectiveGapMs = Math.max(1, Math.min(
+            minimumGapMs,
+            Math.floor((upperBoundMs - lowerBoundMs) / Math.max(1, group.entries.length + 1)),
+        ));
+        let cumulative = 0;
+        let previousStartMs = -Infinity;
+
+        const starts = group.entries.map((entry, index) => {
+            const proposedStartMs = pointAtWeightedRatio(allocationIntervals, cumulative / totalWeight);
+            const minimumStartMs = index === 0 ? lowerBoundMs + effectiveGapMs : previousStartMs + effectiveGapMs;
+            const maximumStartMs = upperBoundMs - effectiveGapMs * (group.entries.length - index);
+            const startMs = Math.max(minimumStartMs, Math.min(proposedStartMs, maximumStartMs));
+            previousStartMs = startMs;
+            cumulative += weights[index];
+            return startMs;
+        });
+
+        cumulative = 0;
+        group.entries.forEach((entry, index) => {
+            cumulative += weights[index];
+            const rawEndMs = pointAtWeightedRatio(allocationIntervals, cumulative / totalWeight);
+            const intervalEndMs = intervalEndAt(allocationIntervals, starts[index]);
+            const nextStartMs = starts[index + 1] ?? upperBoundMs;
+            let endMs = Math.min(rawEndMs, intervalEndMs, nextStartMs, upperBoundMs);
+            if (endMs <= starts[index]) endMs = Math.min(upperBoundMs, starts[index] + Math.max(20, minimumGapMs));
+            estimates.push({
+                segment_id: entry.id,
+                segmentIndex: entry.segmentIndex,
+                text: entry.text,
+                start_ms: Math.round(starts[index]),
+                end_ms: Math.max(Math.round(starts[index]) + 1, Math.round(endMs)),
+                confidence: 0,
+                alignmentSource: 'anchor_interpolation',
+                method,
+                weight: weights[index],
+                previousAnchor: group.previousAnchor,
+                nextAnchor: group.nextAnchor,
+                usedRegions: allocationIntervals,
+            });
+        });
+    }
+    return estimates;
+}
+
+/** 수동/기존 AI 타임은 건드리지 않고 완전 미싱크 세그먼트에만 추정값을 적용한다. */
+export function applyEstimatedTimings(segments, estimates) {
+    let applied = 0;
+    for (const estimate of estimates || []) {
+        const segment = segments?.[estimate.segmentIndex];
+        if (!segment || segment.end > segment.start) continue;
+        if (!Number.isFinite(estimate.start_ms) || !Number.isFinite(estimate.end_ms)) continue;
+        segment.start = Math.max(0, estimate.start_ms / 1000);
+        segment.end = Math.max(segment.start + 0.001, estimate.end_ms / 1000);
+        segment.approx = true;
+        segment.confidence = 0;
+        segment.alignmentSource = 'anchor_interpolation';
+        applied++;
+    }
+    return applied;
+}
+
 function applyFallbackLines(segments, entries, fallbackLines) {
     let applied = 0;
     const entryById = new Map((entries || []).map((entry) => [entry.id || `segment:${entry.segmentIndex}`, entry]));
@@ -605,6 +861,7 @@ function copyAlignmentTiming(originalSegments, alignedSegments) {
         original.end = aligned.end;
         original.approx = aligned.approx;
         if (typeof aligned.confidence === 'number') original.confidence = aligned.confidence;
+        if (aligned.alignmentSource) original.alignmentSource = aligned.alignmentSource;
     });
     return originalSegments;
 }
@@ -809,6 +1066,7 @@ async function processOne(item) {
         fallbackEnabled: alignmentMode === 'en-ko' && prepared.entries?.some((entry) => entry.fallbackCandidate) === true,
     });
     const passResults = [];
+    let primaryDiagnostics = null;
     for (let pi = 0; pi < primaryModelSpecs.length; pi++) {
         const { lang, model } = primaryModelSpecs[pi];
         item.progressOffset = (100 / primaryModelSpecs.length) * pi;
@@ -824,6 +1082,7 @@ async function processOne(item) {
             lineIds: entries.map((entry) => entry.id),
         });
         const resultLines = attachMissingSegmentIds((result && result.lines) || [], entries);
+        if (pi === 0) primaryDiagnostics = result?.diagnostics || null;
         passResults.push(resultLines);
         await traceAlignment(traceId, 'primary_model_result', {
             passIndex: pi,
@@ -1135,11 +1394,44 @@ async function processOne(item) {
         droppedCount: rescueTimelineDropped.length,
         reason: rescueTimelineDropped.length > 0 ? 'second_pass_reversed_original_order' : null,
     });
+
+    // 3차 안전망: 음향 필터와 local rescue를 모두 통과하지 못한 실제 가사만
+    // 앞뒤 앵커 사이의 보컬 활동량에 따라 추정 배치한다. 기존 싱크와 원문은
+    // 읽기 전용이며, 추정값은 강한 검토 대상으로 명시한다.
+    const estimateGroups = buildFinalEstimateGroups(workingSegments, entries, markers);
+    const estimatedLines = estimateUnsyncedTimings(estimateGroups, primaryDiagnostics || {});
+    const estimatedAppliedCount = applyEstimatedTimings(workingSegments, estimatedLines);
+    appliedCount += estimatedAppliedCount;
+    await traceAlignment(traceId, 'third_pass_estimate', {
+        diagnostics: primaryDiagnostics || null,
+        groupCount: estimateGroups.length,
+        groups: estimateGroups.map((group) => ({
+            segmentIds: group.entries.map((entry) => entry.id),
+            previousAnchor: group.previousAnchor,
+            nextAnchor: group.nextAnchor,
+            lowerBoundMs: group.lowerBoundMs,
+            upperBoundMs: group.upperBoundMs,
+            excludedInterludes: group.interludes,
+        })),
+        estimates: estimatedLines,
+        appliedCount: estimatedAppliedCount,
+    });
+
     const finalUnsyncedEntries = entries.filter((entry) => {
         const segment = workingSegments[entry.segmentIndex];
         return !segment || !(segment.end > segment.start);
     });
     const finalUnsyncedCount = finalUnsyncedEntries.length;
+    if (finalUnsyncedCount > 0) {
+        item.status = 'error';
+        item.error = `최종 추정 후에도 ${finalUnsyncedCount}줄이 미싱크로 남아 저장을 중단했습니다.`;
+        await traceAlignment(traceId, 'stopped', {
+            reason: 'final_unsynced_integrity_failure',
+            finalUnsyncedIds: finalUnsyncedEntries.map((entry) => entry.id),
+            estimatedIds: estimatedLines.map((line) => line.segment_id),
+        });
+        return;
+    }
     if (appliedCount === 0) {
         item.status = 'error';
         item.error = 'AI가 정렬한 줄과 일치하는 미싱크 가사를 찾지 못했습니다.';
@@ -1170,6 +1462,15 @@ async function processOne(item) {
             rescueAppliedCount,
             rescueRejectedCount,
         },
+        thirdPass: {
+            groupCount: estimateGroups.length,
+            estimatedAppliedCount,
+            methods: estimatedLines.reduce((counts, line) => {
+                counts[line.method] = (counts[line.method] || 0) + 1;
+                return counts;
+            }, {}),
+            estimatedIds: estimatedLines.map((line) => line.segment_id),
+        },
         timingAudit,
         finalOriginalSegments: savedSegments,
         outputLrc: content,
@@ -1194,7 +1495,7 @@ async function processOne(item) {
         : `${appliedCount}줄 배치됨`;
 
     // 이 곡이 지금 가사 싱크 에디터에 열려 있으면 결과를 즉시 반영.
-    notifyItemComplete(item.path, lines, savedSegments);
+    notifyItemComplete(item.path, [...lines, ...estimatedLines], savedSegments);
 }
 
 async function runQueue() {

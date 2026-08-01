@@ -355,6 +355,11 @@ canvas#waveform-canvas {
     background: color-mix(in srgb, #e0a020 8%, var(--align-item-bg));
 }
 
+.lyric-line-item.estimated-sync {
+    border-color: color-mix(in srgb, #dc6b2f 68%, var(--align-item-border));
+    background: color-mix(in srgb, #dc6b2f 12%, var(--align-item-bg));
+}
+
 .lyric-line-item .review-badge {
     position: absolute;
     top: 8px;
@@ -370,11 +375,22 @@ canvas#waveform-canvas {
     cursor: help;
 }
 
+.lyric-line-item .review-badge.estimated-badge {
+    color: #71300f;
+    background: color-mix(in srgb, #dc6b2f 72%, white);
+    border-color: color-mix(in srgb, #dc6b2f 65%, transparent);
+}
+
 @media (prefers-color-scheme: dark) {
     .lyric-line-item .review-badge {
         color: #ffd27a;
         background: color-mix(in srgb, #e0a020 24%, transparent);
         border-color: color-mix(in srgb, #e0a020 50%, transparent);
+    }
+    .lyric-line-item .review-badge.estimated-badge {
+        color: #ffc5a3;
+        background: color-mix(in srgb, #dc6b2f 28%, transparent);
+        border-color: color-mix(in srgb, #dc6b2f 58%, transparent);
     }
 }
 

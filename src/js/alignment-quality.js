@@ -20,6 +20,11 @@ const MIN_DURATION_SANITY_CAP_MS = 4_000;
 const WEAK_DURATION_CONFIDENCE = 0.12;
 const WEAK_DURATION_MARGIN = 0.30;
 const ORDER_TOLERANCE_MS = 80;
+// Forced alignment의 절대 posterior는 노래 후렴·고음에서 매우 낮아질 수 있다.
+// 시간/보컬/토큰 증거가 모두 정상인 줄을 confidence 하나로 버리지 않는다.
+const CORROBORATED_MIN_TOKEN_COVERAGE = 0.95;
+const CORROBORATED_MIN_VOCAL_ACTIVITY = 0.25;
+const CORROBORATED_MIN_ACOUSTIC_MARGIN = 0.08;
 
 export function segmentId(index) {
   return `segment:${index}`;
@@ -131,6 +136,7 @@ export function gateAlignmentLines(lines, entries, {
   const confidenceFloor = Math.max(ABSOLUTE_CONFIDENCE_FLOOR, relativeFloor);
   const accepted = [];
   const rejected = [];
+  const softAccepted = [];
   const acceptedIds = new Set();
 
   for (const line of candidates) {
@@ -142,6 +148,7 @@ export function gateAlignmentLines(lines, entries, {
     const coverage = Number(line.token_coverage ?? 1);
     const activity = Number(line.vocal_activity ?? 1);
     const confidence = Number(line.confidence ?? 0);
+    const margin = Number(line.acoustic_margin ?? 1);
     if (!Number.isFinite(start) || !Number.isFinite(end) || duration < MIN_DURATION_MS || duration > MAX_DURATION_MS) reasons.push('duration');
     if (Number.isFinite(duration) && hasWeakDurationEvidence(line, duration)) reasons.push('duration_sanity');
     if (Number.isFinite(windowStartMs) && Number.isFinite(windowEndMs)
@@ -152,6 +159,23 @@ export function gateAlignmentLines(lines, entries, {
     if (!Number.isFinite(confidence) || confidence < confidenceFloor) reasons.push('confidence');
     // Old backends omit vocal_activity; only evaluate an explicitly supplied value.
     if (line.vocal_activity != null && (!Number.isFinite(activity) || activity < MIN_VOCAL_ACTIVITY)) reasons.push('vocal_silence');
+    const confidenceOnly = reasons.length === 1 && reasons[0] === 'confidence';
+    const hasCorroboratingTimingEvidence = confidenceOnly
+      && line.vocal_activity != null
+      && Number.isFinite(coverage) && coverage >= CORROBORATED_MIN_TOKEN_COVERAGE
+      && Number.isFinite(activity) && activity >= CORROBORATED_MIN_VOCAL_ACTIVITY
+      && Number.isFinite(margin) && margin >= CORROBORATED_MIN_ACOUSTIC_MARGIN;
+    let candidate = line;
+    let wasSoftAccepted = false;
+    if (hasCorroboratingTimingEvidence) {
+      reasons.length = 0;
+      wasSoftAccepted = true;
+      candidate = {
+        ...line,
+        gate_decision: 'low_confidence_corroborated',
+        quality_flags: [...(line.quality_flags || []), 'low_confidence_corroborated'],
+      };
+    }
     if (reasons.length) {
       rejected.push({ line, reasons });
       continue;
@@ -164,19 +188,20 @@ export function gateAlignmentLines(lines, entries, {
     while (accepted.length > 0) {
       const previous = accepted.at(-1);
       if (start >= Number(previous.start_ms) - ORDER_TOLERANCE_MS) break;
-      if (lineScore(line) > lineScore(previous)) {
+      if (lineScore(candidate) > lineScore(previous)) {
         accepted.pop();
         acceptedIds.delete(previous.segment_id);
         rejected.push({ line: previous, reasons: ['out_of_order'] });
       } else {
-        rejected.push({ line, reasons: ['out_of_order'] });
+        rejected.push({ line: candidate, reasons: ['out_of_order'] });
         keepCurrent = false;
         break;
       }
     }
     if (!keepCurrent) continue;
-    accepted.push(line);
-    acceptedIds.add(line.segment_id);
+    accepted.push(candidate);
+    acceptedIds.add(candidate.segment_id);
+    if (wasSoftAccepted) softAccepted.push(candidate);
   }
-  return { accepted, rejected, confidenceFloor };
+  return { accepted, rejected, softAccepted, confidenceFloor };
 }

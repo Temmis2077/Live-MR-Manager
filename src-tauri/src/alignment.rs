@@ -29,6 +29,10 @@ pub struct CachedAlignmentState {
     /// 윈도우 정렬은 잘라낸 emission 축을 0ms로 보므로, 결과를 원본 오디오
     /// 시간축으로 되돌릴 때 이 오프셋을 보존해야 한다.
     pub time_offset_ms: i64,
+    /// 3차 추정 싱크가 사용할 full-song 진단. 윈도우 정렬을 튜닝하더라도
+    /// 로컬 slice가 아닌 원본 곡 시간축을 유지한다.
+    pub audio_duration_ms: i64,
+    pub vocal_regions: Vec<VocalRegion>,
 }
 
 pub static CACHED_STATE: Mutex<Option<CachedAlignmentState>> = Mutex::new(None);
@@ -340,6 +344,19 @@ pub struct AlignmentDiagnostics {
     /// True when this request reused an existing full-song ONNX emission.
     #[serde(default)]
     pub emission_cache_hit: bool,
+    /// Full-song emission 시간축 길이. 마지막 미싱크 그룹의 안전한 상한이다.
+    #[serde(default)]
+    pub audio_duration_ms: i64,
+    /// 20ms 보컬 활동도를 연속 구간으로 압축한 결과.
+    #[serde(default)]
+    pub vocal_regions: Vec<VocalRegion>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct VocalRegion {
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub activity: f32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -692,6 +709,8 @@ pub async fn run_forced_alignment(
 
     let anchors = anchors.unwrap_or_default();
     let line_ids = line_ids.unwrap_or_default();
+    let audio_duration_ms = full_emission_probs.nrows() as i64 * 20;
+    let vocal_regions = summarize_vocal_regions(full_vocal_activity.as_ref(), 20);
 
     // 영어 폴백은 절대 전곡에서 독립적으로 정렬하지 않는다. 프런트가 준
     // 앵커 사이 창으로 emission을 잘라 Viterbi가 다른 절의 영어를 소비할
@@ -748,6 +767,8 @@ pub async fn run_forced_alignment(
             line_ids: line_ids.clone(),
             anchors: anchors.clone(),
             time_offset_ms,
+            audio_duration_ms,
+            vocal_regions: vocal_regions.clone(),
         });
     }
 
@@ -763,6 +784,8 @@ pub async fn run_forced_alignment(
         &anchors,
         time_offset_ms,
         emission_cache_hit,
+        audio_duration_ms,
+        &vocal_regions,
     )?)
 }
 
@@ -789,6 +812,8 @@ pub async fn apply_alignment_tuning(penalty: f32, blank_penalty: Option<f32>, re
             &state.anchors,
             state.time_offset_ms,
             false,
+            state.audio_duration_ms,
+            &state.vocal_regions,
         )?;
         sys_log("[Alignment] Real-time tuning completed successfully.");
         Ok(result)
@@ -1091,6 +1116,58 @@ fn line_vocal_activity(activity_frames: &[f32], start_frame: usize, end_frame: u
     activity_frames[from..to].iter().sum::<f32>() / (to - from) as f32
 }
 
+/// Full-song 20ms VAD를 프런트에 보내기 좋은 연속 구간으로 압축한다.
+/// 200ms 이하의 짧은 공백은 리버브/자음 사이 끊김으로 보고 합치고,
+/// 160ms보다 짧은 단독 활성 구간은 클릭·누설음일 가능성이 높아 제외한다.
+fn summarize_vocal_regions(activity_frames: &[f32], frame_duration_ms: i64) -> Vec<VocalRegion> {
+    const ACTIVITY_THRESHOLD: f32 = 0.12;
+    const MAX_GAP_FRAMES: usize = 10;
+    const MIN_REGION_FRAMES: usize = 8;
+
+    if activity_frames.is_empty() || frame_duration_ms <= 0 {
+        return Vec::new();
+    }
+
+    let mut raw_runs = Vec::new();
+    let mut run_start = None;
+    for (frame, &activity) in activity_frames.iter().enumerate() {
+        if activity >= ACTIVITY_THRESHOLD {
+            if run_start.is_none() {
+                run_start = Some(frame);
+            }
+        } else if let Some(start) = run_start.take() {
+            raw_runs.push((start, frame));
+        }
+    }
+    if let Some(start) = run_start {
+        raw_runs.push((start, activity_frames.len()));
+    }
+
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    for (start, end) in raw_runs {
+        if let Some(previous) = merged.last_mut() {
+            if start.saturating_sub(previous.1) <= MAX_GAP_FRAMES {
+                previous.1 = end;
+                continue;
+            }
+        }
+        merged.push((start, end));
+    }
+
+    merged
+        .into_iter()
+        .filter(|(start, end)| end.saturating_sub(*start) >= MIN_REGION_FRAMES)
+        .map(|(start, end)| {
+            let activity = activity_frames[start..end].iter().sum::<f32>() / (end - start) as f32;
+            VocalRegion {
+                start_ms: start as i64 * frame_duration_ms,
+                end_ms: end as i64 * frame_duration_ms,
+                activity: activity.clamp(0.0, 1.0),
+            }
+        })
+        .collect()
+}
+
 /// 전역 coarse 경로의 단어 시각을 줄 단위 범위로 바꾼다. 이 시각은 최종
 /// 결과가 아니라 VAD phrase 경계를 찾기 위한 관측값이므로, 경계를 찾지
 /// 못하면 호출자는 기존 경로를 그대로 사용한다.
@@ -1266,6 +1343,8 @@ fn perform_alignment_internal(
     anchors: &[(usize, i64)],
     time_offset_ms: i64,
     emission_cache_hit: bool,
+    audio_duration_ms: i64,
+    vocal_regions: &[VocalRegion],
 ) -> Result<AlignmentResult, String> {
     let aligner = Aligner::new(tokens_path.to_str().unwrap())?;
     let frame_duration_ms = 20.0f32;
@@ -1427,6 +1506,8 @@ fn perform_alignment_internal(
             .map(|&(_, frame)| frame as i64 * frame_duration_ms as i64 + time_offset_ms)
             .collect(),
         emission_cache_hit,
+        audio_duration_ms,
+        vocal_regions: vocal_regions.to_vec(),
     };
 
     Ok(AlignmentResult {
@@ -2105,6 +2186,20 @@ mod aligner_tests {
         assert!(Arc::ptr_eq(&cached_korean, &korean_emission));
         assert!(Arc::ptr_eq(&cached_english, &english_emission));
         EMISSION_CACHE.lock().clear();
+    }
+
+    #[test]
+    fn vocal_regions_merge_short_gaps_and_drop_clicks() {
+        let mut activity = vec![0.0f32; 80];
+        activity[5..15].fill(0.8);   // 100..300ms
+        activity[20..30].fill(0.6); // 400..600ms, 100ms gap -> merge
+        activity[50..54].fill(0.9); // 80ms click -> drop
+
+        let regions = summarize_vocal_regions(&activity, 20);
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].start_ms, 100);
+        assert_eq!(regions[0].end_ms, 600);
+        assert!(regions[0].activity > 0.4 && regions[0].activity < 0.8);
     }
 
     #[test]

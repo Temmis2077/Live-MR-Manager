@@ -34,6 +34,41 @@ describe('alignment identity and quality gate', () => {
     expect(result.rejected[0].reasons).toEqual(expect.arrayContaining(['confidence', 'token_coverage', 'vocal_silence']));
   });
 
+  it('keeps a low-confidence Korean timing when every structural signal corroborates it', () => {
+    const entries = [{ id: segmentId(0) }];
+    const result = gateAlignmentLines([{
+      segment_id: segmentId(0),
+      text: '가슴엔 늘 눈물이 고여',
+      start_ms: 134_840,
+      end_ms: 138_260,
+      confidence: 0.000724,
+      acoustic_margin: 0.089,
+      token_coverage: 1,
+      vocal_activity: 0.756,
+    }], entries);
+
+    expect(result.rejected).toHaveLength(0);
+    expect(result.softAccepted).toHaveLength(1);
+    expect(result.accepted[0]).toMatchObject({
+      segment_id: segmentId(0),
+      gate_decision: 'low_confidence_corroborated',
+    });
+  });
+
+  it('still rejects confidence-only evidence without an explicit VAD measurement', () => {
+    const entries = [{ id: segmentId(0) }];
+    const result = gateAlignmentLines([{
+      segment_id: segmentId(0),
+      start_ms: 1000,
+      end_ms: 2000,
+      confidence: 0.001,
+      acoustic_margin: 0.5,
+      token_coverage: 1,
+    }], entries);
+    expect(result.accepted).toHaveLength(0);
+    expect(result.rejected[0].reasons).toEqual(['confidence']);
+  });
+
   it('rejects the weaker result when chronological order is contradictory', () => {
     const entries = [{ id: segmentId(0) }, { id: segmentId(1) }];
     const result = gateAlignmentLines([
