@@ -545,14 +545,9 @@ function renderPicker() {
 
 /** 상단 '가사 화면' 칩을 오버레이 상시 표시 상태에 맞춘다. */
 function syncOverlayChip() {
-  const chip = $('live-ov-toggle');
-  const text = $('live-ov-text');
-  if (!chip || !text) return;
-  const on = !!$('toggle-overlay-force-visible')?.checked;
-  chip.classList.toggle('on', on);
-  chip.setAttribute('aria-pressed', on ? 'true' : 'false');
-  // 색만이 아니라 문구로도 상태를 알린다(기준서 3 · 7).
-  text.textContent = on ? '오버레이 ON' : '오버레이 OFF';
+  // 칩 갱신 로직은 ui/playback-sync.js 한 곳에만 둔다. 같은 표시를 두 파일이
+  // 각자 그리면 한쪽만 고쳤을 때 조용히 어긋난다.
+  import('./ui/playback-sync.js').then((m) => m.syncPlaybackUI()).catch(() => {});
 }
 
 /* ── 소리 보내는 곳 (출력 장치) ────────────────────────────

@@ -223,9 +223,8 @@ export async function setupBackendListeners() {
         if (elements.progressFill) elements.progressFill.style.width = "0%";
         if (elements.timeCurrent) elements.timeCurrent.textContent = "0:00";
 
-        const { updateThumbnailOverlay, updatePlayButton } = await import('../ui/components.js');
-        updateThumbnailOverlay();
-        updatePlayButton();
+        const { syncPlaybackUI } = await import('../ui/playback-sync.js');
+        syncPlaybackUI();
       }
       if (s === "error" && message) {
         showNotification(`재생 오류: ${message}`, "error");
@@ -249,9 +248,8 @@ export async function setupBackendListeners() {
       elements.statusMsg.textContent = "";
     }
 
-    const { updateThumbnailOverlay, updatePlayButton } = await import('../ui/components.js');
-    updateThumbnailOverlay();
-    updatePlayButton();
+    const { syncPlaybackUI } = await import('../ui/playback-sync.js');
+    syncPlaybackUI();
   });
 
   // MR Separation Progress (Unified Listener)

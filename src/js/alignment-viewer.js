@@ -13,7 +13,6 @@ export class ForcedAlignmentViewer {
         this.state = {
             duration: 0,
             currentTime: 0,
-            isPlaying: false,
             segments: [],
             waveformPoints: null,
             isProcessing: false,
@@ -49,6 +48,16 @@ export class ForcedAlignmentViewer {
             // 원문/차음/번역 3줄 모드 (일본어 가사 등). 수동 토글, 기본 꺼짐.
             tripletMode: false
         };
+
+        // isPlaying은 전역 state 하나만 본다. 예전에는 편집기가 자기 복사본을
+        // 따로 들고 자기 리스너로 갱신해서, 편집기에서 재생을 눌러도 도크·
+        // 라이브의 버튼은 멈춤 모양으로 남았다. 접근자로 위임해 두면 안에서
+        // 읽고 쓰는 코드를 건드리지 않고도 어긋날 수가 없다.
+        Object.defineProperty(this.state, 'isPlaying', {
+            get: () => state.isPlaying,
+            set: (v) => { state.isPlaying = !!v; },
+            enumerable: true,
+        });
         this.autoSaveTimer = null;
         this.autoSaveDelayMs = 1000;
         this.isDirty = false;
@@ -585,11 +594,6 @@ export class ForcedAlignmentViewer {
             unlisten();
             window._alignmentUnlistenProgress = null;
         }
-        if (window._alignmentUnlistenStatus) {
-            const unlisten = await window._alignmentUnlistenStatus;
-            unlisten();
-            window._alignmentUnlistenStatus = null;
-        }
         if (window._alignmentUnlistenModelDownload) {
             const unlisten = await window._alignmentUnlistenModelDownload;
             unlisten();
@@ -629,11 +633,9 @@ export class ForcedAlignmentViewer {
             this.syncSidebar();
         });
 
-        window._alignmentUnlistenStatus = listen('playback-status', (event) => {
-            const { status } = event.payload;
-            this.state.isPlaying = (status && status.toLowerCase() === 'playing');
-            this.updatePlayButton();
-        });
+        // 재생 상태는 events/backend.js의 리스너 하나가 전역 state에 반영하고,
+        // 거기서 syncPlaybackUI()가 이 화면 버튼까지 함께 갱신한다. 여기서
+        // 따로 듣지 않는다 — 두 곳이 각자 그리면 서로 어긋난다.
 
         // AI 정렬 모델 다운로드 진행률 리스너
         window._alignmentUnlistenModelDownload = listen('alignment-model-download-progress', (event) => {
@@ -930,11 +932,8 @@ export class ForcedAlignmentViewer {
     }
 
     updatePlayButton() {
-        const btn = document.getElementById('play-btn');
-        if (!btn) return;
-        btn.innerHTML = this.state.isPlaying
-            ? '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>'
-            : '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+        // 이 버튼만 따로 그리지 않고 재생 상태를 쓰는 화면을 함께 갱신한다.
+        import('./ui/playback-sync.js').then((m) => m.syncPlaybackUI()).catch(() => {});
     }
 
     drawWaveform() {
@@ -1700,10 +1699,16 @@ export class ForcedAlignmentViewer {
         return !!(s && s.approx) && typeof s.confidence === 'number' && s.confidence < 0.45;
     }
 
+    _isEstimatedSync(s) {
+        return s?.alignmentSource === 'anchor_interpolation';
+    }
+
     renderLyricList() {
         const container = document.getElementById('lyric-lines-container');
         if (!container) return;
-        const REVIEW_BADGE = '<span class="review-badge" title="AI 정렬 신뢰도가 낮은 줄입니다. 들어보고 필요하면 시간을 직접 맞춰 주세요 — 고치면 다음 자동 정렬의 기준(앵커)이 됩니다.">확인</span>';
+        const reviewBadge = (segment) => this._isEstimatedSync(segment)
+            ? '<span class="review-badge estimated-badge" title="음향 정렬이 끝까지 확정되지 않아 앞뒤 앵커와 보컬 활동도로 추정한 싱크입니다. 우선 확인해 주세요.">추정 싱크</span>'
+            : '<span class="review-badge" title="AI 정렬 신뢰도가 낮은 줄입니다. 들어보고 필요하면 시간을 직접 맞춰 주세요 — 고치면 다음 자동 정렬의 기준(앵커)이 됩니다.">확인</span>';
         const toggleBtn = document.getElementById('toggle-translation-btn');
         if (toggleBtn) {
             const showing = getShowTranslation();
@@ -1717,18 +1722,18 @@ export class ForcedAlignmentViewer {
                     ? displayLines.map((l, li) => `<span class="triplet-line triplet-line-${li}">${l}</span>`).join('')
                     : '&nbsp;';
                 return `
-            <div class="lyric-line-item${this._needsReview(s) ? ' needs-review' : ''}" data-index="${i}">
+            <div class="lyric-line-item${this._needsReview(s) ? ' needs-review' : ''}${this._isEstimatedSync(s) ? ' estimated-sync' : ''}" data-index="${i}">
                 <span class="time-range" title="이 시간으로 재생 이동">${this.formatTime(s.start)}</span>
                 <span class="lyric-text triplet-text" title="이 가사 위치로 탐색 및 타겟 지정">${html}</span>
-                ${this._needsReview(s) ? REVIEW_BADGE : ''}
+                ${this._needsReview(s) ? reviewBadge(s) : ''}
             </div>
         `;
             }
             return `
-            <div class="lyric-line-item${this._needsReview(s) ? ' needs-review' : ''}" data-index="${i}">
+            <div class="lyric-line-item${this._needsReview(s) ? ' needs-review' : ''}${this._isEstimatedSync(s) ? ' estimated-sync' : ''}" data-index="${i}">
                 <span class="time-range" title="이 시간으로 재생 이동">${this.formatTime(s.start)}</span>
                 <span class="lyric-text" title="이 가사 위치로 탐색 및 타겟 지정">${(s.text && s.text.trim()) ? s.text : '&nbsp;'}</span>
-                ${this._needsReview(s) ? REVIEW_BADGE : ''}
+                ${this._needsReview(s) ? reviewBadge(s) : ''}
             </div>
         `;
         }).join('');

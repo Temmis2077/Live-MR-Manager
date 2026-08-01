@@ -440,10 +440,22 @@ export function updateAiTogglesState(song = null) {
   }
 }
 
+/**
+ * 재생 버튼 갱신 — 도크만이 아니라 재생 상태를 쓰는 화면을 전부 맞춘다.
+ *
+ * 이름은 예전 그대로 두되 동작을 넓혔다. 호출부가 여러 곳(player.js·backend.js)
+ * 인데, 도크 버튼만 갱신하던 시절에는 편집기·라이브의 버튼이 그대로 남아
+ * 화면마다 재생 상태가 달라 보였다.
+ */
 export function updatePlayButton() {
-  if (elements.togglePlayBtn) {
-    elements.togglePlayBtn.classList.toggle("is-playing", state.isPlaying);
-  }
+  import('./playback-sync.js')
+    .then((m) => m.syncPlaybackUI())
+    .catch(() => {
+      // 동기화 모듈을 못 불러와도 도크만이라도 맞춘다.
+      if (elements.togglePlayBtn) {
+        elements.togglePlayBtn.classList.toggle('is-playing', state.isPlaying);
+      }
+    });
 }
 
 export function showSongContextMenu(e, song, originalIndex) {

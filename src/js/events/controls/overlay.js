@@ -429,23 +429,15 @@ export function initOverlayListeners() {
     showNotification('오버레이 디자인을 기본값으로 되돌렸습니다.', 'success');
   });
 
-  /** 지금 시청자에게 실제로 보이는 상태인지 표시.
-   *  조건: '상시 표시'가 켜져 있거나, 곡이 재생 중이면 오버레이가 송출된다. */
+  // 송출 여부 표시는 ui/playback-sync.js가 갖고 있다 — 재생 상태가 바뀌는
+  // 모든 경로에서 함께 갱신되어야 하기 때문이다. 여기서는 '상시 표시'를
+  // 껐다 켤 때만 알려 주면 된다(예전에는 1초 간격 폴링이라 재생을 눌러도
+  // 최대 1초 동안 '송출 안 됨'으로 남아 있었다).
   const syncLiveState = () => {
-    const box = document.getElementById('overlay-live-state');
-    const txt = document.getElementById('overlay-live-state-text');
-    if (!box || !txt) return;
-    const forced = !!toggleOverlayForceVisible?.checked;
-    const playing = !!state.isPlaying;
-    const on = forced || playing;
-    box.dataset.on = on ? 'true' : 'false';
-    txt.textContent = on
-      ? (forced ? '시청자에게 보임 · 상시 표시' : '시청자에게 보임 · 재생 중')
-      : '지금은 시청자에게 안 보임';
+    import('../../ui/playback-sync.js').then((m) => m.syncPlaybackUI()).catch(() => {});
   };
   toggleOverlayForceVisible?.addEventListener('change', syncLiveState);
   syncLiveState();
-  setInterval(syncLiveState, 1000);
 
   const previewTabs = document.querySelectorAll('.preview-tab');
   previewTabs.forEach(tab => {
