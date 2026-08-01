@@ -485,6 +485,23 @@
               </div>
             </aside>
 
+            <!-- 가사 패널 — 공연 중에 편집기를 열지 않고도 싱크된 가사를 본다.
+                 좌우 위치를 바꾸고 숨길 수 있다(모니터 배치가 사람마다 다르다). -->
+            <aside class="live-lyrics" id="live-lyrics" data-side="right">
+              <div class="live-lyrics-head">
+                <div class="live-lyrics-title">가사</div>
+                <div class="live-lyrics-actions">
+                  <button type="button" class="live-lyrics-btn" id="live-lyrics-side">왼쪽으로</button>
+                  <button type="button" class="live-lyrics-btn" id="live-lyrics-hide"
+                          title="가사 패널을 숨깁니다">숨기기</button>
+                </div>
+              </div>
+              <div class="live-lyrics-body" id="live-lyrics-body"></div>
+            </aside>
+
+            <!-- 숨겼을 때 다시 꺼내는 손잡이 — 숨기면 되돌릴 길이 없으면 안 된다 -->
+            <button type="button" class="live-lyrics-show" id="live-lyrics-show" hidden>가사 보기</button>
+
             <!-- 다음 곡 담기 — 저장된 음원에서 검색해 큐에 넣는다 -->
             <div class="live-picker" id="live-picker" hidden>
               <div class="live-picker-scrim" data-picker-close></div>

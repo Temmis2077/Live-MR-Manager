@@ -19,7 +19,30 @@ export function syncLyricDrawerHeader() {
     updateDrawerTrackTitle();
 }
 
+/**
+ * 재생 위치 → 현재 줄 계산 → 오버레이·가사 뷰 푸시.
+ *
+ * 이 등록은 어떤 UI 크롬에도 기대면 안 된다. 예전에는 initLyricDrawer 안에서
+ * `if (!trigger) return` 뒤에 있었는데, 화면 오른쪽 LYRICS 손잡이를 걷어내면서
+ * trigger가 사라지자 함수가 즉시 빠져나가 이 리스너가 아예 등록되지 않았다.
+ * 그 결과 재생 중 update_overlay_lyrics가 한 번도 호출되지 않아, 싱크를 아무리
+ * 맞춰도 OBS 가사 오버레이와 가사 뷰가 현재 줄을 받지 못했다.
+ */
+let progressListenerBound = false;
+
+export function bindLyricProgressListener() {
+    if (progressListenerBound) return;
+    progressListenerBound = true;
+    listen('playback-progress', (event) => {
+        const positionMs = event.payload.positionMs ?? event.payload.position_ms ?? 0;
+        syncLyricsWithTime(positionMs / 1000);
+    });
+}
+
 export function initLyricDrawer() {
+    // 서랍 UI가 있든 없든 가사 송출은 살아 있어야 한다.
+    bindLyricProgressListener();
+
     const trigger = document.getElementById('lyric-drawer-trigger');
     const closeBtn = document.getElementById('lyric-drawer-close');
     const drawer = document.getElementById('lyric-drawer');
@@ -175,13 +198,7 @@ export function initLyricDrawer() {
     updateDrawerBounds();
     updateDrawerTrackTitle();
 
-    // Setup real-time sync listener
-    listen('playback-progress', (event) => {
-        const positionMs = event.payload.positionMs ?? event.payload.position_ms ?? 0;
-        const currentTime = positionMs / 1000;
-        syncLyricsWithTime(currentTime);
-    });
-
+    // 재생 위치 리스너는 함수 맨 위 bindLyricProgressListener()가 이미 걸었다.
     console.log('[LyricDrawer] Initialized');
 }
 
@@ -190,18 +207,24 @@ export function initLyricDrawer() {
  * @param {Array} segments 
  */
 export function updateLyrics(segments) {
+    state.currentLyricIndex = -1;
+
+    // 가사 뷰 페이지(/lyrics-view, OBS 독)용 전체 가사 목록 푸시.
+    // 인앱 표시 설정('app' 스코프)을 따라 원문/차음/번역 노출을 결정.
+    // 이 푸시는 서랍 DOM 유무보다 먼저다 — 방송에 나가는 것이 인앱 위젯의
+    // 존재 여부에 좌우되면 안 된다(예전에 그래서 연결이 끊겼다).
+    invoke('update_overlay_lyrics_full', {
+        lines: (segments || []).map((seg) => displayText(seg, 'app')),
+    }).catch(() => {});
+
+    // 라이브 화면의 가사 패널에도 같은 목록을 넘긴다.
+    import('./live-lyrics.js').then((m) => m.renderLiveLyrics(segments)).catch(() => {});
+
     const container = document.querySelector('#lyric-drawer .drawer-content');
     if (!container) return;
     updateDrawerTrackTitle();
     // On track change, always reset lyric drawer to top for singer-friendly flow.
     container.scrollTop = 0;
-    state.currentLyricIndex = -1;
-
-    // 가사 뷰 페이지(/lyrics-view, OBS 독)용 전체 가사 목록 푸시.
-    // 인앱 표시 설정('app' 스코프)을 따라 원문/차음/번역 노출을 결정.
-    invoke('update_overlay_lyrics_full', {
-        lines: (segments || []).map((seg) => displayText(seg, 'app')),
-    }).catch(() => {});
 
     if (!segments || segments.length === 0) {
         lastOverlayCurrent = null;
@@ -289,6 +312,9 @@ function syncLyricsWithTime(currentTime) {
 
     if (playingIndex === state.currentLyricIndex) return;
     state.currentLyricIndex = playingIndex;
+
+    // 라이브 화면 가사 패널의 현재 줄 하이라이트
+    import('./live-lyrics.js').then((m) => m.highlightLiveLyric(playingIndex)).catch(() => {});
 
     const container = document.querySelector('#lyric-drawer .drawer-content');
     if (!container) return;

@@ -466,9 +466,13 @@ export function initOverlayListeners() {
 
         if (mode === 'lyrics') {
           overlayIframe.src = `overlay-lyrics.html?preview=true&cb=${OVERLAY_CACHE_BUST}`;
+          // 미리보기에는 예시 문구를 채운다. 현재 줄이 비어 있으면 글자 크기·
+          // 색·그림자를 아무것도 확인할 수 없어 설정을 눈으로 맞출 수 없다.
+          // 실제 가사가 아닌 안내 문구를 쓴다.
           await updateOverlayLyrics({
-            current: "",
-            next: "첫 번째 가사가 여기에 미리 표시됩니다."
+            current: "지금 부르는 줄이 이렇게 보입니다",
+            next: "다음 줄은 이렇게 흐리게 따라옵니다",
+            index: 0,
           }).catch(err => console.error(err));
         } else {
           overlayIframe.src = `overlay-info.html?preview=true&cb=${OVERLAY_CACHE_BUST}`;

@@ -650,6 +650,8 @@ export function showLiveScreen() {
   initLiveScreen();
   syncOverlayChip();
   syncDeviceChip();
+  // 지금 곡의 가사를 패널에 즉시 반영 — 라이브에 들어온 순간부터 보여야 한다.
+  import('./live-lyrics.js').then((m) => m.refreshLiveLyrics()).catch(() => {});
   renderLiveQueue();
   renderSeparation();
   tick();
