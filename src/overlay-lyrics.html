@@ -68,7 +68,7 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      background: var(--glass-bg);
+      background: var(--overlay-card-bg, var(--glass-bg));
       backdrop-filter: blur(16px);
       border: 1px solid var(--glass-border);
       padding: 18px 28px;
@@ -193,6 +193,15 @@
        (높이만 0으로 두면 빈 줄이 남아 어색하다) */
     .overlay-container.no-next .lyric-line.next {
       display: none;
+    }
+
+    /* 글자 외곽선·그림자 — 밝은 방송 배경에서도 가사가 읽히게.
+       .lyric-line.current 가 자기 text-shadow를 갖고 있어 그보다 구체적으로
+       적어야 외곽선이 현재 줄에도 걸린다(외곽선이 정작 필요한 줄이다). */
+    .lyric-line,
+    .overlay-container .lyric-line.current,
+    .overlay-container .lyric-line.next {
+      text-shadow: var(--overlay-text-outline, none);
     }
 
     .lyric-line.next {
@@ -368,6 +377,9 @@
 
       // 화면에 무엇을 보여줄지. 필드가 없는 예전 설정은 예전과 같은 화면이 되게
       // 기본 true로 본다.
+      // 디자인 축(외곽선·그림자·그라디언트)
+      window.OverlayShared.applyDesign(style);
+
       const vis = style.visibility || {};
       const on = (v) => v !== false;
       overlay.classList.toggle('no-card', !on(vis.card));

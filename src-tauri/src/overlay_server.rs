@@ -34,6 +34,27 @@ pub struct OverlayStyle {
     /// 화면에 무엇을 보여줄지 (카드·커버·라벨·가수·키/BPM·다음 줄).
     #[serde(default)]
     pub visibility: OverlayVisibility,
+
+    /// 글자 외곽선 두께(px). 0이면 없음. 밝은 방송 화면에서 가사가 배경에
+    /// 묻히지 않게 하는 가장 실전적인 수단이라 별도 축으로 둔다.
+    #[serde(default)]
+    pub outline_width: f32,
+    /// 글자 외곽선 색(hex, # 없이).
+    #[serde(default = "black_hex")]
+    pub outline_color: String,
+    /// 그림자 세기(0~1). 0이면 그림자 없음.
+    #[serde(default)]
+    pub shadow: f32,
+    /// 카드 배경에 그라디언트를 쓸지. 켜면 bg_color에서 gradient_color로 흐른다.
+    #[serde(default)]
+    pub gradient: bool,
+    /// 그라디언트의 두 번째 색(hex, # 없이).
+    #[serde(default = "black_hex")]
+    pub gradient_color: String,
+}
+
+fn black_hex() -> String {
+    "000000".to_string()
 }
 
 /// 오버레이에 무엇을 보여줄지. 방송마다 화면에 남길 정보량이 다르고(가사만
@@ -63,6 +84,10 @@ pub struct OverlayVisibility {
     /// 가사 오버레이의 다음 줄 미리 보여주기.
     #[serde(default = "yes")]
     pub next_line: bool,
+    /// 곡 진행바. 기본은 꺼둔다 — 방송 화면에 줄 하나가 더 생기는 일이라
+    /// 원하는 사람만 켜는 쪽이 안전하다.
+    #[serde(default)]
+    pub progress: bool,
 }
 
 fn yes() -> bool {
@@ -78,6 +103,7 @@ impl Default for OverlayVisibility {
             artist: true,
             key_bpm: false,
             next_line: true,
+            progress: false,
         }
     }
 }
@@ -97,6 +123,11 @@ impl Default for OverlayStyle {
             effect_float: false,
             effect_glow: false,
             visibility: OverlayVisibility::default(),
+            outline_width: 0.0,
+            outline_color: black_hex(),
+            shadow: 0.0,
+            gradient: false,
+            gradient_color: black_hex(),
         }
     }
 }
@@ -127,6 +158,13 @@ pub struct OverlayState {
     pub song_key: String,
     #[serde(default)]
     pub bpm: f64,
+
+    /// 진행바용 재생 위치·길이(ms). 오버레이가 스스로 시간을 세지 않고
+    /// 앱이 알려주는 값만 그린다 — 두 화면의 위치가 어긋나면 안 된다.
+    #[serde(default)]
+    pub position_ms: u64,
+    #[serde(default)]
+    pub duration_ms: u64,
 }
 
 fn default_lyric_index() -> i32 {
@@ -153,6 +191,8 @@ impl Default for OverlayState {
             lyric_index: -1,
             song_key: String::new(),
             bpm: 0.0,
+            position_ms: 0,
+            duration_ms: 0,
         }
     }
 }
@@ -480,7 +520,7 @@ pub async fn update_overlay_state(title: String, artist: String, thumbnail: Stri
 }
 
 #[tauri::command]
-pub async fn update_overlay_style(target: String, scale: f32, font: String, color: String, text_color: String, bg_color: String, bg_opacity: f32, rounding: f32, is_force_visible: bool, animation_direction: String, theme_mode: String, font_size: Option<f32>, effect_float: Option<bool>, effect_glow: Option<bool>, visibility: Option<OverlayVisibility>) {
+pub async fn update_overlay_style(target: String, scale: f32, font: String, color: String, text_color: String, bg_color: String, bg_opacity: f32, rounding: f32, is_force_visible: bool, animation_direction: String, theme_mode: String, font_size: Option<f32>, effect_float: Option<bool>, effect_glow: Option<bool>, visibility: Option<OverlayVisibility>, design: Option<OverlayDesignInput>) {
     let mut state = CURRENT_STATE.lock().await.clone();
     // 표시 항목은 프런트가 안 보내면 지금 값을 유지한다 — 색만 바꾸는 호출이
     // 표시 항목을 조용히 기본값으로 되돌리면 안 된다.
@@ -488,6 +528,12 @@ pub async fn update_overlay_style(target: String, scale: f32, font: String, colo
         state.lyrics_style.visibility.clone()
     } else {
         state.info_style.visibility.clone()
+    };
+    // 디자인 축도 안 보내면 지금 값을 유지한다(색만 바꾸는 호출이 외곽선을
+    // 지워버리면 안 된다).
+    let kept_design = {
+        let cur = if target == "lyrics" { &state.lyrics_style } else { &state.info_style };
+        (cur.outline_width, cur.outline_color.clone(), cur.shadow, cur.gradient, cur.gradient_color.clone())
     };
     let style = OverlayStyle {
         scale,
@@ -502,6 +548,11 @@ pub async fn update_overlay_style(target: String, scale: f32, font: String, colo
         effect_float: effect_float.unwrap_or(false),
         effect_glow: effect_glow.unwrap_or(false),
         visibility: visibility.unwrap_or(kept_visibility),
+        outline_width: design.as_ref().map(|d| d.outline_width).unwrap_or(kept_design.0),
+        outline_color: design.as_ref().map(|d| d.outline_color.clone()).unwrap_or(kept_design.1),
+        shadow: design.as_ref().map(|d| d.shadow).unwrap_or(kept_design.2),
+        gradient: design.as_ref().map(|d| d.gradient).unwrap_or(kept_design.3),
+        gradient_color: design.as_ref().map(|d| d.gradient_color.clone()).unwrap_or(kept_design.4),
     };
     let shared_color = style.color.clone();
     let shared_text_color = style.text_color.clone();
@@ -526,6 +577,48 @@ pub async fn update_overlay_style(target: String, scale: f32, font: String, colo
     broadcast_overlay_state(state).await;
 }
 
+
+/// 디자인 축 입력 — update_overlay_style의 인자가 이미 길어서 묶어서 받는다.
+#[derive(Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct OverlayDesignInput {
+    #[serde(default)]
+    pub outline_width: f32,
+    #[serde(default = "black_hex")]
+    pub outline_color: String,
+    #[serde(default)]
+    pub shadow: f32,
+    #[serde(default)]
+    pub gradient: bool,
+    #[serde(default = "black_hex")]
+    pub gradient_color: String,
+}
+
+/// 재생 위치만 갱신한다.
+///
+/// 전체 상태를 다시 보내지 않는 이유: broadcast_overlay_state는 매번 썸네일을
+/// data URI로 만드는데, 진행바는 초당 여러 번 갱신되므로 그걸 매번 돌리면
+/// 낭비가 크다. 여기서는 위치만 바꾸고 그대로 내보낸다.
+#[tauri::command]
+pub async fn update_overlay_progress(position_ms: u64, duration_ms: u64) {
+    let mut state = CURRENT_STATE.lock().await;
+    state.position_ms = position_ms;
+    if duration_ms > 0 {
+        state.duration_ms = duration_ms;
+    }
+    let msg = match serde_json::to_string(&*state) {
+        Ok(m) => m,
+        Err(_) => return,
+    };
+    drop(state);
+
+    for tx in PEERS.lock().await.values() {
+        let _ = tx.send(Message::Text(msg.clone()));
+    }
+    if let Some(handle) = APP_HANDLE.lock().await.as_ref() {
+        let _ = handle.emit("overlay-state-updated", msg);
+    }
+}
 
 #[tauri::command]
 pub async fn update_overlay_lyrics(current: String, next: String, index: Option<i32>) {

@@ -48,10 +48,51 @@
     return fallback;
   }
 
+  /**
+   * 디자인 축(외곽선·그림자·그라디언트)을 CSS 변수로 푼다.
+   * 두 오버레이 페이지가 같은 규칙을 쓰도록 여기 한 곳에만 둔다.
+   */
+  function applyDesign(style, rootEl) {
+    const root = rootEl || document.documentElement;
+    const num = (v, d) => (typeof v === 'number' && isFinite(v) ? v : d);
+    const outlineW = num(readStyleField(style, 'outline_width', 'outlineWidth', 0), 0);
+    const outlineC = String(readStyleField(style, 'outline_color', 'outlineColor', '000000')).replace('#', '');
+    const shadow = num(readStyleField(style, 'shadow', 'shadow', 0), 0);
+
+    // 외곽선은 text-shadow 8방향으로 만든다. -webkit-text-stroke는 글자 안쪽을
+    // 깎아 얇은 폰트가 뭉개지므로 쓰지 않는다.
+    let stroke = 'none';
+    if (outlineW > 0) {
+      const c = `#${outlineC}`;
+      const w = outlineW;
+      const d = w * 0.7071; // 대각선은 √2로 나눠 굵기를 맞춘다
+      stroke = [
+        `${w}px 0 0 ${c}`, `-${w}px 0 0 ${c}`, `0 ${w}px 0 ${c}`, `0 -${w}px 0 ${c}`,
+        `${d}px ${d}px 0 ${c}`, `-${d}px ${d}px 0 ${c}`,
+        `${d}px -${d}px 0 ${c}`, `-${d}px -${d}px 0 ${c}`,
+      ].join(', ');
+    }
+    const drop = shadow > 0 ? `0 ${Math.round(shadow * 6)}px ${Math.round(shadow * 18)}px rgba(0,0,0,${shadow})` : '';
+    root.style.setProperty('--overlay-text-outline',
+      [stroke === 'none' ? '' : stroke, drop].filter(Boolean).join(', ') || 'none');
+    root.style.setProperty('--overlay-card-shadow',
+      shadow > 0 ? `0 ${Math.round(shadow * 20)}px ${Math.round(shadow * 55)}px rgba(0,0,0,${shadow * 0.85})` : 'none');
+
+    // 그라디언트 — 끄면 기존 단색(--glass-bg)을 그대로 쓴다.
+    const useGrad = readStyleField(style, 'gradient', 'gradient', false) === true;
+    const gradC = String(readStyleField(style, 'gradient_color', 'gradientColor', '000000')).replace('#', '');
+    const opacity = num(readStyleField(style, 'bg_opacity', 'bgOpacity', 0.6), 0.6);
+    root.style.setProperty('--overlay-card-bg',
+      useGrad
+        ? `linear-gradient(135deg, var(--glass-bg), rgba(${hexToRgb(gradC)}, ${opacity}))`
+        : 'var(--glass-bg)');
+  }
+
   global.OverlayShared = {
     hexToRgb,
     connectWS,
     readBool,
     readStyleField,
+    applyDesign,
   };
 })(window);

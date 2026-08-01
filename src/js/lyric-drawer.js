@@ -35,7 +35,11 @@ export function bindLyricProgressListener() {
     progressListenerBound = true;
     listen('playback-progress', (event) => {
         const positionMs = event.payload.positionMs ?? event.payload.position_ms ?? 0;
+        const durationMs = event.payload.durationMs ?? event.payload.duration_ms ?? 0;
         syncLyricsWithTime(positionMs / 1000);
+        // 오버레이 진행바 — 오버레이가 스스로 시간을 세지 않고 앱이 알려주는
+        // 위치만 그린다(두 화면이 어긋나면 안 된다).
+        invoke('update_overlay_progress', { positionMs, durationMs }).catch(() => {});
     });
 }
 

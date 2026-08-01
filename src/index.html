@@ -691,6 +691,39 @@
                           </label>
                         </div>
                       </div>
+
+                      <!-- 디자인 축 — 밝은 방송 화면에서 글자가 묻히지 않게 하는
+                           실전 수단(외곽선)과 입체감(그림자·그라디언트). -->
+                      <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <label style="font-size: 0.8rem; font-weight: 700; color: var(--text-dim);">글자 외곽선</label>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                          <input type="range" id="overlay-outline-width" min="0" max="6" step="0.5" value="0" class="range-slider" style="flex: 1;">
+                          <span id="overlay-outline-width-val" style="font-size: 0.85rem; font-weight: 800; min-width: 40px; text-align: right;">0px</span>
+                        </div>
+                        <div class="hex-input-wrapper" style="width: 92px;">
+                          <span class="hex-hash">#</span>
+                          <input type="text" id="overlay-outline-color" value="000000" maxlength="6" class="hex-text-input">
+                        </div>
+                      </div>
+
+                      <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <label style="font-size: 0.8rem; font-weight: 700; color: var(--text-dim);">그림자</label>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                          <input type="range" id="overlay-shadow" min="0" max="1" step="0.1" value="0" class="range-slider" style="flex: 1;">
+                          <span id="overlay-shadow-val" style="font-size: 0.85rem; font-weight: 800; min-width: 40px; text-align: right;">0%</span>
+                        </div>
+                      </div>
+
+                      <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <label style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; cursor: pointer;">
+                          <input type="checkbox" id="overlay-gradient" style="width: 16px; height: 16px;">
+                          배경 그라디언트
+                        </label>
+                        <div class="hex-input-wrapper" style="width: 92px;">
+                          <span class="hex-hash">#</span>
+                          <input type="text" id="overlay-gradient-color" value="000000" maxlength="6" class="hex-text-input">
+                        </div>
+                      </div>
                     </div>
 
                     <!-- 우측: 폰트 및 컬러 팔레트 -->
@@ -845,6 +878,13 @@
                       <span class="ov-vis-text">
                         <span class="ov-vis-name">키 · 빠르기</span>
                         <span class="ov-vis-hint">원곡과 다를 때만 표시</span>
+                      </span>
+                    </label>
+                    <label class="ov-vis-item" data-for="info">
+                      <input type="checkbox" class="ov-vis-toggle" id="ov-vis-progress" data-vis="progress">
+                      <span class="ov-vis-text">
+                        <span class="ov-vis-name">진행바</span>
+                        <span class="ov-vis-hint">카드 아래 얇은 곡 진행 표시</span>
                       </span>
                     </label>
                     <label class="ov-vis-item" data-for="lyrics">

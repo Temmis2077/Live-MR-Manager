@@ -205,6 +205,35 @@ export function initOverlayListeners() {
   const updateTextPalette = setupPalette('text-palette', overlayTextColor, overlayTextColorHex);
   const updateBgPalette = setupPalette('bg-palette', overlayBgColor, overlayBgColorHex);
 
+  /** 디자인 축(외곽선·그림자·그라디언트)을 백엔드가 받는 모양으로 읽는다. */
+  const readDesign = () => {
+    const num = (id, d) => {
+      const el = document.getElementById(id);
+      const v = el ? parseFloat(el.value) : NaN;
+      return Number.isFinite(v) ? v : d;
+    };
+    const hex = (id, d) => {
+      const el = document.getElementById(id);
+      const v = (el?.value || '').replace(/[^0-9a-fA-F]/g, '');
+      return v.length === 6 ? v.toLowerCase() : d;
+    };
+    const outlineWidth = num('overlay-outline-width', 0);
+    const shadow = num('overlay-shadow', 0);
+
+    const ow = document.getElementById('overlay-outline-width-val');
+    if (ow) ow.textContent = `${outlineWidth}px`;
+    const sh = document.getElementById('overlay-shadow-val');
+    if (sh) sh.textContent = `${Math.round(shadow * 100)}%`;
+
+    return {
+      outlineWidth,
+      outlineColor: hex('overlay-outline-color', '000000'),
+      shadow,
+      gradient: !!document.getElementById('overlay-gradient')?.checked,
+      gradientColor: hex('overlay-gradient-color', '000000'),
+    };
+  };
+
   /** 표시 항목 체크박스를 백엔드가 받는 모양으로 읽는다. */
   const readVisibilityToggles = () => {
     const vis = {};
@@ -252,6 +281,7 @@ export function initOverlayListeners() {
     // 항목은 아래에서 행 자체를 숨기지만, 값은 그대로 보내 다른 탭의 설정이
     // 초기화되지 않게 한다.
     const visibility = readVisibilityToggles();
+    const design = readDesign();
     document.querySelectorAll('#ov-vis-list .ov-vis-item').forEach((row) => {
       const scope = row.dataset.for;
       row.style.display = (scope === 'both' || scope === currentTarget) ? 'flex' : 'none';
@@ -281,7 +311,7 @@ export function initOverlayListeners() {
           config.byTarget = config.byTarget || {};
           config.byTarget[currentTarget] = {
             ...(config.byTarget[currentTarget] || {}),
-            fontSize, effectFloat, effectGlow, visibility,
+            fontSize, effectFloat, effectGlow, visibility, design,
           };
 
           localStorage.setItem('overlay-settings', JSON.stringify(config));
@@ -350,7 +380,8 @@ export function initOverlayListeners() {
               fontSize,
               effectFloat,
               effectGlow,
-              visibility
+              visibility,
+              design
             });
           }
         } catch (err) {
@@ -569,6 +600,15 @@ export function initOverlayListeners() {
     const fsInput = document.getElementById('overlay-font-size');
     if (fsInput && perTarget.fontSize) fsInput.value = perTarget.fontSize;
 
+    const d = perTarget.design || {};
+    const setVal = (id, v) => { const el = document.getElementById(id); if (el && v !== undefined) el.value = v; };
+    setVal('overlay-outline-width', d.outlineWidth ?? 0);
+    setVal('overlay-outline-color', d.outlineColor ?? '000000');
+    setVal('overlay-shadow', d.shadow ?? 0);
+    setVal('overlay-gradient-color', d.gradientColor ?? '000000');
+    const gradBox = document.getElementById('overlay-gradient');
+    if (gradBox) gradBox.checked = d.gradient === true;
+
     if (config.preset && OVERLAY_PRESETS[config.preset]) {
       setDropdownValue('overlay-preset-dropdown', 'overlay-preset', config.preset);
     }
@@ -634,13 +674,25 @@ export function initOverlayListeners() {
             fontSize: perTarget.fontSize || final.fontSize || 22,
             effectFloat: perTarget.effectFloat !== undefined ? !!perTarget.effectFloat : !!final.effectFloat,
             effectGlow: perTarget.effectGlow !== undefined ? !!perTarget.effectGlow : !!final.effectGlow,
-            visibility: perTarget.visibility || final.visibility
+            visibility: perTarget.visibility || final.visibility,
+            design: perTarget.design
           });
         } catch (err) {
           console.error(`Failed to sync ${target} overlay style:`, err);
         }
       }
     };
+
+  // 디자인 축 컨트롤
+  ['overlay-outline-width', 'overlay-shadow'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', () => updateOverlaySettings());
+  });
+  ['overlay-outline-color', 'overlay-gradient-color'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', () => updateOverlaySettings());
+  });
+  document.getElementById('overlay-gradient')?.addEventListener('change', () => updateOverlaySettings());
 
   // 표시 항목 토글 — 바꾸면 바로 미리보기·방송에 반영된다
   document.querySelectorAll('.ov-vis-toggle').forEach((el) => {

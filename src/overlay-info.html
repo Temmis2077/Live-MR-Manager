@@ -56,13 +56,14 @@
       position: absolute;
       display: flex;
       align-items: center;
-      background: var(--glass-bg);
+      /* 그라디언트를 쓰면 --overlay-card-bg가 그것을, 아니면 단색을 준다 */
+      background: var(--overlay-card-bg, var(--glass-bg));
       backdrop-filter: blur(24px);
       -webkit-backdrop-filter: blur(24px);
       border: 1px solid var(--glass-border);
       padding: 16px 24px;
       border-radius: var(--overlay-rounding);
-      box-shadow: 0 15px 50px rgba(0, 0, 0, 0.6);
+      box-shadow: var(--overlay-card-shadow, 0 15px 50px rgba(0, 0, 0, 0.6));
 
       /* Hard cap overlay width regardless of content length */
       width: min(400px, calc(100vw - 32px));
@@ -177,6 +178,11 @@
       overflow: hidden;
     }
 
+    /* 글자 외곽선·그림자 — 밝은 방송 배경에서도 읽히게 한다 */
+    .label, #title, #artist, .key-bpm {
+      text-shadow: var(--overlay-text-outline, none);
+    }
+
     .label {
       font-size: 11px;
       font-weight: 900;
@@ -207,6 +213,29 @@
     .overlay-container.no-label .label,
     .overlay-container.no-artist #artist {
       display: none;
+    }
+
+    /* 곡 진행바 — 카드 아래쪽에 얇게 깔린다. 기본은 꺼져 있다. */
+    .progress-bar {
+      display: none;
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.16);
+      border-bottom-left-radius: var(--overlay-rounding);
+      border-bottom-right-radius: var(--overlay-rounding);
+      overflow: hidden;
+    }
+
+    .progress-bar.on { display: block; }
+
+    .progress-fill {
+      height: 100%;
+      width: 0%;
+      background: var(--accent-color);
+      transition: width 0.25s linear;
     }
 
     /* 키·빠르기 배지 — 원곡과 다르게 부를 때만 의미가 있어 기본은 꺼져 있다 */
@@ -260,6 +289,7 @@
 </head>
 <body style="background: transparent;">
   <div class="overlay-container" id="container">
+    <div class="progress-bar" id="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
     <div class="fx-wrapper" id="fx-wrapper">
       <div class="thumbnail-wrapper" id="thumb-wrap">
         <img src="" alt="" class="thumbnail" id="thumb">
@@ -281,6 +311,8 @@
     const thumbWrap = document.getElementById('thumb-wrap');
     const thumb = document.getElementById('thumb');
     const keyBpmEl = document.getElementById('key-bpm');
+    const progressBar = document.getElementById('progress-bar');
+    const progressFill = document.getElementById('progress-fill');
     const activeAnimations = {};
 
     /**
@@ -438,6 +470,19 @@
         // 필드가 없는 예전 설정은 "예전과 같은 화면"이 되도록 기본 true.
         const vis = style.visibility || {};
         const on = (v) => v !== false;
+        // 디자인 축(외곽선·그림자·그라디언트)을 CSS 변수로 푼다
+        window.OverlayShared.applyDesign(style);
+
+        // 진행바 — 앱이 알려준 위치만 그린다(오버레이가 시간을 세지 않는다)
+        const showProgress = on(vis.progress) && vis.progress !== undefined;
+        progressBar.classList.toggle('on', showProgress === true);
+        if (showProgress) {
+          const posMs = Number(data.position_ms ?? data.positionMs ?? 0);
+          const durMs = Number(data.duration_ms ?? data.durationMs ?? 0);
+          const pct = durMs > 0 ? Math.max(0, Math.min(100, (posMs / durMs) * 100)) : 0;
+          progressFill.style.width = `${pct}%`;
+        }
+
         container.classList.toggle('no-card', !on(vis.card));
         container.classList.toggle('no-label', !on(vis.label));
         container.classList.toggle('no-artist', !on(vis.artist));

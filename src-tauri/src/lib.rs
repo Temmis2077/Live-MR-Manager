@@ -225,6 +225,7 @@ pub fn run() {
             overlay_server::update_overlay_lyrics_full,
             overlay_server::get_overlay_state,
             overlay_server::get_lan_addresses,
+            overlay_server::update_overlay_progress,
             meloming::meloming_get_user_profile,
             meloming::meloming_get_channel_id,
             meloming::meloming_set_channel_id,
