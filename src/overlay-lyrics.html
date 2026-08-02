@@ -130,11 +130,11 @@
           /* 글로우 효과 — 박스 그림자 대신 현재 가사 줄에만 text-shadow 펄스.
              방향별 등장 애니메이션과 충돌하지 않도록 별도 요소에 적용한다. */
           /* 외곽선을 함께 실어 글로우와 공존시킨다(아래 info 쪽과 같은 이유). */
+          /* 외곽선은 text-stroke라 애니메이션과 무관하다. */
           @keyframes text-glow-pulse {
-            0%, 100% { text-shadow: var(--overlay-text-outline, 0 2px 4px var(--text-shadow)); }
+            0%, 100% { text-shadow: var(--overlay-text-shadow, 0 2px 4px var(--text-shadow)); }
             50% {
               text-shadow:
-                var(--overlay-text-outline, 0 0 0 transparent),
                 0 0 24px rgb(var(--accent-rgb) / 0.7),
                 0 0 48px rgb(var(--accent-rgb) / 0.3);
             }
@@ -194,7 +194,7 @@
     /* 카드를 끄면 기본 그림자를 깔되, 외곽선 설정이 있으면 그쪽이 이긴다
        (변수를 덮어쓰지 않고 기본값 자리에 둔다). */
     .overlay-container.no-card .lyric-line {
-      text-shadow: var(--overlay-text-outline,
+      text-shadow: var(--overlay-text-shadow,
         0 2px 12px rgba(0, 0, 0, 0.9), 0 0 4px rgba(0, 0, 0, 0.9));
     }
 
@@ -210,7 +210,9 @@
     .lyric-line,
     .overlay-container .lyric-line.current,
     .overlay-container .lyric-line.next {
-      text-shadow: var(--overlay-text-outline, none);
+      -webkit-text-stroke: var(--overlay-stroke-width, 0) var(--overlay-stroke-color, #000);
+      paint-order: stroke fill;
+      text-shadow: var(--overlay-text-shadow, none);
     }
 
     .lyric-line.next {
@@ -474,7 +476,12 @@
     function showOverlay() { overlay.classList.add('visible'); }
     function hideOverlay() { overlay.classList.remove('visible'); }
 
-    connectWS(updateOverlay);
+    // 개발용 — ?dev=1 이면 WS 대신 외부 주입을 받는다(백엔드 없이 확인).
+    if (new URLSearchParams(location.search).get('dev') === '1') {
+      window.__applyOverlayState = updateOverlay;
+    } else {
+      connectWS(updateOverlay);
+    }
   </script>
 </body>
 </html>

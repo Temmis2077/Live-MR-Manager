@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>OSW 오버레이 개발용 미리보기</title>
+  <!--
+    백엔드(Tauri/WebSocket) 없이 오버레이 페이지의 실제 렌더링을 확인하는
+    개발용 화면. 오버레이 페이지를 ?dev=1 로 띄우면 WS 대신 window의
+    __applyOverlayState 로 상태를 받으므로, 여기서 직접 밀어 넣는다.
+
+    쓰는 법: npm run dev 후 http://localhost:1420/dev-overlay.html
+    (릴리즈 UI에서는 어디서도 링크하지 않는 개발 전용 페이지다.)
+  -->
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0b0b0f; color: #e6e6ea; min-height: 100vh;
+      font-family: 'Segoe UI', system-ui, sans-serif; padding: 20px;
+      display: grid; grid-template-columns: 300px 1fr; gap: 20px;
+    }
+    h1 { font-size: 1rem; margin-bottom: 14px; }
+    .panel { background: #15151c; border: 1px solid #2a2a35; border-radius: 12px; padding: 16px; }
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+    label { font-size: 0.78rem; color: #a0a0b0; }
+    input[type=range] { width: 130px; }
+    input[type=color] { width: 40px; height: 26px; border: none; background: none; }
+    select, input[type=text] { background: #1e1e28; color: #e6e6ea; border: 1px solid #33333f; border-radius: 6px; padding: 4px 8px; font-size: 0.78rem; }
+    .stage {
+      /* 격자 = 투명. 오버레이가 실제로 어떻게 얹히는지 보려면 배경이 필요하다. */
+      background-color: #101014;
+      background-image:
+        linear-gradient(45deg, rgba(255,255,255,.05) 25%, transparent 25% 75%, rgba(255,255,255,.05) 75%),
+        linear-gradient(45deg, rgba(255,255,255,.05) 25%, transparent 25% 75%, rgba(255,255,255,.05) 75%);
+      background-size: 26px 26px; background-position: 0 0, 13px 13px;
+      border: 1px solid #2a2a35; border-radius: 10px; margin-bottom: 16px; overflow: hidden;
+    }
+    .stage.light { background-color: #e8e4dc; }
+    .stage h2 { font-size: 0.72rem; color: #8a8a99; padding: 8px 10px; background: #15151c; }
+    iframe { width: 100%; border: none; display: block; }
+    .hint { font-size: 0.7rem; color: #70707f; line-height: 1.6; margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <h1>오버레이 개발용 미리보기</h1>
+
+    <div class="row"><label>프리셋</label><select id="preset"></select></div>
+    <div class="row"><label>외곽선 두께</label><input type="range" id="outlineWidth" min="0" max="6" step="0.5" value="4"></div>
+    <div class="row"><label>외곽선 색</label><input type="color" id="outlineColor" value="#000000"></div>
+    <div class="row"><label>그림자</label><input type="range" id="shadow" min="0" max="1" step="0.1" value="0.5"></div>
+    <div class="row"><label>그라디언트</label><input type="checkbox" id="gradient"></div>
+    <div class="row"><label>그라디언트 색</label><input type="color" id="gradientColor" value="#1a1a2e"></div>
+    <div class="row"><label>글자색</label><input type="color" id="textColor" value="#ffffff"></div>
+    <div class="row"><label>액센트</label><input type="color" id="accent" value="#8b5cf6"></div>
+    <div class="row"><label>배경 불투명도</label><input type="range" id="bgOpacity" min="0" max="1" step="0.1" value="0.6"></div>
+    <div class="row"><label>가사 글자 크기</label><input type="range" id="fontSize" min="14" max="40" step="1" value="28"></div>
+    <div class="row"><label>카드</label><input type="checkbox" id="card" checked></div>
+    <div class="row"><label>진행바</label><input type="checkbox" id="progress" checked></div>
+    <div class="row"><label>글로우</label><input type="checkbox" id="glow"></div>
+    <div class="row"><label>밝은 무대</label><input type="checkbox" id="lightStage"></div>
+
+    <div class="hint">
+      외곽선이 매끄러운지 보려면 두께를 4~6으로 올리고 밝은 무대를 켜 보세요.
+      이 화면은 백엔드 없이 프런트만으로 돕니다.
+    </div>
+  </div>
+
+  <div>
+    <div class="stage" id="stage-info">
+      <h2>곡 정보 오버레이 (640 × 200)</h2>
+      <iframe id="f-info" src="overlay-info.html?dev=1" height="200"></iframe>
+    </div>
+    <div class="stage" id="stage-lyrics">
+      <h2>가사 오버레이 (640 × 220)</h2>
+      <iframe id="f-lyrics" src="overlay-lyrics.html?dev=1" height="220"></iframe>
+    </div>
+  </div>
+
+  <script type="module">
+    // 프리셋은 앱과 같은 정의를 그대로 가져다 쓴다 — 여기서 따로 베끼면
+    // 실제 화면과 달라져 확인의 의미가 없어진다.
+    const { OVERLAY_PRESETS } = await import('./js/overlay-presets.js');
+
+    const $ = (id) => document.getElementById(id);
+    const presetSel = $('preset');
+    for (const [key, p] of Object.entries(OVERLAY_PRESETS)) {
+      const o = document.createElement('option');
+      o.value = key; o.textContent = `${p.label} — ${p.desc}`;
+      presetSel.appendChild(o);
+    }
+
+    const hex = (el) => el.value.replace('#', '');
+
+    function buildStyle(extra) {
+      return {
+        scale: 1.0,
+        font: 'Pretendard',
+        color: hex($('accent')),
+        text_color: hex($('textColor')),
+        bg_color: '0f0f14',
+        bg_opacity: parseFloat($('bgOpacity').value),
+        rounding: 20,
+        animation_direction: 'left',
+        font_size: parseInt($('fontSize').value, 10),
+        effect_float: false,
+        effect_glow: $('glow').checked,
+        outline_width: parseFloat($('outlineWidth').value),
+        outline_color: hex($('outlineColor')),
+        shadow: parseFloat($('shadow').value),
+        gradient: $('gradient').checked,
+        gradient_color: hex($('gradientColor')),
+        visibility: {
+          card: $('card').checked, cover: true, label: true, artist: true,
+          keyBpm: true, nextLine: true, progress: $('progress').checked,
+        },
+        ...extra,
+      };
+    }
+
+    function push() {
+      const style = buildStyle();
+      // 가사는 예시 문구만 쓴다(실제 가사를 넣지 않는다).
+      const state = {
+        title: '샘플 곡 제목', artist: '샘플 가수', thumbnail: '',
+        is_playing: true, theme_mode: 'dark', is_force_visible: true,
+        current_lyric: '지금 부르는 줄이 이렇게 보입니다',
+        next_lyric: '다음 줄은 이렇게 흐리게 따라옵니다',
+        song_key: '2', bpm: 128,
+        position_ms: 72000, duration_ms: 210000,
+        info_style: style, lyrics_style: style,
+      };
+      for (const id of ['f-info', 'f-lyrics']) {
+        const w = $(id).contentWindow;
+        if (w && typeof w.__applyOverlayState === 'function') w.__applyOverlayState(state);
+      }
+      $('stage-info').classList.toggle('light', $('lightStage').checked);
+      $('stage-lyrics').classList.toggle('light', $('lightStage').checked);
+    }
+
+    presetSel.addEventListener('change', () => {
+      const p = OVERLAY_PRESETS[presetSel.value];
+      if (!p) return;
+      const d = p.design || {};
+      $('outlineWidth').value = d.outlineWidth ?? 0;
+      $('outlineColor').value = `#${d.outlineColor ?? '000000'}`;
+      $('shadow').value = d.shadow ?? 0;
+      $('gradient').checked = d.gradient === true;
+      $('gradientColor').value = `#${d.gradientColor ?? '000000'}`;
+      $('accent').value = `#${p.color}`;
+      $('textColor').value = `#${p.textColor}`;
+      $('bgOpacity').value = p.bgOpacity;
+      $('fontSize').value = p.fontSize;
+      $('glow').checked = !!p.effectGlow;
+      $('card').checked = p.visibility?.card !== false;
+      $('progress').checked = p.visibility?.progress === true;
+      push();
+    });
+
+    document.querySelectorAll('input').forEach((el) => {
+      el.addEventListener('input', push);
+      el.addEventListener('change', push);
+    });
+
+    // iframe이 뜬 뒤 첫 상태를 밀어 넣는다.
+    let ready = 0;
+    for (const id of ['f-info', 'f-lyrics']) {
+      $(id).addEventListener('load', () => { if (++ready === 2) push(); });
+    }
+  </script>
+</body>
+</html>

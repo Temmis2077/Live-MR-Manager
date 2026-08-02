@@ -98,11 +98,12 @@
         /* 글로우는 text-shadow를 쓰는데, 그냥 두면 외곽선 설정을 통째로
            덮어써서 글로우를 켜는 순간 외곽선이 사라진다. 키프레임마다 외곽선을
            함께 실어 둘이 공존하게 한다. */
+        /* 외곽선은 이제 text-stroke라 애니메이션이 건드리지 않는다.
+           글로우는 그림자만 다루면 된다. */
         @keyframes text-glow-pulse {
-          0%, 100% { text-shadow: var(--overlay-text-outline, 0 0 0 transparent); }
+          0%, 100% { text-shadow: var(--overlay-text-shadow, 0 0 0 transparent); }
           50% {
             text-shadow:
-              var(--overlay-text-outline, 0 0 0 transparent),
               0 0 24px rgb(var(--accent-rgb) / 0.7),
               0 0 48px rgb(var(--accent-rgb) / 0.3);
           }
@@ -186,9 +187,14 @@
       overflow: hidden;
     }
 
-    /* 글자 외곽선·그림자 — 밝은 방송 배경에서도 읽히게 한다 */
+    /* 글자 외곽선·그림자 — 밝은 방송 배경에서도 읽히게 한다.
+       외곽선은 text-stroke(실제 곡선을 따는 획)로 그리고, paint-order로 획을
+       채움 뒤에 깔아 글자 안쪽이 깎이지 않게 한다. 그림자는 별도 속성이라
+       외곽선과 서로 덮어쓰지 않는다. */
     .label, #title, #artist, .key-bpm {
-      text-shadow: var(--overlay-text-outline, none);
+      -webkit-text-stroke: var(--overlay-stroke-width, 0) var(--overlay-stroke-color, #000);
+      paint-order: stroke fill;
+      text-shadow: var(--overlay-text-shadow, none);
     }
 
     .label {
@@ -218,7 +224,7 @@
     .overlay-container.no-card #title,
     .overlay-container.no-card #artist,
     .overlay-container.no-card .key-bpm {
-      text-shadow: var(--overlay-text-outline,
+      text-shadow: var(--overlay-text-shadow,
         0 2px 10px rgba(0, 0, 0, 0.85), 0 0 3px rgba(0, 0, 0, 0.9));
     }
 
@@ -570,7 +576,13 @@
       document.body.style.width = `${PREVIEW_STAGE_WIDTH}px`;
       document.body.style.height = `${PREVIEW_STAGE_HEIGHT}px`;
     }
-    connectWS(update);
+    // 개발용 — ?dev=1 이면 WS 대신 창 밖에서 상태를 밀어 넣을 수 있게 연다.
+    // 백엔드(Tauri/WS) 없이 프런트만으로 렌더링을 확인하기 위한 통로다.
+    if (new URLSearchParams(location.search).get('dev') === '1') {
+      window.__applyOverlayState = update;
+    } else {
+      connectWS(update);
+    }
     thumb.onerror = () => {
       if (thumb.src !== DEFAULT_THUMB_URL) {
         thumb.src = DEFAULT_THUMB_URL;

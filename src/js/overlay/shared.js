@@ -51,6 +51,12 @@
   /**
    * 디자인 축(외곽선·그림자·그라디언트)을 CSS 변수로 푼다.
    * 두 오버레이 페이지가 같은 규칙을 쓰도록 여기 한 곳에만 둔다.
+   *
+   * 외곽선은 -webkit-text-stroke + paint-order: stroke fill 로 그린다.
+   * 예전에는 text-shadow를 8방향으로 깔아 흉내 냈는데, 원을 8개 점으로만
+   * 근사하는 셈이라 그 사이 각도에서 두께가 얇아져 굵을수록 톱니처럼 깎여
+   * 보였다. text-stroke는 글자 외곽선을 실제 곡선으로 따므로 매끄럽고,
+   * paint-order로 획을 채움 뒤에 그리면 안쪽을 깎지도 않는다.
    */
   function applyDesign(style, rootEl) {
     const root = rootEl || document.documentElement;
@@ -59,22 +65,14 @@
     const outlineC = String(readStyleField(style, 'outline_color', 'outlineColor', '000000')).replace('#', '');
     const shadow = num(readStyleField(style, 'shadow', 'shadow', 0), 0);
 
-    // 외곽선은 text-shadow 8방향으로 만든다. -webkit-text-stroke는 글자 안쪽을
-    // 깎아 얇은 폰트가 뭉개지므로 쓰지 않는다.
-    let stroke = 'none';
-    if (outlineW > 0) {
-      const c = `#${outlineC}`;
-      const w = outlineW;
-      const d = w * 0.7071; // 대각선은 √2로 나눠 굵기를 맞춘다
-      stroke = [
-        `${w}px 0 0 ${c}`, `-${w}px 0 0 ${c}`, `0 ${w}px 0 ${c}`, `0 -${w}px 0 ${c}`,
-        `${d}px ${d}px 0 ${c}`, `-${d}px ${d}px 0 ${c}`,
-        `${d}px -${d}px 0 ${c}`, `-${d}px -${d}px 0 ${c}`,
-      ].join(', ');
-    }
-    const drop = shadow > 0 ? `0 ${Math.round(shadow * 6)}px ${Math.round(shadow * 18)}px rgba(0,0,0,${shadow})` : '';
-    root.style.setProperty('--overlay-text-outline',
-      [stroke === 'none' ? '' : stroke, drop].filter(Boolean).join(', ') || 'none');
+    // text-stroke는 획이 글자 경계 중앙에 걸려 절반만 바깥으로 나온다.
+    // 설정한 두께가 눈에 보이는 두께가 되도록 두 배로 준다.
+    root.style.setProperty('--overlay-stroke-width', outlineW > 0 ? `${outlineW * 2}px` : '0');
+    root.style.setProperty('--overlay-stroke-color', `#${outlineC}`);
+
+    // 그림자는 이제 순수하게 그림자만 담당한다(외곽선과 속성이 분리됐다).
+    root.style.setProperty('--overlay-text-shadow',
+      shadow > 0 ? `0 ${Math.round(shadow * 6)}px ${Math.round(shadow * 18)}px rgba(0,0,0,${shadow})` : 'none');
     root.style.setProperty('--overlay-card-shadow',
       shadow > 0 ? `0 ${Math.round(shadow * 20)}px ${Math.round(shadow * 55)}px rgba(0,0,0,${shadow * 0.85})` : 'none');
 
