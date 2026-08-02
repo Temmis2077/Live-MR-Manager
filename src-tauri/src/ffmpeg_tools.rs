@@ -4,10 +4,12 @@ use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
 pub fn tools_cache_dir() -> PathBuf {
+    // 기존 설치의 수 GB 규모 GPU 팩·모델·도구를 재다운로드하지 않도록 이 경로는
+    // OSW에서도 의도적으로 유지한다. 새 브랜드 데이터 루트와는 별도인 공유 캐시다.
     if let Ok(base) = std::env::var("LOCALAPPDATA").or_else(|_| std::env::var("APPDATA")) {
         return Path::new(&base).join("LiveMRManager").join("tools");
     }
-    std::env::temp_dir().join("live-mr-manager-tools")
+    std::env::temp_dir().join("osw-tools")
 }
 
 pub fn managed_ffmpeg_path() -> PathBuf {

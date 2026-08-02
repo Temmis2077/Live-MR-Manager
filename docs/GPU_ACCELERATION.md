@@ -38,6 +38,9 @@ NVIDIA GPU 전용이며, 없어도 앱은 기존대로 동작한다.
 DLL이 전부 합쳐 약 3.8GB(압축 ~2.6GB)라 설치본에 넣을 수 없다. GitHub 릴리즈에
 분할 zip으로 올려두고, 앱 설정 화면의 **다운로드** 버튼으로 받아 아래 위치에 푼다:
 
+이 경로는 구버전에서 받은 수 GB 규모 런타임을 다시 내려받지 않도록 OSW에서도
+의도적으로 유지하는 레거시 호환 공유 캐시다. 앱 데이터 루트와는 별개다.
+
 ```
 %LOCALAPPDATA%\LiveMRManager\tools\gpu\      ← DLL
 %LOCALAPPDATA%\LiveMRManager\tools\trt_cache\ ← 빌드된 엔진 캐시

@@ -11,11 +11,11 @@ if os.path.isfile(env_path):
             k, v = line.split("=", 1)
             os.environ.setdefault(k.strip(), v.strip())
 
-db = os.path.join(
-    os.environ["LOCALAPPDATA"],
-    "com.autumncolor77.live-mr-manager",
-    "library.db",
-)
+db_candidates = [
+    os.path.join(os.environ["LOCALAPPDATA"], identifier, "library.db")
+    for identifier in ("com.osw.desktop", "com.autumncolor77.live-mr-manager")
+]
+db = next((path for path in db_candidates if os.path.isfile(path)), db_candidates[0])
 conn = sqlite3.connect(db)
 db_secret = conn.execute(
     "SELECT value FROM Settings WHERE key='meloming_client_secret'"

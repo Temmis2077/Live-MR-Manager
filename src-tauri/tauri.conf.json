@@ -36,7 +36,7 @@
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["live-mr-manager"]
+        "schemes": ["osw", "live-mr-manager"]
       }
     }
   },

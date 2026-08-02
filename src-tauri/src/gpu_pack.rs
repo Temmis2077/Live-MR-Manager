@@ -7,7 +7,8 @@
 //!
 //! 다만 TensorRT+cuDNN DLL은 전부 합쳐 ~3.8GB(압축 ~2.6GB)라 설치본에 넣을 수
 //! 없다. 그래서 GitHub 릴리즈에 분할 zip으로 올려두고, 앱 안에서 버튼 하나로
-//! 내려받아 `%LOCALAPPDATA%\LiveMRManager\tools\gpu\`에 풀어 넣는다(`install_gpu_pack`).
+//! 내려받아 레거시 호환 관리 경로인
+//! `%LOCALAPPDATA%\LiveMRManager\tools\gpu\`에 풀어 넣는다(`install_gpu_pack`).
 //! 팩이 없으면 기존 경로(CPU/DirectML)로 그대로 동작한다.
 //!
 //! NVIDIA 런타임 재배포 근거: TensorRT SLA §8.2 / cuDNN SLA / CUDA EULA Attachment A가
@@ -258,7 +259,7 @@ async fn install_gpu_pack_inner(app: &tauri::AppHandle) -> Result<(), String> {
     std::fs::create_dir_all(&tmp_dir).map_err(|e| format!("임시 폴더 생성 실패: {e}"))?;
 
     let client = reqwest::Client::builder()
-        .user_agent("LiveMRManager")
+        .user_agent("OSW")
         .build()
         .map_err(|e| format!("HTTP 클라이언트 생성 실패: {e}"))?;
 

@@ -16,7 +16,11 @@ import librosa
 CHUNK = 352800
 SR = 44100
 
-sep = os.path.join(os.environ["LOCALAPPDATA"], "com.autumncolor77.live-mr-manager", "cache", "separated")
+sep_candidates = [
+    os.path.join(os.environ["LOCALAPPDATA"], identifier, "cache", "separated")
+    for identifier in ("com.osw.desktop", "com.autumncolor77.live-mr-manager")
+]
+sep = next((path for path in sep_candidates if os.path.isdir(path)), sep_candidates[0])
 cands = sorted(glob.glob(os.path.join(sep, "*", "vocal.wav"))) + sorted(glob.glob(os.path.join(sep, "*", "vocal.mp3")))
 if not cands:
     print("검증용 보컬을 찾지 못함:", sep); sys.exit(1)
