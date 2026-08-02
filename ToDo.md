@@ -1,6 +1,6 @@
-# 🗺️ Live MR Manager — Mod 로드맵 (ToDo)
+# 🗺️ OSW — 로드맵 (ToDo)
 
-이 문서는 **개조(모드) 레포의 로드맵**입니다. 원본 프로젝트의 로드맵은 [업스트림 ToDo](https://github.com/AutumnColor77/Live-MR-Manager/blob/main/ToDo.md)를 참고하세요.
+이 문서는 **OSW(Open Stem Wave)의 독립 로드맵**입니다. 현재 제품 방향과 완료·예정 작업을 함께 관리합니다.
 
 ## 🤖 1. AI 가사 자동 정렬 (핵심 축)
 

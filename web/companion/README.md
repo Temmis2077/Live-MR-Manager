@@ -15,7 +15,7 @@
 | `/download` | GitHub Releases 링크 |
 | `/login` | (테스트) 웹 멜로밍 OAuth 시작 |
 | `/account` | (테스트) 웹 로그인 세션 확인 |
-| `/oauth/callback` | 멜로밍 Redirect URI — 웹 PKCE 완료 또는 앱 `live-mr-manager://` 브릿지 |
+| `/oauth/callback` | 멜로밍 Redirect URI — 웹 PKCE 완료 또는 앱 `osw://` 브릿지 |
 
 ## API
 
@@ -47,10 +47,13 @@ MELOMING_CLIENT_ID=
 MELOMING_CLIENT_SECRET=
 # 선택: Redirect URI 고정 (미설정 시 Origin + /oauth/callback)
 # NEXT_PUBLIC_OAUTH_REDIRECT_URI=https://lmrm.vercel.app/oauth/callback
-NEXT_PUBLIC_APP_SCHEME=live-mr-manager
+NEXT_PUBLIC_APP_SCHEME=osw
 # Discord 영구 초대 (프로덕션 Vercel에도 설정)
 NEXT_PUBLIC_DISCORD_INVITE_URL=https://discord.gg/qfJnk3VJyf
 ```
+
+새 콜백은 `osw://`를 생성합니다. 데스크톱 앱은 기존 OAuth 세션과 구버전 웹
+콜백을 위해 `live-mr-manager://`도 입력 호환용으로만 계속 받습니다.
 
 배포 앱 로그인: **Client Secret은 Vercel에만** 두고, 데스크톱 릴리스는 GitHub secret `MELOMING_CLIENT_ID`만 바이너리에 임베드합니다. 앱은 Secret이 없으면 Companion `/api/oauth/exchange`·`/api/oauth/refresh`로 토큰을 교환합니다.
 

@@ -25,7 +25,7 @@ fn append_sys_log_file(message: &str) {
         if let Some(paths) = crate::state::APP_PATHS.lock().as_ref() {
             paths.root.join("logs").join("app.log")
         } else {
-            let base = std::env::temp_dir().join("live-mr-manager");
+            let base = std::env::temp_dir().join("osw");
             base.join("logs").join("app.log")
         }
     };

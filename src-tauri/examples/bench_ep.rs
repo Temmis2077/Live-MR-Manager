@@ -46,6 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             s.encode_utf16().chain(std::iter::once(0)).collect()
         }
         let base = std::env::var("LOCALAPPDATA").unwrap_or_default();
+        // 앱과 동일한 레거시 호환 공유 캐시. 기존 수 GB GPU 팩을 재사용한다.
         let dir = std::path::Path::new(&base).join("LiveMRManager").join("tools").join("gpu");
         if dir.exists() {
             unsafe { SetDllDirectoryW(wide(&dir.to_string_lossy()).as_ptr()) };

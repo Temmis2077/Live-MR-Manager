@@ -285,7 +285,7 @@ sequenceDiagram
   alt 웹 PKCE 쿠키 있음
     Web->>Web: POST /api/oauth/complete → httpOnly 세션
   else 앱 로그인
-    Web->>App: live-mr-manager://oauth/callback?code=
+    Web->>App: osw://oauth/callback?code=
     App->>Meloming: POST /oauth/token (직접 또는 /api/oauth/exchange)
     App->>App: 토큰 Settings 저장
   end
@@ -357,7 +357,7 @@ sequenceDiagram
 
 ### 7.2 레포 구조 (권장)
 
-- **별도 레포** `live-mr-companion` (또는 monorepo `web/companion/`)
+- **별도 레포** `osw-companion` (또는 monorepo `web/companion/`)
 - 스택: Next.js App Router, TypeScript
 - 배포: Vercel Git 연동
 
@@ -367,11 +367,11 @@ sequenceDiagram
 
 ```json
 {
-  "version": "0.5.1",
-  "minSupportedVersion": "0.4.0",
-  "releaseUrl": "https://github.com/AutumnColor77/Live-MR-Manager/releases/tag/v0.5.1",
-  "changelogUrl": "https://lmrm.vercel.app/changelog#v0.5.1",
-  "notes": "멜로밍 OAuth 배포 로그인 핫픽스 — Client ID 임베드 + Companion 토큰 프록시 …",
+  "version": "1.0.0-beta.1",
+  "minSupportedVersion": "1.0.0-beta.1",
+  "releaseUrl": "https://github.com/Temmis2077/OSW/releases/tag/v1.0.0-beta.1",
+  "changelogUrl": "https://lmrm.vercel.app/changelog#v1.0.0-beta.1",
+  "notes": "OSW 독립 베타 릴리즈 — Client ID 임베드 + Companion 토큰 프록시 …",
   "publishedAt": "2026-07-13T00:00:00Z",
   "critical": false
 }
@@ -391,7 +391,7 @@ sequenceDiagram
 
 ```mermaid
 flowchart TB
-  subgraph desktop [Live_MR_Manager]
+  subgraph desktop [OSW]
     UI[Settings / Modal / Sync_UI]
     Cmd[Tauri_commands]
     Client[meloming_client]

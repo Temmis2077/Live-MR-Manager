@@ -14,7 +14,7 @@
 
 > ### 원본과의 관계
 >
-> **OSW는 [AutumnColor77/Live-MR-Manager](https://github.com/AutumnColor77/Live-MR-Manager)에서 갈라져 나온 별개의 앱입니다.** 원본의 모드(개조판)가 아니라 독자적으로 유지·발전하는 프로젝트입니다.
+> **OSW는 [AutumnColor77/Live-MR-Manager](https://github.com/AutumnColor77/Live-MR-Manager)를 기반으로 출발한 별개의 앱입니다.** 현재는 독립된 제품·저장소·릴리즈 체계로 유지·발전합니다.
 >
 > - 아이디어와 초기 구조를 원본에서 가져왔고, 그 뒤 오디오 엔진·정렬 로직·UI를 전면 재작성했습니다. 초기 설계·구현의 저작권은 원 개발자에게 있으며 MIT 조건에 따라 저작권 표시를 [`LICENSE`](LICENSE)에 함께 싣습니다.
 > - **설치·데이터·업데이트가 전부 분리되어 있습니다.** 앱 식별자가 `com.osw.desktop`이라 원본과 나란히 설치되며, 업데이트도 이 레포의 릴리즈만 봅니다. (원본 사용자는 첫 실행 때 데이터를 가져올지 물어봅니다.)
@@ -137,7 +137,8 @@ cd src-tauri && cargo test --lib   # Rust 테스트
 - `npm` 미인식 시 터미널 재시작 또는 `npm.cmd`
 - 실행 정책 오류 시 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
 - 캐시/데이터: `%LOCALAPPDATA%\com.osw.desktop\`, 관리형 도구: `%LOCALAPPDATA%\LiveMRManager\tools\`
-  (구 버전 데이터는 `com.autumncolor77.live-mr-manager\`에 있었고, 첫 실행 시 새 위치로 가져올지 물어봅니다. 관리형 도구 폴더는 식별자와 무관해 그대로 유지됩니다.)
+  (구 버전 데이터는 `com.autumncolor77.live-mr-manager\`에 있었고, 첫 실행 시 새 위치로 가져올지 물어봅니다. 관리형 도구 폴더는 기존 GPU 팩·모델의 대용량 재다운로드를 막기 위한 레거시 호환 공유 캐시라 경로를 유지합니다.)
+- 남겨 둔 구 식별자의 범위: [docs/LEGACY_COMPATIBILITY.md](docs/LEGACY_COMPATIBILITY.md)
 
 ## 📄 라이선스·크레딧
 
