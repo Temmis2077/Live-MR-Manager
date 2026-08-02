@@ -92,6 +92,8 @@ pub fn run() {
                 }
                 #[cfg(not(any(windows, target_os = "linux")))]
                 {
+                    let _ = app.deep_link().register("osw");
+                    // 기존 설치와 이미 발급된 OAuth 콜백의 하위 호환.
                     let _ = app.deep_link().register("live-mr-manager");
                 }
 

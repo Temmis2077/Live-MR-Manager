@@ -6,7 +6,8 @@
 //! 음소 단위로 맞추는 경우), 드라이한 보컬로 정렬하면 정확도가 올라간다.
 //!
 //! 모델은 anvuew/dereverb_mel_band_roformer(mono 권장)를 Deux와 같은 방식으로
-//! ONNX 변환해 `%LOCALAPPDATA%\LiveMRManager\tools\dereverb\`에 두면 활성화된다.
+//! ONNX 변환해 레거시 호환 관리 경로인
+//! `%LOCALAPPDATA%\LiveMRManager\tools\dereverb\`에 두면 활성화된다.
 //! 없거나 꺼져 있으면 원본 보컬로 폴백하므로 무회귀. 우리 엔진의 RawWaveform
 //! (melband_roformer 프리셋)을 그대로 재사용한다.
 //!

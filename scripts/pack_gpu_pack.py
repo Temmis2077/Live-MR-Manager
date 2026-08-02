@@ -9,7 +9,7 @@ manifest.json을 읽어 파트들을 내려받아 검증(sha256)하고 팩 폴�
     python scripts/pack_gpu_pack.py \
         --src "%LOCALAPPDATA%/LiveMRManager/tools/gpu" \
         --out dist/gpu-pack \
-        --base-url https://github.com/Temmis2077/Live-MR-Manager-Mod/releases/download/gpu-pack-v1
+        --base-url https://github.com/Temmis2077/OSW/releases/download/gpu-pack-v1
 
 그 다음 out 폴더의 part_*.zip 과 manifest.json 을 gpu-pack-v1 태그에 업로드한다.
 manifest.json 의 URL은 gpu_pack.rs 의 GPU_PACK_MANIFEST_URL 과 일치해야 한다.

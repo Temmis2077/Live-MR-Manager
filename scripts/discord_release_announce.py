@@ -12,7 +12,7 @@ import urllib.request
 from pathlib import Path
 
 DISCORD_DESC_LIMIT = 3800
-REPO = os.environ.get("GITHUB_REPOSITORY", "AutumnColor77/Live-MR-Manager")
+REPO = os.environ.get("GITHUB_REPOSITORY", "Temmis2077/OSW")
 ANNOUNCE_PATH = Path("DISCORD_ANNOUNCEMENTS.md")
 
 
@@ -77,7 +77,7 @@ def post_webhook(url: str, payload: dict) -> None:
         data=data,
         headers={
             "Content-Type": "application/json; charset=utf-8",
-            "User-Agent": "Live-MR-Manager-release-bot",
+            "User-Agent": "OSW-release-bot",
         },
         method="POST",
     )

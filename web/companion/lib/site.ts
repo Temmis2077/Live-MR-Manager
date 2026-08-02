@@ -27,7 +27,7 @@ export const GITHUB_ISSUES_FEATURE_URL = `${GITHUB_ISSUES_URL}/new?template=feat
 
 /** 앱 OAuth 콜백 (웹 PKCE 쿠키가 없을 때만 사용) */
 export const APP_SCHEME =
-  process.env.NEXT_PUBLIC_APP_SCHEME ?? "live-mr-manager";
+  process.env.NEXT_PUBLIC_APP_SCHEME ?? "osw";
 
 export function appOAuthCallbackUrl(params: {
   code?: string;

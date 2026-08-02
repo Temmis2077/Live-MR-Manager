@@ -16,7 +16,7 @@
 | :--- | :--- |
 | GPU 가속 팩 | **필수** — 이 모델은 CPU로 돌리면 비현실적으로 느려서, 팩이 없으면 시도 자체를 건너뜁니다 → [GPU_ACCELERATION.md](GPU_ACCELERATION.md) |
 | 모델 | Mel-Band RoFormer 디리버브 ONNX (약 940MB) |
-| 위치 | `%LOCALAPPDATA%\LiveMRManager\tools\dereverb\dereverb_mel_band_roformer.onnx` |
+| 위치 | `%LOCALAPPDATA%\LiveMRManager\tools\dereverb\dereverb_mel_band_roformer.onnx` (기존 설치 자산을 재사용하는 레거시 호환 공유 캐시) |
 
 앱의 `AI 가사 정렬` 섹션에서 상태를 확인할 수 있습니다:
 

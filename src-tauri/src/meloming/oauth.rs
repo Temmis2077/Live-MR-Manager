@@ -21,6 +21,12 @@ use super::settings::{
 pub const REDIRECT_URI: &str = "https://lmrm.vercel.app/oauth/callback";
 pub const COMPANION_EXCHANGE_URL: &str = "https://lmrm.vercel.app/api/oauth/exchange";
 pub const COMPANION_REFRESH_URL: &str = "https://lmrm.vercel.app/api/oauth/refresh";
+const APP_DEEP_LINK_SCHEME: &str = "osw";
+const LEGACY_DEEP_LINK_SCHEME: &str = "live-mr-manager";
+
+fn is_supported_deep_link_scheme(scheme: &str) -> bool {
+    scheme == APP_DEEP_LINK_SCHEME || scheme == LEGACY_DEEP_LINK_SCHEME
+}
 /// 개발자 센터 OAuth Client 생성 시 허용한 scope와 동일하게 맞출 것.
 pub const OAUTH_SCOPE: &str = "profile:read channels:read songbook:read songbook:write";
 
@@ -587,7 +593,7 @@ pub fn handle_deep_link(app: &AppHandle, url: &str) {
             return;
         }
     };
-    if parsed.scheme() != "live-mr-manager" {
+    if !is_supported_deep_link_scheme(parsed.scheme()) {
         return;
     }
     if parsed.host_str() != Some("oauth") || parsed.path() != "/callback" {
@@ -631,4 +637,17 @@ pub fn handle_deep_link(app: &AppHandle, url: &str) {
         };
         let _ = handle.emit("meloming-oauth-complete", payload);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_supported_deep_link_scheme;
+
+    #[test]
+    fn accepts_osw_and_legacy_deep_link_schemes_only() {
+        assert!(is_supported_deep_link_scheme("osw"));
+        assert!(is_supported_deep_link_scheme("live-mr-manager"));
+        assert!(!is_supported_deep_link_scheme("http"));
+        assert!(!is_supported_deep_link_scheme("live-mr-manager-mod"));
+    }
 }

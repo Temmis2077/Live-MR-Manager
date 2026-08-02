@@ -6,9 +6,15 @@ import sqlite3
 import urllib.error
 import urllib.request
 
-DB = os.path.expandvars(
-    r"%LOCALAPPDATA%\com.autumncolor77.live-mr-manager\library.db"
-)
+def resolve_db() -> str:
+    roots = ("com.osw.desktop", "com.autumncolor77.live-mr-manager")
+    candidates = [
+        os.path.expandvars(rf"%LOCALAPPDATA%\{root}\library.db") for root in roots
+    ]
+    return next((path for path in candidates if os.path.isfile(path)), candidates[0])
+
+
+DB = resolve_db()
 CHANNEL_ID = 2681
 EXISTING_SONG_ID = 273443
 CRAYON_NUT_ARTIST_ID = 168415
@@ -62,7 +68,7 @@ def main() -> None:
         base,
         token,
         {
-            "title": "Live MR Manager API test (delete me)",
+            "title": "OSW API test (delete me)",
             "artistId": CRAYON_NUT_ARTIST_ID,
         },
     )
