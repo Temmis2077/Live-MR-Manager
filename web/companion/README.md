@@ -57,7 +57,8 @@ NEXT_PUBLIC_DISCORD_INVITE_URL=https://discord.gg/qfJnk3VJyf
 
 배포 앱 로그인: **Client Secret은 Vercel에만** 두고, 데스크톱 릴리스는 GitHub secret `MELOMING_CLIENT_ID`만 바이너리에 임베드합니다. 앱은 Secret이 없으면 Companion `/api/oauth/exchange`·`/api/oauth/refresh`로 토큰을 교환합니다.
 
-문의 채널·Discord 서버 설정: [`docs/DISCORD_SETUP.md`](../../docs/DISCORD_SETUP.md)
+문의 채널과 Discord 주소는 [GitHub 이슈 안내 설정](../../.github/ISSUE_TEMPLATE/config.yml)과
+Companion의 `/qa` 페이지에서 함께 관리합니다.
 
 ## GitHub Issues
 
@@ -66,12 +67,13 @@ NEXT_PUBLIC_DISCORD_INVITE_URL=https://discord.gg/qfJnk3VJyf
 ## Vercel 배포
 
 1. Vercel에서 이 폴더(`web/companion`)를 루트로 import
-2. 프로덕션 URL: `https://lmrm.vercel.app`
+2. 공개 안내 URL: `https://companion-six-kappa.vercel.app`
+   - OAuth Redirect URI는 멜로밍에 등록된 기존 `https://lmrm.vercel.app/oauth/callback`을 새 엔드포인트 등록 전까지 유지합니다.
 3. 멜로밍 개발자 센터:
-   - **iframe URL**: `https://lmrm.vercel.app/`
+   - **iframe URL**: `https://companion-six-kappa.vercel.app/`
    - **Redirect URI**: `https://lmrm.vercel.app/oauth/callback` (끝 `/` 없음, `https`)
 
-## OAuth 상태 (2026-07, v0.5.1)
+## OAuth 상태 (2026-07, Legacy v0.5.1 기준)
 
 - authorize·code·콜백 분기: 동작
 - **배포 앱**: Client ID는 릴리스 바이너리 임베드, Client Secret은 Vercel만 → Companion `/api/oauth/exchange`·`/api/oauth/refresh`
