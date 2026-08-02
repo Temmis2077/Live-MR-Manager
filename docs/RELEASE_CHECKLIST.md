@@ -28,7 +28,7 @@ cd src-tauri && cargo test --lib
 
 - [ ] 창 최소 크기(1024px)와 1280px에서 가로 스크롤이 없다
 - [ ] 기능 없는 버튼이 노출되지 않는다 (녹음 콘솔은 잠긴 상태)
-- [ ] 옛 브랜드 문자열(`Live MR Manager`, `Mod`, 옛 버전 번호)이 화면에 없다
+- [ ] Legacy 호환·마이그레이션 안내 외에 옛 제품명이나 버전 번호가 화면에 없다
 - [ ] 멜로밍 관련 UI가 노출되지 않는다
 
 ## 4. 첫 실행 경로 (새 PC / 새 사용자 기준)
@@ -65,6 +65,7 @@ grep -rn "releases/download" src-tauri/src/*.rs | grep -v yt-dlp
 - [ ] `RELEASE_NOTES.md`에 이번 버전 항목이 있다
 - [ ] 새 서드파티를 추가했다면 `docs/THIRD-PARTY.md`에 적었다
 - [ ] README의 기능 설명이 실제 동작과 맞는다
+- [ ] README의 배포 상태가 GitHub Releases의 실제 공개 자산과 맞는다
 
 ## 7. 태그 밀기
 

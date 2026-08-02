@@ -294,7 +294,7 @@ sequenceDiagram
 - Companion `/oauth/callback`: `code`·`state` 파싱 → **웹 PKCE 세션** 또는 **커스텀 스킴**으로 분기
 - **토큰 교환**: 로컬에 Client Secret이 없으면 Companion `POST /api/oauth/exchange`·`/api/oauth/refresh` 사용 (Client Secret은 Vercel env만). 로컬 `.env`에 Secret이 있으면 멜로밍 직접 교환.
 - **배포 빌드**: GitHub Actions secret `MELOMING_CLIENT_ID` → 바이너리에 임베드. Secret은 앱에 넣지 않음.
-- Redirect URI (등록·코드 공통): `https://lmrm.vercel.app/oauth/callback`
+- Redirect URI (등록·코드 공통): `https://lmrm.vercel.app/oauth/callback` (배포 계약이 남아 있는 Legacy OAuth 엔드포인트)
 
 ### 6.7 OAuth·동기화 UI 상태 (2026-07-13, v0.5.1)
 
@@ -352,7 +352,7 @@ sequenceDiagram
 
 **등록 예시**
 
-- iframe: `https://lmrm.vercel.app/`
+- iframe: `https://companion-six-kappa.vercel.app/`
 - Redirect URI: `https://lmrm.vercel.app/oauth/callback`
 
 ### 7.2 레포 구조 (권장)
@@ -370,7 +370,7 @@ sequenceDiagram
   "version": "1.0.0-beta.1",
   "minSupportedVersion": "1.0.0-beta.1",
   "releaseUrl": "https://github.com/Temmis2077/OSW/releases/tag/v1.0.0-beta.1",
-  "changelogUrl": "https://lmrm.vercel.app/changelog#v1.0.0-beta.1",
+  "changelogUrl": "https://github.com/Temmis2077/OSW/blob/main/RELEASE_NOTES.md",
   "notes": "OSW 독립 베타 릴리즈 — Client ID 임베드 + Companion 토큰 프록시 …",
   "publishedAt": "2026-07-13T00:00:00Z",
   "critical": false
@@ -569,7 +569,7 @@ flowchart LR
 | 리스크 | 완화 |
 |--------|------|
 | 앱등록 링크 → 미니앱 페이지 | 2A 전제, 경로 B/C |
-| OAuth 심사·토큰 500/401 | 2A·멜로밍 지원; 동기화는 `MELOMING_SYNC_COMING_SOON` (v0.4.15) |
+| OAuth 심사·토큰 500/401 | 2A·멜로밍 지원; Legacy `v0.4.15`에서는 `MELOMING_SYNC_COMING_SOON` |
 | KEY/BPM 미저장 | Phase 0 필수 |
 | `artistId` 필수 | Map + 선택 UI |
 | 아티스트 생성 API 없음 | 멜로밍 웹 선등록 안내 |

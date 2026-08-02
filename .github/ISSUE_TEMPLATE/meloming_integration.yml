@@ -8,7 +8,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        [FAQ — 채널 주소](https://lmrm.vercel.app/faq#channel-id)를 먼저 확인해 주세요.
+        [FAQ — 채널 주소](https://companion-six-kappa.vercel.app/faq#channel-id)를 먼저 확인해 주세요.
         **OAuth access token·refresh token·Client Secret은 올리지 마세요.**
 
   - type: dropdown
@@ -28,7 +28,7 @@ body:
     id: app_version
     attributes:
       label: 앱 버전
-      placeholder: v0.4.15
+      placeholder: v1.0.0-beta.1
     validations:
       required: true
 

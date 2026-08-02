@@ -20,7 +20,7 @@ export default function PrivacyPage() {
           <span className="badge">법적 고지</span>
           <h1>개인정보 처리방침</h1>
           <p>
-            OSW 데스크톱 앱과 Companion 웹(lmrm.vercel.app)에서
+            OSW 데스크톱 앱과 OSW Companion에서
             처리하는 정보의 범위와 목적을 안내합니다. 시행일:{" "}
             {PRIVACY_EFFECTIVE_DATE}
           </p>

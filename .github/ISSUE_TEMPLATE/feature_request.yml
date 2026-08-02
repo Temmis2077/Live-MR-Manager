@@ -7,7 +7,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        기능 제안은 환영합니다. 빠른 질문은 [문의 허브](https://lmrm.vercel.app/qa)의 Discord를 이용해 주세요.
+        기능 제안은 환영합니다. 빠른 질문은 [문의 허브](https://companion-six-kappa.vercel.app/qa)의 Discord를 이용해 주세요.
+        **토큰·Client Secret·전체 로그는 올리지 마세요.**
 
   - type: textarea
     id: problem

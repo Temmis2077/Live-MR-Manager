@@ -18,7 +18,7 @@ OSW는 아래 프로젝트를 기반으로 출발한 **별개의 앱**이며 현
 
 | 프로젝트 | 라이선스 | 비고 |
 | --- | --- | --- |
-| [AutumnColor77/Live-MR-Manager](https://github.com/AutumnColor77/Live-MR-Manager) | MIT | 초기 오디오 엔진·AI 분리·라이브러리·OBS 오버레이의 설계·구현. 이후 전면 재작성했으나, MIT 조건에 따라 저작권 표시를 `LICENSE`에 함께 싣습니다. |
+| [AutumnColor77/Live-MR-Manager](https://github.com/AutumnColor77/Live-MR-Manager) | MIT | OSW가 기반으로 사용한 초기 오디오 엔진·AI 분리·라이브러리·OBS 오버레이의 설계·구현. MIT 조건에 따라 저작권 표시를 `LICENSE`에 함께 싣습니다. |
 
 ---
 

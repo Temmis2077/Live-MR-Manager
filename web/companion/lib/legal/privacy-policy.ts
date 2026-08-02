@@ -3,7 +3,7 @@ export const PRIVACY_EFFECTIVE_DATE = "2026년 6월 27일";
 export const GITHUB_ISSUES_URL =
   "https://github.com/Temmis2077/OSW/issues";
 
-export const QA_URL = "https://lmrm.vercel.app/qa";
+export const QA_URL = "https://companion-six-kappa.vercel.app/qa";
 
 export type LegalTable = {
   headers: string[];
@@ -24,7 +24,7 @@ export const PRIVACY_SECTIONS: LegalSection[] = [
     id: "intro",
     title: "1. 총칙",
     paragraphs: [
-      "OSW(이하 「서비스」)는 Windows 데스크톱 앱과 Companion 웹사이트(lmrm.vercel.app)를 통해 방송·연습용 MR 관리 및 멜로밍 노래책 연동 안내를 제공합니다.",
+      "OSW(이하 「서비스」)는 Windows 데스크톱 앱과 OSW Companion을 통해 방송·연습용 MR 관리 및 멜로밍 노래책 연동 안내를 제공합니다.",
       "본 개인정보 처리방침은 서비스 이용 과정에서 처리되는 정보의 범위, 목적, 보유 기간 등을 설명합니다.",
       "개인정보 처리자: 총괄 프로듀싱 Temmis2077",
       `시행일: ${PRIVACY_EFFECTIVE_DATE}`,
