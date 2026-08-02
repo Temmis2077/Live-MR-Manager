@@ -35,59 +35,79 @@ const OVERLAY_PRESETS = {
     scale: 1.0, font: 'Pretendard', color: '8b5cf6', textColor: 'ffffff',
     bgOpacity: 0.6, rounding: 20, bgColor: '0f0f14', animationDirection: 'left', fontSize: 22,
     effectFloat: true, effectGlow: false,
+    // 카드가 있으니 외곽선은 필요 없다. 그림자로 배경에서 살짝 띄운다.
+    design: { outlineWidth: 0, outlineColor: '000000', shadow: 0.5, gradient: true, gradientColor: '1a1a2e' },
     visibility: { ...ALL_ON },
   },
   minimal: {
     label: '미니멀', desc: '박스 없이 텍스트만 · 담백하게',
     scale: 1.0, font: 'Inter', color: 'a78bfa', textColor: 'ffffff',
-    bgOpacity: 0.1, rounding: 10, bgColor: '000000', animationDirection: 'top', fontSize: 24,
+    bgOpacity: 0.0, rounding: 10, bgColor: '000000', animationDirection: 'top', fontSize: 24,
     effectFloat: false, effectGlow: false,
-    // 카드를 끄면 라벨까지 남기는 건 지저분하다 — 제목·가수만 남긴다.
+    // 카드를 없앤 만큼 얇은 외곽선으로 최소한의 가독성을 확보한다.
+    design: { outlineWidth: 1.5, outlineColor: '000000', shadow: 0.3, gradient: false, gradientColor: '000000' },
     visibility: { ...ALL_ON, card: false, label: false },
   },
   stage: {
-    label: '스테이지', desc: '굵고 선명하게 · 노래방 감성',
+    label: '스테이지', desc: '굵은 외곽선 · 노래방 캡션',
     scale: 1.2, font: 'SUITE', color: 'ec4899', textColor: 'ffffff',
-    bgOpacity: 0.9, rounding: 30, bgColor: '1a0b2e', animationDirection: 'bottom', fontSize: 27,
-    effectFloat: false, effectGlow: true,
-    visibility: { ...ALL_ON },
+    bgOpacity: 0.0, rounding: 30, bgColor: '1a0b2e', animationDirection: 'bottom', fontSize: 28,
+    effectFloat: false, effectGlow: false,
+    // 노래방 자막의 핵심은 두꺼운 검은 외곽선이다. 배경 없이 이것만으로 읽힌다.
+    design: { outlineWidth: 4, outlineColor: '000000', shadow: 0.6, gradient: false, gradientColor: '000000' },
+    visibility: { ...ALL_ON, card: false },
   },
   lyricsOnly: {
     label: '가사 집중', desc: '가사만 큼직하게 · 곡 정보는 최소',
     scale: 1.1, font: 'SUITE', color: 'ffffff', textColor: 'ffffff',
-    bgOpacity: 0.0, rounding: 10, bgColor: '000000', animationDirection: 'top', fontSize: 30,
+    bgOpacity: 0.0, rounding: 10, bgColor: '000000', animationDirection: 'top', fontSize: 32,
     effectFloat: false, effectGlow: false,
-    // 화면을 가사에 내주는 프리셋 — 커버·라벨·가수·다음 줄을 모두 접는다.
-    visibility: { card: false, cover: false, label: false, artist: false, keyBpm: false, nextLine: false },
+    design: { outlineWidth: 3, outlineColor: '000000', shadow: 0.5, gradient: false, gradientColor: '000000' },
+    visibility: { card: false, cover: false, label: false, artist: false, keyBpm: false, nextLine: false, progress: false },
   },
   titleOnly: {
     label: '제목만', desc: '커버·라벨 없이 곡 제목 한 줄',
     scale: 1.0, font: 'Pretendard', color: '8b5cf6', textColor: 'ffffff',
     bgOpacity: 0.5, rounding: 14, bgColor: '0f0f14', animationDirection: 'left', fontSize: 22,
     effectFloat: false, effectGlow: false,
-    visibility: { card: true, cover: false, label: false, artist: false, keyBpm: false, nextLine: true },
+    design: { outlineWidth: 0, outlineColor: '000000', shadow: 0.3, gradient: false, gradientColor: '000000' },
+    visibility: { card: true, cover: false, label: false, artist: false, keyBpm: false, nextLine: true, progress: true },
   },
   practice: {
-    label: '연습용', desc: '키·빠르기를 함께 표시 · 커버 연습에',
+    label: '연습용', desc: '키·빠르기·진행바를 함께 표시',
     scale: 1.0, font: 'Inter', color: '22c55e', textColor: 'ffffff',
     bgOpacity: 0.7, rounding: 12, bgColor: '0b1410', animationDirection: 'left', fontSize: 22,
     effectFloat: false, effectGlow: false,
-    // 원곡과 다르게 부를 때 시청자에게 알려주는 용도.
-    visibility: { ...ALL_ON, keyBpm: true },
+    // 연습 중에는 어디쯤인지가 중요해 진행바를 켠다.
+    design: { outlineWidth: 0, outlineColor: '000000', shadow: 0.4, gradient: true, gradientColor: '052e16' },
+    visibility: { ...ALL_ON, keyBpm: true, progress: true },
   },
   neon: {
-    label: '네온', desc: '진한 배경에 빛나는 글자 · 어두운 화면에',
+    label: '네온', desc: '빛나는 글자 · 어두운 화면에',
     scale: 1.1, font: 'SUITE', color: '38bdf8', textColor: 'ffffff',
-    bgOpacity: 0.8, rounding: 24, bgColor: '020617', animationDirection: 'bottom', fontSize: 26,
+    bgOpacity: 0.55, rounding: 24, bgColor: '020617', animationDirection: 'bottom', fontSize: 26,
     effectFloat: true, effectGlow: true,
-    visibility: { ...ALL_ON },
+    // 글로우와 외곽선을 함께 — 외곽선이 빛 번짐의 심을 만들어 준다.
+    design: { outlineWidth: 2, outlineColor: '020617', shadow: 0.7, gradient: true, gradientColor: '1e1b4b' },
+    visibility: { ...ALL_ON, progress: true },
   },
   paper: {
     label: '페이퍼', desc: '밝은 카드에 검은 글자 · 밝은 화면에',
     scale: 1.0, font: 'Pretendard', color: '9a6b3f', textColor: '1a1a1a',
-    bgOpacity: 0.9, rounding: 16, bgColor: 'f6f1e9', animationDirection: 'right', fontSize: 23,
+    bgOpacity: 0.92, rounding: 16, bgColor: 'f6f1e9', animationDirection: 'right', fontSize: 23,
     effectFloat: false, effectGlow: false,
+    // 밝은 카드에는 흰 외곽선이 오히려 지저분하다 — 외곽선 없이 옅은 그림자만.
+    design: { outlineWidth: 0, outlineColor: 'ffffff', shadow: 0.2, gradient: true, gradientColor: 'e7dccb' },
     visibility: { ...ALL_ON },
+  },
+  outline: {
+    label: '아웃라인', desc: '배경 없이 굵은 테두리 글자만',
+    scale: 1.05, font: 'SUITE', color: 'fbbf24', textColor: 'ffffff',
+    bgOpacity: 0.0, rounding: 8, bgColor: '000000', animationDirection: 'top', fontSize: 30,
+    effectFloat: false, effectGlow: false,
+    // 어떤 배경 위에도 얹을 수 있는 가장 안전한 조합.
+    design: { outlineWidth: 5, outlineColor: '111111', shadow: 0.6, gradient: false, gradientColor: '000000' },
+    visibility: { ...ALL_ON, card: false, label: false },
   },
 };
 
@@ -419,6 +439,21 @@ export function initOverlayListeners() {
     if (overlayEffectFloat) overlayEffectFloat.checked = !!preset.effectFloat;
     if (overlayEffectGlow) overlayEffectGlow.checked = !!preset.effectGlow;
 
+    // 디자인 축(외곽선·그림자·그라디언트)도 프리셋의 일부다. 이게 없으면
+    // 스테이지·아웃라인처럼 "배경 없이 외곽선으로 읽히는" 룩이 성립하지 않는다.
+    if (preset.design) {
+      const d = preset.design;
+      const put = (id, v) => { const el = document.getElementById(id); if (el && v !== undefined) el.value = v; };
+      put('overlay-outline-width', d.outlineWidth);
+      put('overlay-outline-color', d.outlineColor);
+      put('overlay-outline-color-native', `#${d.outlineColor}`);
+      put('overlay-shadow', d.shadow);
+      put('overlay-gradient-color', d.gradientColor);
+      put('overlay-gradient-color-native', `#${d.gradientColor}`);
+      const g = document.getElementById('overlay-gradient');
+      if (g) g.checked = d.gradient === true;
+    }
+
     // 표시 항목도 프리셋의 일부다 — "박스 없이 가사만" 같은 룩은 색·투명도만
     // 바꿔서는 안 되고 커버·라벨을 함께 꺼야 완성된다.
     if (preset.visibility) {
@@ -606,6 +641,8 @@ export function initOverlayListeners() {
     setVal('overlay-outline-color', d.outlineColor ?? '000000');
     setVal('overlay-shadow', d.shadow ?? 0);
     setVal('overlay-gradient-color', d.gradientColor ?? '000000');
+    setVal('overlay-outline-color-native', `#${d.outlineColor ?? '000000'}`);
+    setVal('overlay-gradient-color-native', `#${d.gradientColor ?? '000000'}`);
     const gradBox = document.getElementById('overlay-gradient');
     if (gradBox) gradBox.checked = d.gradient === true;
 
@@ -693,6 +730,21 @@ export function initOverlayListeners() {
     if (el) el.addEventListener('input', () => updateOverlaySettings());
   });
   document.getElementById('overlay-gradient')?.addEventListener('change', () => updateOverlaySettings());
+
+  // 색상 선택기 ↔ hex 입력 양방향 — 다른 색 항목과 같은 조작감을 준다.
+  [['overlay-outline-color'], ['overlay-gradient-color']].forEach(([hexId]) => {
+    const hex = document.getElementById(hexId);
+    const native = document.getElementById(`${hexId}-native`);
+    if (!hex || !native) return;
+    native.addEventListener('input', () => {
+      hex.value = native.value.replace('#', '').toLowerCase();
+      updateOverlaySettings();
+    });
+    hex.addEventListener('input', () => {
+      const v = hex.value.replace(/[^0-9a-fA-F]/g, '');
+      if (v.length === 6) native.value = `#${v}`;
+    });
+  });
 
   // 표시 항목 토글 — 바꾸면 바로 미리보기·방송에 반영된다
   document.querySelectorAll('.ov-vis-toggle').forEach((el) => {

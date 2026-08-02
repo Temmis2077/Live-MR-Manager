@@ -95,9 +95,17 @@
         }
 
         /* 글로우 — 박스 그림자 대신 텍스트에만 액센트 색 text-shadow 펄스 */
+        /* 글로우는 text-shadow를 쓰는데, 그냥 두면 외곽선 설정을 통째로
+           덮어써서 글로우를 켜는 순간 외곽선이 사라진다. 키프레임마다 외곽선을
+           함께 실어 둘이 공존하게 한다. */
         @keyframes text-glow-pulse {
-          0%, 100% { text-shadow: 0 0 0 transparent; }
-          50% { text-shadow: 0 0 24px rgb(var(--accent-rgb) / 0.7), 0 0 48px rgb(var(--accent-rgb) / 0.3); }
+          0%, 100% { text-shadow: var(--overlay-text-outline, 0 0 0 transparent); }
+          50% {
+            text-shadow:
+              var(--overlay-text-outline, 0 0 0 transparent),
+              0 0 24px rgb(var(--accent-rgb) / 0.7),
+              0 0 48px rgb(var(--accent-rgb) / 0.3);
+          }
         }
         .overlay-container.fx-glow .label,
         .overlay-container.fx-glow #title {
@@ -203,11 +211,15 @@
       padding: 8px 10px;
     }
 
+    /* 카드를 끄면 배경이 없어 글자가 배경에 묻힌다. 외곽선을 따로 주지 않은
+       사람을 위해 기본 그림자를 깔되, 외곽선 설정이 있으면 그쪽이 이겨야 하므로
+       변수의 '기본값' 자리에 넣는다(변수를 덮어쓰면 설정이 무시된다). */
     .overlay-container.no-card .label,
     .overlay-container.no-card #title,
     .overlay-container.no-card #artist,
     .overlay-container.no-card .key-bpm {
-      text-shadow: 0 2px 10px rgba(0, 0, 0, 0.85), 0 0 3px rgba(0, 0, 0, 0.9);
+      text-shadow: var(--overlay-text-outline,
+        0 2px 10px rgba(0, 0, 0, 0.85), 0 0 3px rgba(0, 0, 0, 0.9));
     }
 
     .overlay-container.no-label .label,

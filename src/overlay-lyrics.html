@@ -129,9 +129,15 @@
 
           /* 글로우 효과 — 박스 그림자 대신 현재 가사 줄에만 text-shadow 펄스.
              방향별 등장 애니메이션과 충돌하지 않도록 별도 요소에 적용한다. */
+          /* 외곽선을 함께 실어 글로우와 공존시킨다(아래 info 쪽과 같은 이유). */
           @keyframes text-glow-pulse {
-            0%, 100% { text-shadow: 0 2px 4px var(--text-shadow); }
-            50% { text-shadow: 0 0 24px rgb(var(--accent-rgb) / 0.7), 0 0 48px rgb(var(--accent-rgb) / 0.3); }
+            0%, 100% { text-shadow: var(--overlay-text-outline, 0 2px 4px var(--text-shadow)); }
+            50% {
+              text-shadow:
+                var(--overlay-text-outline, 0 0 0 transparent),
+                0 0 24px rgb(var(--accent-rgb) / 0.7),
+                0 0 48px rgb(var(--accent-rgb) / 0.3);
+            }
           }
           .overlay-container.fx-glow .lyric-line.current {
             animation: text-glow-pulse 2.2s ease-in-out infinite;
@@ -185,8 +191,11 @@
       box-shadow: none !important;
     }
 
+    /* 카드를 끄면 기본 그림자를 깔되, 외곽선 설정이 있으면 그쪽이 이긴다
+       (변수를 덮어쓰지 않고 기본값 자리에 둔다). */
     .overlay-container.no-card .lyric-line {
-      text-shadow: 0 2px 12px rgba(0, 0, 0, 0.9), 0 0 4px rgba(0, 0, 0, 0.9);
+      text-shadow: var(--overlay-text-outline,
+        0 2px 12px rgba(0, 0, 0, 0.9), 0 0 4px rgba(0, 0, 0, 0.9));
     }
 
     /* 다음 줄을 끄면 자리까지 없애 카드가 그만큼 낮아진다
