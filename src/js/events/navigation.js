@@ -6,6 +6,7 @@ import { elements } from '../ui/elements.js';
 import { renderLibrary } from '../ui/library.js';
 import { getAllWindows, WebviewWindow, emit } from '../tauri-bridge.js';
 import { updateBroadcastTasksControlVisibility } from '../ui/components.js';
+import { pushEntry, rememberScroll, back, forward, canGoBack, canGoForward } from '../nav-history.js';
 
 export function initNavigation() {
   document.querySelectorAll(".nav-item").forEach(item => {
@@ -49,7 +50,7 @@ export function initNavigation() {
   }
 }
 
-export function switchTab(tabId) {
+export function switchTab(tabId, options = {}) {
   // 오버레이 설정은 화면이 아니다. 예전 코드가 탭으로 열려고 하면 빈 화면이
   // 되므로 여기서 패널로 돌려보낸다(진입 경로를 하나로 유지).
   if (tabId === "overlay") {
@@ -61,6 +62,14 @@ export function switchTab(tabId) {
   // 떠 있는 오버레이 설정 패널을 먼저 닫는다 — 패널이 #overlay-tab 노드를
   // 자기 안으로 옮겨 두므로, 닫아서 제자리로 돌려야 다른 화면이 정상이다.
   import('../ui/overlay-float.js').then((m) => m.close()).catch(() => {});
+
+  // 화면을 떠나기 직전의 스크롤 위치를 지금 화면 기록에 남긴다 — 뒤로가기로
+  // 돌아왔을 때 보던 자리에서 이어지게 하기 위해서다. 뒤로/앞으로가 부른
+  // 전환은 스택을 다시 밀면 안 되므로 건너뛴다.
+  if (!options.fromHistory) {
+    rememberScroll(elements.scrollArea?.scrollTop ?? 0);
+    pushEntry(tabId);
+  }
 
   state.activeView = tabId;
 
@@ -96,6 +105,14 @@ export function switchTab(tabId) {
   updateBroadcastTasksControlVisibility();
 
   if (elements.settingsPage) elements.settingsPage.style.display = tabId === "settings" ? "block" : "none";
+
+  // 설정에 들어올 때마다 하위 탭을 다시 적용한다 — 앱 시작 때 한 번만 칠하면
+  // 그 뒤 다른 코드가 섹션 hidden을 건드렸을 때 되돌릴 기회가 없어, 설정이
+  // 다시 긴 리스트가 된다(이 화면이 리스트로 되돌아간 재발 원인 중 하나).
+  if (tabId === "settings") {
+    import('./settings-tabs.js').then((m) => m.refreshSettingsTabs())
+      .catch((err) => console.error('[Settings] tabs refresh failed:', err));
+  }
 
   // 라이브(공연 리모컨) — 보일 때만 갱신 루프를 돌린다.
   if (elements.livePage) {
@@ -175,11 +192,46 @@ export function switchTab(tabId) {
     import('../ui/components.js').then(({ updateTaskUI }) => updateTaskUI());
   }
 
-  // Reset scroll position when switching tabs
+  // 스크롤 — 새로 들어가는 화면은 맨 위에서, 뒤로/앞으로로 돌아온 화면은
+  // 떠날 때 보던 자리에서 시작한다.
   if (elements.scrollArea) {
-    elements.scrollArea.scrollTop = 0;
+    const target = options.fromHistory ? (options.restoreScroll || 0) : 0;
+    elements.scrollArea.scrollTop = target;
+    // 목록을 비동기로 채우는 화면(가사 싱크 등)은 이 시점에 아직 높이가
+    // 없어서 위 대입이 먹지 않는다. 한 프레임 뒤에 한 번 더 맞춘다.
+    if (target > 0) {
+      requestAnimationFrame(() => {
+        if (elements.scrollArea && elements.scrollArea.scrollTop !== target) {
+          elements.scrollArea.scrollTop = target;
+        }
+      });
+    }
   }
 }
+
+/**
+ * 히스토리를 따라 이동한다. 커서를 옮기기 전에 지금 화면의 스크롤을 먼저
+ * 기록해야 한다 — 그래야 뒤로 갔다가 다시 앞으로 왔을 때도 자리가 유지된다.
+ */
+function travel(step) {
+  rememberScroll(elements.scrollArea?.scrollTop ?? 0);
+  const entry = step();
+  if (!entry) return false;
+  switchTab(entry.view, { fromHistory: true, restoreScroll: entry.scroll });
+  return true;
+}
+
+/** 뒤로 한 칸. 갈 곳이 없으면 아무 일도 하지 않는다. */
+export function goBackView() {
+  return travel(back);
+}
+
+/** 앞으로 한 칸. */
+export function goForwardView() {
+  return travel(forward);
+}
+
+export { canGoBack, canGoForward };
 
 export async function openAlignmentForTrack(path, options = {}) {
   const forceLoad = options.forceLoad === true;
