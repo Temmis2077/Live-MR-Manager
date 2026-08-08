@@ -390,6 +390,41 @@ export function initOverlayListeners() {
   /** 기본값 복원 — 기준서 5: "기본값을 쉽게 복원할 수 있어야 합니다".
    *  오버레이 설정은 곡 정보/가사 구분 없이 하나로 저장되므로(통합 구조),
    *  스타일 값만 지우고 '상시 표시'처럼 스타일이 아닌 설정은 남긴다. */
+  // ── 가사 타이밍 보정 ──────────────────────────────────────
+  // 값은 lyric-drawer.js가 들고 적용한다(오버레이·라이브 패널이 같은 시간을
+  // 보게 하려면 적용 지점이 하나여야 한다). 여기서는 조작만 한다.
+  (async () => {
+    const slider = document.getElementById('lyric-offset-slider');
+    const label = document.getElementById('lyric-offset-val');
+    const resetBtn = document.getElementById('lyric-offset-reset');
+    if (!slider) return;
+
+    const { getLyricOffsetMs, setLyricOffsetMs } = await import('../../lyric-drawer.js');
+
+    const paint = (v) => {
+      if (label) {
+        label.textContent = `${v > 0 ? '+' : ''}${v} ms`;
+        label.classList.toggle('changed', v !== 0);
+      }
+      slider.setAttribute('aria-valuetext', `${v} 밀리초`);
+    };
+
+    const cur = getLyricOffsetMs();
+    slider.value = String(cur);
+    paint(cur);
+
+    slider.addEventListener('input', () => {
+      paint(setLyricOffsetMs(slider.value));
+    });
+
+    if (resetBtn) {
+      resetBtn.addEventListener('click', () => {
+        slider.value = '0';
+        paint(setLyricOffsetMs(0));
+      });
+    }
+  })();
+
   document.getElementById('btn-overlay-reset')?.addEventListener('click', async () => {
     if (!confirm('오버레이 디자인을 기본값으로 되돌릴까요?\n(색·크기·글씨체·애니메이션이 처음 상태로 돌아갑니다)')) return;
 

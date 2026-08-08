@@ -77,7 +77,8 @@
       
       min-width: 400px;
       max-width: 90vw;
-      min-height: 96px;
+      /* 카드 최소 높이도 글자 크기를 따라간다 — 고정 96px이면 큰 글자에서 넘친다 */
+      min-height: max(96px, calc(var(--lyric-font-size) * 4.4));
       text-align: center;
 
       transition: opacity 0.35s ease, border-radius 0.3s ease, background 0.3s ease;
@@ -150,9 +151,10 @@
       width: 100%;
       animation: fadeIn 0.5s ease-out forwards;
       align-items: center;
+      /* 높이를 고정하지 않는다. 3줄 모드(원문/차음/번역)나 큰 글자에서는
+         내용이 두 줄 높이를 넘는데, 고정하면 그만큼 잘려 나갔다.
+         최소 높이만 잡아 짧은 가사에서도 카드가 덜컹이지 않게 한다. */
       min-height: calc(var(--lyric-current-height) + var(--lyric-next-height) + var(--lyric-lines-gap));
-      height: calc(var(--lyric-current-height) + var(--lyric-next-height) + var(--lyric-lines-gap));
-      overflow: hidden;
       position: relative;
     }
     
@@ -174,10 +176,7 @@
       line-height: 1.35;
       font-weight: 700;
       text-shadow: 0 2px 4px var(--text-shadow);
-      height: var(--lyric-current-height);
       min-height: var(--lyric-current-height);
-      max-height: var(--lyric-current-height);
-      overflow: hidden;
     }
 
     /* ── 표시 항목 끄기 (설정의 '화면에 보여줄 것') ──────────────────
@@ -220,15 +219,12 @@
       font-size: calc(var(--lyric-font-size) * 0.73);
       margin-top: 4px;
       line-height: 1.35;
-      height: var(--lyric-next-height);
       min-height: var(--lyric-next-height);
-      max-height: var(--lyric-next-height);
-      overflow: hidden;
     }
 
-    /* 3줄(원문/차음/번역) 모드에서 2줄 이상이 한 슬롯에 들어갈 때 — 고정
-       높이 박스 안에 단일 줄 기준 폰트 크기를 그대로 쓰면 잘리거나 겹쳐서
-       가독성이 떨어짐. 줄 수에 맞춰 기준 폰트를 줄이고 줄간격도 좁힌다.
+    /* 3줄(원문/차음/번역) 모드에서 2줄 이상이 한 슬롯에 들어갈 때 —
+       한 줄 기준 폰트 크기를 그대로 쓰면 카드가 지나치게 커질 수 있어
+       줄 수에 맞춰 기준 폰트를 조금 줄이고 줄간격도 좁힌다.
        (하위 줄은 lyric-drawer.js의 displayText()가 0.7em 인라인 스타일로
        이미 상대적으로 더 작게 렌더링하므로, 여기서는 컨테이너 기준값만 조정) */
     .lyric-line.current.multi-line {
@@ -267,6 +263,24 @@
     }
 
     @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+    /* 줄 전환 — 글자만 짧게 번진다. 카드 등장(lyrics-pop-*)과 분리해서,
+       줄이 바뀔 때 표시가 등장 애니메이션을 기다리지 않게 한다. */
+    @keyframes lyric-line-swap {
+      0%   { opacity: 0.35; transform: translateY(3px); }
+      100% { opacity: 1;    transform: translateY(0); }
+    }
+    .lyric-line.line-swap {
+      animation: lyric-line-swap 0.14s ease-out both;
+    }
+
+    /* 움직임을 줄여 달라고 한 사용자에게는 전부 즉시 바꾼다. */
+    @media (prefers-reduced-motion: reduce) {
+      .overlay-container.visible,
+      .lyric-line.line-swap {
+        animation-duration: 0.01ms !important;
+      }
+    }
 
     @keyframes lyrics-pop-right {
       0% { transform: translate(calc(100% + var(--enter-gap-x)), -50%) scale(0.97); }
@@ -345,6 +359,16 @@
       // 잘리거나 겹치지 않게 한다(<br>로 조인되므로 그 존재 여부로 판단).
       lyricCurrent.classList.toggle('multi-line', /<br\s*\/?>/i.test(currentText || ''));
       lyricNext.classList.toggle('multi-line', /<br\s*\/?>/i.test(nextText || ''));
+
+      // 줄이 바뀔 때는 글자만 아주 짧게 번지듯 바꾼다(140ms). 내용은 이미
+      // 새 것으로 들어가 있으므로 표시가 애니메이션을 기다리지 않는다 —
+      // 카드 등장 애니메이션과 줄 전환을 분리하는 게 핵심이다.
+      if (currentText !== displayedCurrent) {
+        lyricCurrent.classList.remove('line-swap');
+        void lyricCurrent.offsetWidth; // 재시작을 위해 리플로우 강제
+        lyricCurrent.classList.add('line-swap');
+      }
+
       displayedCurrent = currentText || "";
       displayedNext = nextText || "";
     }
@@ -396,10 +420,15 @@
       overlay.classList.toggle('no-card', !on(vis.card));
       overlay.classList.toggle('no-next', !on(vis.nextLine ?? vis.next_line));
 
-      let duration = '0.85s';
-      if (direction === 'right' || direction === 'left') duration = '1.5s';
-      else duration = '0.7s';
-      document.documentElement.style.setProperty('--anim-duration', duration);
+      // 카드 등장 애니메이션 길이.
+      //
+      // 예전에는 좌/우 1.5초, 상/하 0.7초였다. 이 애니메이션은 카드 전체를
+      // 움직이므로 그동안 가사 글자도 같이 화면 밖에 있다 — 곡의 첫 줄과 곡
+      // 전환에서 "가사 블럭엔 이미 들어갔는데 화면엔 한참 뒤에 뜬다"의 실제
+      // 원인이었다. 등장인 걸 알아볼 만큼만 남기고 짧게 줄인다.
+      // 좌/우는 이동 거리가 길어 조금 더 준다.
+      const isHorizontal = direction === 'right' || direction === 'left';
+      document.documentElement.style.setProperty('--anim-duration', isHorizontal ? '0.34s' : '0.26s');
     }
 
     function updateOverlay(data) {

@@ -388,6 +388,16 @@
                 <span class="live-dot"></span>
                 <span class="live-ov-text" id="live-ov-text">가사 화면 꺼짐</span>
               </button>
+              <!-- 가사 타이밍 보정 — 어긋난 걸 알아채는 건 라이브 중이다.
+                   설정 화면까지 안 가고 여기서 바로 밀고 당긴다. -->
+              <div class="live-offset">
+                <button type="button" class="live-chip is-button live-offset-btn" id="live-offset-down"
+                        title="가사를 50ms 늦게" aria-label="가사를 50밀리초 늦게">−</button>
+                <button type="button" class="live-chip is-button live-offset-val" id="live-offset-val"
+                        title="클릭하면 보정을 0으로 되돌립니다" aria-label="가사 타이밍 보정 초기화">가사 0ms</button>
+                <button type="button" class="live-chip is-button live-offset-btn" id="live-offset-up"
+                        title="가사를 50ms 먼저" aria-label="가사를 50밀리초 먼저">＋</button>
+              </div>
               <button type="button" class="live-chip is-button" id="live-open-overlay">오버레이 설정</button>
             </div>
           </div>
@@ -903,6 +913,28 @@
                     </div>
                   </div>
                   </details>
+                </div>
+              </div>
+
+              <!-- 가사 타이밍 보정 — 출력 장치·OBS 캡처 경로마다 실제 지연이
+                   달라서 코드로 한 값을 정할 수 없다. 사용자가 맞추는 값. -->
+              <div class="ai-model-card ov-offset-card" style="margin-top: 16px;">
+                <div class="ai-info-left" style="width: 100%;">
+                  <div class="ai-title-large">가사 타이밍 보정</div>
+                  <div class="ai-model-desc">
+                    가사가 노래보다 늦게 뜨면 오른쪽(+)으로, 먼저 뜨면 왼쪽(−)으로 옮기세요.
+                    진행바와 남은 시간은 실제 재생 위치 그대로 유지됩니다.
+                  </div>
+
+                  <div class="ov-offset-row">
+                    <span class="ov-offset-end">−0.5초<br><small>늦게</small></span>
+                    <input type="range" id="lyric-offset-slider" class="range-slider"
+                           min="-500" max="500" step="10" value="0"
+                           aria-label="가사 타이밍 보정 (밀리초)">
+                    <span class="ov-offset-end">+0.5초<br><small>먼저</small></span>
+                    <span class="ov-offset-val" id="lyric-offset-val">0 ms</span>
+                    <button type="button" class="btn-ai-action secondary" id="lyric-offset-reset">0으로</button>
+                  </div>
                 </div>
               </div>
 

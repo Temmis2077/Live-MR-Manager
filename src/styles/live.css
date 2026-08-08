@@ -214,12 +214,20 @@
 
 /* ── 파형 ────────────────────────────────────────────────── */
 .live-wave {
-  display: flex;
-  align-items: flex-end;
-  gap: 2px;
+  position: relative;
   height: 104px;
   padding: 0 2px;
   cursor: pointer;
+  overflow: hidden;
+  border-radius: 8px;
+}
+
+.live-wave-bars {
+  position: absolute;
+  inset: 0 2px;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
 }
 
 .live-wave-bar {
@@ -231,6 +239,39 @@
 }
 
 .live-wave-bar.played { background: var(--accent-secondary); }
+
+.live-wave-region {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: rgba(245, 158, 11, 0.13);
+  border-inline: 1px solid rgba(245, 158, 11, 0.5);
+}
+
+.live-wave-vocal-start {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 3;
+  width: 2px;
+  pointer-events: none;
+  background: #34d399;
+  box-shadow: 0 0 10px rgba(52, 211, 153, 0.75);
+}
+
+.live-wave-cue {
+  min-height: 20px;
+  margin-top: 6px;
+  color: var(--text-dim);
+  font-size: 0.76rem;
+  font-weight: 650;
+}
+
+.live-wave-cue.soon { color: #34d399; }
+.live-wave-cue.instrumental { color: #fbbf24; }
+.live-wave-cue.missing-marker { color: #fbbf24; }
 
 .live-time {
   display: flex;
@@ -1140,6 +1181,386 @@
   font-weight: 500;
 }
 
+/* ── 수행자 중심 라이브 레이아웃 ────────────────────────────
+   중앙 가사와 진입 정보가 가장 먼저 읽히고, 조절·앨범아트는 보조 정보가 된다. */
+.live-main {
+  /* 떠 있는 조절 창의 기준 상자 */
+  position: relative;
+  gap: 9px;
+  padding: 12px 20px 14px;
+}
+
+.live-now { gap: 12px; }
+.live-art { width: 58px; height: 58px; border-radius: 10px; }
+.live-badges { margin-bottom: 3px; }
+.live-title { font-size: 1.25rem; line-height: 1.2; }
+.live-artist { font-size: 0.82rem; margin-top: 2px; }
+
+/* 화면낭독기 전용 텍스트. 이 규칙이 어디에도 없어서 aria-labelledby용
+   <h2 class="sr-only">가 24px 흰 글씨로 가사 한복판에 30px을 차지하고 있었다. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.live-performer {
+  position: relative;
+  /* 남는 세로 공간은 부르는 사람이 읽는 영역이 가져간다.
+     예전에는 모든 블록이 내용 높이로만 잡혀 1440x900에서 아래쪽 115px이
+     그냥 비어 있었고, 정작 현재 가사는 58px에 머물렀다. */
+  flex: 1 1 auto;
+  /* min-height를 고정값으로 주면 flex의 자동 최소 크기(= 내용 크기)를 덮어써,
+     내용이 그 값을 넘는 순간 카드 밖으로 새어 나간다. 여기서는 자동 최소가
+     정확히 원하는 동작이라 아무것도 지정하지 않는다. 카드가 넉넉해 보이는
+     것은 위의 flex-grow가 남는 공간을 가져오는 것으로 충분하다.
+     (max(170px, min-content)는 무효 — 수학 함수 안에 내재 크기 키워드는
+     쓸 수 없어 선언째 버려진다.) */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 14px 30px 12px;
+  text-align: center;
+  border-radius: 16px;
+  background: var(--surface-1);
+  border: 1px solid var(--glass-border);
+}
+
+.live-performer-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 28px;
+  margin-bottom: 6px;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+#live-section-label {
+  padding: 4px 9px;
+  border-radius: 7px;
+  background: var(--surface-3);
+}
+#live-section-label[data-kind="intro"],
+#live-section-label[data-kind="interlude"] { color: #fbbf24; }
+#live-section-label[data-kind="vocal-countdown"] { color: #34d399; }
+#live-entry-countdown.urgent { color: #34d399; font-size: 1rem; }
+
+.live-current-lyric {
+  --karaoke-progress: 0%;
+  position: relative;
+  /* 절대 눌리지 않는다. 원문+차음+번역 3줄을 켜면 이 블록이 237px을 요구하는데,
+     기본 flex-shrink 때문에 130px로 찌그러져 내용이 '다음 가사' 위에 겹쳐
+     그려졌다 — 부를 때 가장 먼저 읽어야 하는 줄이 먼저 망가지는 구조였다. */
+  flex: 0 0 auto;
+  width: 100%;
+  min-height: 54px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  color: var(--text-main);
+  /* 4vw까지 키워 봤더니 긴 일본어 원문이 두 줄로 접히면서 파형 카드를
+     최소치(44px)까지 밀어냈다. 글자 크기와 파형 해상도 둘 다 부를 때 쓰는
+     정보라, 한 줄에 들어가는 선에서 최대로 키운다. */
+  font-size: clamp(1.65rem, 3.6vw, 3.4rem);
+  font-weight: 850;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.live-karaoke-base,
+.live-karaoke-fill {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+
+.live-karaoke-base { color: var(--text-dim); }
+
+/* 아직 부르기 전 미리 띄운 줄. 진행도 0%라 이미 흐린 색이지만, "부르는 중인데
+   진행이 안 나간다"와 "아직 차례가 아니다"는 구분돼야 한다. */
+.live-current-lyric.pending { opacity: 0.66; }
+.live-karaoke-fill {
+  position: absolute;
+  inset: 0;
+  color: var(--accent-secondary);
+  clip-path: inset(0 calc(100% - var(--karaoke-progress)) 0 0);
+  filter: drop-shadow(0 0 7px rgb(var(--accent-rgb) / .24));
+  transition: clip-path .1s linear;
+  pointer-events: none;
+}
+
+.live-next-lyric {
+  flex: 0 0 auto;
+  min-height: 30px;
+  margin-top: 5px;
+  color: var(--text-muted);
+  font-size: clamp(1rem, 2vw, 1.75rem);
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.live-current-lyric .live-lyric-sub,
+.live-next-lyric .live-lyric-sub { font-size: 0.62em; }
+
+.live-next-timing { min-height: 19px; margin-top: 5px; color: var(--text-dim); font-size: 0.76rem; }
+
+.live-inline-action {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+/* 중앙의 '전체 가사' 버튼이 유일한 진입점이다. 예전 측면 손잡이는 중복이라 숨긴다. */
+.live-lyrics-show { display: none !important; }
+
+.live-timeline-card {
+  /* 가사가 길어지면 높이를 양보하는 쪽은 파형이다(캔버스는 매 프레임 CSS
+     크기를 다시 재므로 줄어든 만큼 그대로 다시 그린다). */
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  /* 긴 가사에 높이를 양보하되, 자기 내용 아래로는 눌리지 않는다.
+     min-height:0으로 바닥을 아예 없앴더니 조절 창(272px)을 펼칠 때 카드가
+     64px까지 찌그러져 파형·시간·안내가 카드 밖 94px까지 삐져나왔다. */
+  min-height: min-content;
+  padding: 7px 12px 5px;
+  border-radius: 14px;
+  background: var(--surface-1);
+  border: 1px solid var(--glass-border);
+}
+.live-timeline-head { flex:0 0 auto; display:flex; justify-content:space-between; gap:12px; margin-bottom:7px; font-size:.72rem; font-weight:750; color:var(--text-muted); }
+#live-wave-legend { color: var(--text-dim); font-weight: 550; }
+.live-lookahead { position:relative; flex:1 1 auto; height:86px; min-height:56px; overflow:hidden; border-radius:7px; background:var(--surface-2); border:1px solid var(--glass-border); }
+#live-wave-canvas { display:block; width:100%; height:100%; cursor:crosshair; }
+.live-wave { flex:0 0 auto; height: 26px; margin-top: 4px; }
+.live-time { flex:0 0 auto; margin-top: 5px; }
+.live-wave-cue { flex:0 0 auto; margin-top: 3px; min-height: 18px; }
+
+.live-transport { gap: 18px; }
+.live-tp-play { width: 58px; height: 58px; font-size: 1.3rem; box-shadow: 0 7px 22px rgb(var(--accent-rgb) / .28); }
+.live-tp-btn { width: 42px; height: 42px; }
+
+.live-control-summary {
+  display: grid;
+  /* 예전에는 끝에 '조절 펼치기' 버튼 칸(auto)이 하나 더 있었다. 이제 네
+     항목 자체가 조절 창을 여는 손잡이라 칸도 넷이면 된다. */
+  grid-template-columns: repeat(4, minmax(78px, 1fr));
+  gap: 8px;
+}
+.live-summary-item, .live-controls-toggle {
+  min-height: 42px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: var(--surface-1);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: .76rem;
+  cursor: pointer;
+}
+.live-summary-item strong { margin-left: 7px; color: var(--text-main); font-size: .92rem; }
+.live-summary-item.changed { border-color: rgb(var(--accent-rgb) / .48); }
+
+/* 조절 창을 열어 둔 동안 네 항목이 눌린 상태로 보이게 — 창이 어디서 나왔는지
+   눈으로 이어진다. */
+.live-summary-item[aria-expanded="true"] {
+  background: var(--surface-2);
+  color: var(--text-main);
+  border-color: rgb(var(--accent-rgb) / .35);
+}
+
+/* 지금 창이 가리키는 항목. 창 안에서 만진 카드를 따라 옮겨 다니고, 이 버튼을
+   누르면 창이 닫힌다 — 어느 버튼이 닫는 버튼인지 눈에 보여야 한다. */
+.live-summary-item.is-current {
+  border-color: var(--accent-primary);
+  box-shadow: inset 0 -2px 0 0 var(--accent-primary);
+}
+
+.live-summary-item.is-current strong { color: var(--accent-secondary); }
+.live-summary-item.changed strong { color: var(--accent-secondary); }
+.live-summary-item.muted strong { color: #f87171; text-decoration: line-through; }
+.live-controls-toggle { font-weight: 750; color: var(--text-main); }
+.live-controls-panel[hidden] { display: none !important; }
+
+/* 조절 창은 흐름에서 빼서 요약 바 위로 띄운다.
+   흐름 안에 두면 펼치는 순간 272px을 요구해 가사·파형이 그만큼 눌리고,
+   눌릴 자리가 없으면 본문이 165px 밀려 재생 버튼이 화면 밖으로 나갔다.
+   공연 중에 조절 한 번 하려고 화면 전체가 재배치되면 안 된다.
+   (장치 변경·OBS 오버레이 설정과 같은 방식) */
+.live-controls-panel {
+  position: absolute;
+  left: 20px;
+  right: 20px;
+  /* bottom은 .live-main의 패딩 상자 아래 끝(= 하단 패딩 바깥)에서 잰다.
+     아래에 쌓인 것을 전부 넘긴다 — 하단 패딩 14 + 상태줄 22 + gap 9 +
+     요약 바 42 + gap 9 + 전송부 58 + gap 9. 재생 버튼과 자기를 연 버튼까지
+     살려 두고, 조절하는 동안 가려지는 것은 파형뿐이다. */
+  bottom: calc(14px + 22px + 9px + 42px + 9px + 58px + 9px);
+  z-index: 6;
+  max-height: min(340px, calc(100% - 150px));
+  overflow-y: auto;
+  padding: 12px;
+  border-radius: 14px;
+  /* 흐름 안 카드는 --surface-1(불투명도 3~5%)로 배경 위에 옅게 얹히면 되지만,
+     이 패널은 파형·재생 버튼 위에 떠서 그 아래 내용이 계속 움직인다.
+     같은 옅은 배경을 쓰면 스위치·슬라이더 글자가 뒤에 비치는 것과 뒤섞여
+     거의 안 보였다. 앱이 드롭다운·플로팅 메뉴에 이미 쓰는 --menu-bg(불투명도
+     95%+)로 맞춘다. */
+  background: var(--menu-bg);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 -10px 30px rgba(0, 0, 0, .34);
+}
+
+.live-controls-panel .live-steppers + .live-volumes { margin-top: 10px; }
+
+/* 창 안에 닫기를 둔다 — 여는 곳(요약 항목)과 닫는 곳(이 버튼)이 따로다. */
+.live-controls-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.live-controls-head-title {
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.live-controls-close {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.8rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.live-controls-close:hover { color: var(--text-main); border-color: rgb(var(--accent-rgb) / .45); }
+.live-controls-close:focus-visible { outline: 2px solid var(--accent-secondary); outline-offset: 2px; }
+
+/* 누른 항목의 카드를 잠깐 짚어 준다 — 네 카드가 한 줄이라 어디로 왔는지 놓치기 쉽다. */
+.live-controls-panel .live-card.just-opened {
+  border-color: rgb(var(--accent-rgb) / .55);
+  box-shadow: 0 0 0 1px rgb(var(--accent-rgb) / .25);
+}
+.live-controls-panel .live-card { background: var(--surface-2); }
+
+/* 넓은 창에서는 네 카드(키·빠르기·믹스·모니터)를 한 줄에 놓아 판을 낮춘다.
+   두 줄로 쌓으면 272px이라 파형 위로 한참 올라와 가사까지 넘본다.
+   이 블록은 위의 margin-top 규칙보다 뒤에 와야 한다 — 앞에 두면 같은
+   명시도라 소스 순서에 밀려 오른쪽 묶음만 10px 내려앉는다. */
+@media (min-width: 1180px) {
+  .live-controls-panel {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    align-items: stretch;
+    gap: 14px;
+  }
+  .live-controls-panel .live-steppers + .live-volumes { margin-top: 0; }
+  .live-controls-head { grid-column: 1 / -1; margin-bottom: 0; }
+  /* 네 카드 높이를 한 줄로 맞춘다. 스테퍼 카드가 내용이 많아 10px 더 높았고,
+     그만큼 아래위 모서리가 들쭉날쭉했다. */
+  .live-controls-panel .live-steppers,
+  .live-controls-panel .live-volumes { grid-auto-rows: 1fr; }
+}
+
+.live-health { display:flex; justify-content:flex-end; gap:7px; min-height:22px; }
+.live-health span { padding:3px 7px; border-radius:6px; background:var(--surface-1); color:var(--text-dim); font-size:.68rem; }
+.live-health span.warn { color:#fbbf24; background:rgba(245,158,11,.1); }
+
+.live-queue { width: 356px; }
+.live-queue-subtitle { margin-top:3px; color:var(--text-dim); font-size:.66rem; }
+.live-q-item { align-items:flex-start; padding:10px; }
+.live-q-item.dragging { opacity:.45; }
+.live-q-item.drag-target { border-color:var(--accent-secondary); box-shadow:0 -2px 0 var(--accent-secondary); }
+.live-q-drag-handle { flex:none; width:25px; height:34px; padding:0; border:0; border-radius:6px; background:transparent; color:var(--text-dim); font-size:1.15rem; line-height:1; cursor:grab; touch-action:none; user-select:none; }
+.live-q-drag-handle:hover, .live-q-drag-handle:focus-visible { color:var(--text-main); background:var(--surface-2); }
+.live-q-drag-handle:active { cursor:grabbing; }
+.live-q-status { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
+.live-q-status span { padding:2px 5px; border-radius:4px; background:var(--surface-3); color:var(--text-dim); font-size:.6rem; font-weight:700; }
+.live-q-status .ready { color:#34d399; }
+.live-q-status .warn { color:#fbbf24; }
+.live-q-status .working { color:var(--accent-secondary); }
+.live-q-actions { display:flex; flex-direction:column; gap:4px; }
+.live-q-actions button { min-width:42px; height:24px; padding:0 6px; border:1px solid var(--glass-border); border-radius:6px; background:var(--surface-2); color:var(--text-muted); font:inherit; font-size:.62rem; cursor:pointer; }
+.live-q-actions button:hover, .live-q-actions button:focus-visible { color:var(--text-main); border-color:rgb(var(--accent-rgb) / .45); }
+.live-q-current-label { padding:4px 7px; border-radius:6px; color:var(--accent-secondary); background:rgb(var(--accent-rgb) / .12); font-size:.64rem; font-weight:800; }
+.live-queue-drawer-toggle { display:none; }
+
+@media (max-width: 1180px) {
+  .live-queue {
+    display:flex;
+    position:fixed;
+    z-index:40;
+    top:52px;
+    right:0;
+    bottom:var(--dock-height, 76px);
+    width:min(380px, 92vw);
+    transform:translateX(102%);
+    box-shadow:-18px 0 36px rgba(0,0,0,.28);
+    transition:transform .18s ease;
+  }
+  body.live-queue-drawer-open .live-queue { transform:translateX(0); }
+  .live-queue-drawer-toggle { display:block; position:fixed; z-index:41; right:16px; bottom:calc(var(--dock-height, 76px) + 14px); height:38px; padding:0 13px; border:1px solid var(--glass-border); border-radius:9px; background:var(--surface-2); color:var(--text-main); font:inherit; font-size:.75rem; font-weight:750; }
+  .live-lyrics { display:flex; position:fixed; z-index:39; top:52px; right:0; bottom:var(--dock-height, 76px); width:min(360px, 90vw); box-shadow:-18px 0 36px rgba(0,0,0,.28); }
+  .live-lyrics[hidden] { display:none; }
+  .live-lyrics-show { display:none; }
+}
+
+/* 세로가 짧은 창(1280x720 노트북 등) — 공연 중에 스크롤해서 재생 버튼을
+   찾는 일이 없어야 한다. 항목을 빼지 않고 여백만 조인다.
+   기본 배치에서는 720px 높이에서 52px이 접혀 아래쪽(상태 줄·재생 버튼)이
+   화면 밖으로 밀렸다. */
+@media (max-height: 820px) {
+  .live-main { gap:6px; padding:8px 20px 10px; }
+  .live-art { width:48px; height:48px; }
+  .live-title { font-size:1.12rem; }
+  .live-performer { padding:10px 30px 8px; }
+  .live-performer-status { min-height:24px; margin-bottom:3px; }
+  .live-timeline-card { padding:5px 12px 3px; }
+  /* 캔버스는 매 프레임 CSS 크기를 다시 재므로 높이만 줄이면 그대로 따라온다. */
+  .live-lookahead { height:64px; }
+  .live-transport { padding-block:4px; }
+  .live-health { margin-top:2px; }
+  .live-controls-panel { bottom: calc(10px + 24px + 6px + 42px + 6px + 66px + 6px); max-height: calc(100% - 190px); }
+}
+
+@media (max-width: 760px) {
+  .live-main { padding:12px; }
+  .live-performer { padding-inline:16px; }
+  .live-control-summary { grid-template-columns:repeat(2, minmax(0,1fr)); }
+  .live-controls-toggle { grid-column:1 / -1; }
+  .live-timeline-head #live-wave-legend { display:none; }
+}
+
 /* 보컬 음원 on/off — 가이드 보컬 카드 안의 작은 스위치.
    도크의 '보컬' 체크박스와 같은 값을 보여준다. */
 .live-vol-head-right {
@@ -1194,4 +1615,29 @@
 @media (prefers-reduced-motion: reduce) {
   .live-vocal-toggle,
   .live-vocal-knob { transition-duration: 0.01ms !important; }
+}
+
+/* 가사 타이밍 보정 칩 — 라이브 중에 바로 밀고 당긴다. */
+.live-offset {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.live-offset-btn {
+  min-width: 30px;
+  justify-content: center;
+  font-weight: 800;
+}
+
+.live-offset-val {
+  min-width: 92px;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 보정이 걸려 있으면 눈에 띄게 — 켜 둔 걸 잊고 방송하면 안 된다. */
+.live-offset-val.changed {
+  border-color: rgb(var(--accent-rgb) / 0.5);
+  color: var(--accent-secondary);
 }

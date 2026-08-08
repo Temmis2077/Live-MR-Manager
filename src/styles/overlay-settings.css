@@ -213,3 +213,44 @@
   /* 클릭은 위의 버튼이 받고, 이 input은 자리만 잡아 준다 */
   pointer-events: none;
 }
+
+/* 가사 타이밍 보정 */
+.ov-offset-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.ov-offset-row .range-slider {
+  flex: 1;
+  min-width: 160px;
+}
+
+.ov-offset-end {
+  font-size: 0.66rem;
+  color: var(--text-dim);
+  text-align: center;
+  line-height: 1.3;
+  flex: none;
+}
+
+.ov-offset-end small {
+  font-size: 0.58rem;
+  opacity: 0.75;
+}
+
+.ov-offset-val {
+  min-width: 66px;
+  text-align: right;
+  font-size: 0.76rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  flex: none;
+}
+
+.ov-offset-val.changed {
+  color: var(--accent-secondary);
+}

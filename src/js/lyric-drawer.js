@@ -5,6 +5,7 @@ import { listen, invoke } from './tauri-bridge.js';
 import { state } from './state.js';
 import { registerAppHandler, callAppHandler } from './app-context.js';
 import { getDisplayLines } from './lrc-parser.js';
+import { findUpcomingIndex } from './live-performance.js';
 
 let lastOverlayCurrent = null;
 let lastOverlayNext = null;
@@ -30,16 +31,55 @@ export function syncLyricDrawerHeader() {
  */
 let progressListenerBound = false;
 
+/**
+ * 가사 표시 보정(ms). 양수면 가사를 그만큼 **먼저** 띄운다.
+ *
+ * 출력 장치·OBS 캡처·모니터링 경로마다 실제 지연이 달라서, 코드로 한 값을
+ * 정해 둘 수가 없다. 사용자가 자기 환경에 맞춰 맞추는 값이다.
+ *
+ * 적용은 여기 한 곳에서만 한다 — 오버레이와 라이브 가사 패널이 같은
+ * syncLyricsWithTime을 통해 갈라지므로, 여기서 더하면 두 화면이 항상 같은
+ * 시간을 본다. 화면마다 따로 더하면 어긋난다.
+ */
+export const LYRIC_OFFSET_KEY = 'lyricOffsetMs';
+export const LYRIC_OFFSET_MAX = 500;
+
+export function getLyricOffsetMs() {
+    const raw = Number(localStorage.getItem(LYRIC_OFFSET_KEY));
+    if (!Number.isFinite(raw)) return 0;
+    return Math.max(-LYRIC_OFFSET_MAX, Math.min(LYRIC_OFFSET_MAX, Math.round(raw)));
+}
+
+export function setLyricOffsetMs(ms) {
+    const v = Math.max(-LYRIC_OFFSET_MAX, Math.min(LYRIC_OFFSET_MAX, Math.round(Number(ms) || 0)));
+    localStorage.setItem(LYRIC_OFFSET_KEY, String(v));
+    // 멈춰 있어도 바꾼 값이 바로 보이게 마지막 위치로 다시 계산한다.
+    if (Number.isFinite(lastPositionMs)) applyProgress(lastPositionMs, lastDurationMs);
+    return v;
+}
+
+let lastPositionMs = NaN;
+let lastDurationMs = 0;
+
+function applyProgress(positionMs, durationMs) {
+    lastPositionMs = positionMs;
+    lastDurationMs = durationMs;
+    // 보정은 가사 판정에만 쓴다. 진행바·시간 표시는 실제 재생 위치를 그대로
+    // 보여줘야 한다 — 사용자가 보정을 걸었다고 남은 시간이 달라지면 안 된다.
+    const shifted = positionMs + getLyricOffsetMs();
+    syncLyricsWithTime(Math.max(0, shifted) / 1000);
+    // 오버레이 진행바 — 오버레이가 스스로 시간을 세지 않고 앱이 알려주는
+    // 위치만 그린다(두 화면이 어긋나면 안 된다).
+    invoke('update_overlay_progress', { positionMs, durationMs }).catch(() => {});
+}
+
 export function bindLyricProgressListener() {
     if (progressListenerBound) return;
     progressListenerBound = true;
     listen('playback-progress', (event) => {
         const positionMs = event.payload.positionMs ?? event.payload.position_ms ?? 0;
         const durationMs = event.payload.durationMs ?? event.payload.duration_ms ?? 0;
-        syncLyricsWithTime(positionMs / 1000);
-        // 오버레이 진행바 — 오버레이가 스스로 시간을 세지 않고 앱이 알려주는
-        // 위치만 그린다(두 화면이 어긋나면 안 된다).
-        invoke('update_overlay_progress', { positionMs, durationMs }).catch(() => {});
+        applyProgress(positionMs, durationMs);
     });
 }
 
@@ -189,12 +229,17 @@ export function initLyricDrawer() {
     };
     registerAppHandler('goToLyricSyncForCurrentTrack', goToLyricSyncForCurrentTrack);
 
-    // Optional: Close drawer on Escape key
-    window.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && body.classList.contains('drawer-open')) {
-            body.classList.remove('drawer-open');
-            updateDrawerBounds();
-        }
+    // Esc로 드로어 닫기.
+    //
+    // 드로어는 모달이 아니라 오래 열어 두는 옆 패널이라 layer-stack에 올리지
+    // 않는다(올리면 열려 있는 내내 화면 단축키가 막힌다). 대신 위에 뜬 것이
+    // 있으면 그쪽에 Esc를 양보한다 — 모달을 닫으려다 드로어까지 닫히면 곤란하다.
+    window.addEventListener('keydown', async (e) => {
+        if (e.key !== 'Escape' || !body.classList.contains('drawer-open')) return;
+        const { hasOpenLayer } = await import('./ui/layer-stack.js');
+        if (hasOpenLayer()) return;
+        body.classList.remove('drawer-open');
+        updateDrawerBounds();
     });
 
     window.addEventListener('resize', updateDrawerBounds);
@@ -324,12 +369,17 @@ function syncLyricsWithTime(currentTime) {
     // 떠 있었다. 편집기에서 찍어 둔 구간 마커를 기준으로 삼는다.
     const inInstrumental = isInInstrumental(currentTime);
 
+    // 부르는 줄이 없는 구간(줄 사이)에서 다음 줄을 곡의 첫 줄(lyrics[0])로
+    // 잡고 있었다. 노래 중반 간주에도 오버레이에 1절 첫 줄이 "다음 가사"로
+    // 떠 있었다는 뜻이다. 판정은 live-performance.js 한 곳에서만 한다 —
+    // 라이브 화면도 같은 버그를 따로 갖고 있었다.
+    const upcomingIndex = playingIndex !== -1
+        ? playingIndex + 1
+        : findUpcomingIndex(lyrics, currentTime);
+    const upcoming = upcomingIndex >= 0 ? lyrics[upcomingIndex] : null;
+
     const current = (playingIndex !== -1) ? displayText(lyrics[playingIndex], 'overlay') : "";
-    const next = inInstrumental
-        ? ""
-        : (playingIndex !== -1)
-            ? ((playingIndex + 1 < lyrics.length) ? displayText(lyrics[playingIndex + 1], 'overlay') : "")
-            : ((lyrics.length > 0) ? displayText(lyrics[0], 'overlay') : "");
+    const next = (inInstrumental || !upcoming) ? "" : displayText(upcoming, 'overlay');
 
     // IMPORTANT: Don't skip overlay update only because index didn't change.
     // At song start, index can stay -1 for a while but first line still needs to appear in "next".
