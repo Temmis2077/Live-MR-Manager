@@ -244,6 +244,18 @@ export async function selectTrack(index) {
     }).catch((err) => console.error('[Player] Failed to auto-follow alignment tab:', err));
   }
 
+  // 새 곡의 가사가 도착하기 전까지 이전 곡의 가사·마커를 들고 있으면 안 된다.
+  //
+  // 가사 로드는 비동기라 곡이 바뀐 직후 수백 ms 동안 옛 데이터가 살아 있었고,
+  // 그동안 syncLyricsWithTime이 새 곡의 재생 시간을 옛 가사에 대고 맞췄다 —
+  // 오버레이와 라이브 가사창에 엉뚱한 줄이 떴다. 로드가 실패하면(.catch가
+  // 없었다) 그 상태가 곡이 끝날 때까지 유지됐고, 옛 마커의 vocalStartSec이
+  // 남아 있으면 isInInstrumental이 계속 참이라 오버레이가 아예 비어 보였다.
+  state.currentLyrics = [];
+  state.currentMarkers = { vocalStartSec: null, interludes: [] };
+  state.currentLyricIndex = -1;
+  import('./lyric-drawer.js').then((m) => m.updateLyrics?.([])).catch(() => {});
+
   // Load Lyrics for the selected track
   // Guarded by mySequence: if the user switches tracks again before this
   // resolves, applying it here would overwrite the newer track's lyrics
@@ -259,6 +271,11 @@ export async function selectTrack(index) {
       if (m.updateLyrics) m.updateLyrics(segments);
       if (m.syncLyricDrawerHeader) m.syncLyricDrawerHeader();
     });
+  }).catch((err) => {
+    console.error('[Player] 가사·마커 로드 실패:', err);
+    // 위에서 이미 비워 뒀으므로 옛 가사가 남지는 않는다. 화면만 정리한다.
+    if (mySequence !== state.playbackSequence) return;
+    import('./lyric-drawer.js').then((m) => m.syncLyricDrawerHeader?.()).catch(() => {});
   });
 
   const durationHintMs = parseDurationToMs(song.duration);
@@ -402,6 +419,13 @@ export async function selectTrack(index) {
   }
 }
 
+/** 가사 줄 판정 함수. 프레임마다 동적 import 프라미스를 만들지 않도록
+ *  한 번만 붙잡아 둔다(60fps로 도는 자리다). */
+let lyricSync = null;
+import('./lyric-drawer.js')
+  .then((m) => { lyricSync = m.syncLyricsAtPosition; })
+  .catch(() => {});
+
 export function updateProgressBar(timestamp) {
   if (!state.isPlaying && !state.isLoading) {
     state.rafId = null;
@@ -435,6 +459,18 @@ export function updateProgressBar(timestamp) {
     elements.timeCurrent.textContent = formatTime(state.currentProgressMs / 1000);
     elements.timeTotal.textContent = formatTime(state.trackDurationMs / 1000);
   }
+
+  // 가사 줄 판정을 여기서 돌린다.
+  //
+  // 예전에는 백엔드의 playback-progress(100ms 폴링)에만 물려 있어서 줄 전환이
+  // 100ms 계단이었다 — 평균 50ms, 최악 100ms 늦게 바뀐다. currentProgressMs는
+  // 바로 위에서 tempo까지 반영해 프레임 단위로 보간한 값이므로, 이걸 쓰면
+  // 줄 전환이 프레임 정확도로 올라간다.
+  //
+  // 오버레이로 나가는 IPC는 늘지 않는다 — syncLyricsWithTime은 현재/다음 줄
+  // 텍스트가 바뀔 때만 update_overlay_lyrics를 부른다(내부 dedupe).
+  // 위치 패킷(update_overlay_progress)은 지금처럼 100ms 이벤트에서만 보낸다.
+  if (!state.isSeeking && lyricSync) lyricSync(state.currentProgressMs);
 
   if (state.isPlaying || state.isLoading) {
     state.rafId = requestAnimationFrame(updateProgressBar);

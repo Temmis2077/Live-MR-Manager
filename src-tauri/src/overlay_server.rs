@@ -165,6 +165,21 @@ pub struct OverlayState {
     pub position_ms: u64,
     #[serde(default)]
     pub duration_ms: u64,
+
+    /// 지금 부르는 줄의 시작·끝(ms)과 단어별 타임스탬프.
+    ///
+    /// 줄 안 진행도(가라오케 와이프)를 그리려면 오버레이가 "이 줄이 언제
+    /// 시작해 언제 끝나는지"를 알아야 한다. 진행도는 60fps로 움직이므로
+    /// 매 프레임 WS로 보낼 수 없다 — 줄이 바뀔 때 한 번만 보내고, 그 사이는
+    /// 오버레이가 자기 시계로 보간한다.
+    #[serde(default)]
+    pub line_start_ms: u64,
+    #[serde(default)]
+    pub line_end_ms: u64,
+    /// [단어, 시작ms, 끝ms] 배열. 비어 있으면 오버레이가 줄 단위 선형 보간으로
+    /// 물러난다(예전에 정렬한 곡·손으로 쓴 LRC에는 없다).
+    #[serde(default)]
+    pub line_words: Vec<(String, u64, u64)>,
 }
 
 fn default_lyric_index() -> i32 {
@@ -193,6 +208,9 @@ impl Default for OverlayState {
             bpm: 0.0,
             position_ms: 0,
             duration_ms: 0,
+            line_start_ms: 0,
+            line_end_ms: 0,
+            line_words: Vec::new(),
         }
     }
 }
@@ -610,24 +628,41 @@ pub async fn update_overlay_progress(position_ms: u64, duration_ms: u64) {
         Ok(m) => m,
         Err(_) => return,
     };
+    let snapshot = state.clone();
     drop(state);
 
     for tx in PEERS.lock().await.values() {
         let _ = tx.send(Message::Text(msg.clone()));
     }
+    // 앱 내부 오버레이 창은 "overlay-state-update"에 상태 객체가 오길 기다린다
+    // (broadcast_overlay_state와 같은 규약). 여기서만 이름이 한 글자 다른
+    // "overlay-state-updated"로, 그것도 문자열을 실어 보내고 있었다 —
+    // 그래서 내부 미리보기는 진행 갱신을 한 번도 받지 못했다.
     if let Some(handle) = APP_HANDLE.lock().await.as_ref() {
-        let _ = handle.emit("overlay-state-updated", msg);
+        let _ = handle.emit("overlay-state-update", snapshot);
     }
 }
 
 #[tauri::command]
-pub async fn update_overlay_lyrics(current: String, next: String, index: Option<i32>) {
+pub async fn update_overlay_lyrics(
+    current: String,
+    next: String,
+    index: Option<i32>,
+    line_start_ms: Option<u64>,
+    line_end_ms: Option<u64>,
+    line_words: Option<Vec<(String, u64, u64)>>,
+) {
     let mut state = CURRENT_STATE.lock().await.clone();
     state.current_lyric = current;
     state.next_lyric = next;
     if let Some(i) = index {
         state.lyric_index = i;
     }
+    // 줄 타이밍은 줄이 바뀔 때만 온다. 안 왔으면 지운다 — 이전 줄의 구간이
+    // 남아 있으면 새 줄에 엉뚱한 진행도가 그려진다.
+    state.line_start_ms = line_start_ms.unwrap_or(0);
+    state.line_end_ms = line_end_ms.unwrap_or(0);
+    state.line_words = line_words.unwrap_or_default();
     broadcast_overlay_state(state).await;
 }
 

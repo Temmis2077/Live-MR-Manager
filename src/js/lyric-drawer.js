@@ -61,15 +61,32 @@ export function setLyricOffsetMs(ms) {
 let lastPositionMs = NaN;
 let lastDurationMs = 0;
 
-function applyProgress(positionMs, durationMs) {
+/**
+ * 재생 위치로 가사 줄 판정을 돌린다. player.js의 rAF 루프가 프레임마다 부른다.
+ *
+ * 백엔드 폴링(100ms)이 아니라 보간된 위치를 쓰는 이유는, 폴링 주기가 그대로
+ * 줄 전환의 계단이 되기 때문이다. syncLyricsWithTime은 현재/다음 줄 텍스트가
+ * 바뀔 때만 오버레이로 IPC를 보내므로(내부 dedupe) 60fps로 불러도 안전하다.
+ */
+export function syncLyricsAtPosition(positionMs) {
+    if (!Number.isFinite(positionMs)) return;
     lastPositionMs = positionMs;
-    lastDurationMs = durationMs;
     // 보정은 가사 판정에만 쓴다. 진행바·시간 표시는 실제 재생 위치를 그대로
     // 보여줘야 한다 — 사용자가 보정을 걸었다고 남은 시간이 달라지면 안 된다.
     const shifted = positionMs + getLyricOffsetMs();
     syncLyricsWithTime(Math.max(0, shifted) / 1000);
-    // 오버레이 진행바 — 오버레이가 스스로 시간을 세지 않고 앱이 알려주는
-    // 위치만 그린다(두 화면이 어긋나면 안 된다).
+}
+
+function applyProgress(positionMs, durationMs) {
+    lastDurationMs = durationMs;
+    // 재생 중에는 rAF가 더 촘촘하게 줄 판정을 돌린다. 여기서는 멈춰 있을 때
+    // (rAF 루프가 꺼진 상태)를 위해서만 한 번 돌린다 — seek 직후 정지 상태로
+    // 가사가 갱신되지 않으면 화면이 이전 줄에 멈춰 있게 된다.
+    if (!state.isPlaying) syncLyricsAtPosition(positionMs);
+    else lastPositionMs = positionMs;
+
+    // 오버레이 위치 패킷 — 오버레이가 이 값을 기준으로 스스로 보간한다.
+    // 여기는 100ms 그대로 둔다(WS로 60fps를 보낼 이유가 없다).
     invoke('update_overlay_progress', { positionMs, durationMs }).catch(() => {});
 }
 
@@ -385,8 +402,29 @@ function syncLyricsWithTime(currentTime) {
     // At song start, index can stay -1 for a while but first line still needs to appear in "next".
     const overlayPayloadChanged = current !== lastOverlayCurrent || next !== lastOverlayNext;
     if (overlayPayloadChanged) {
-        // index는 가사 뷰 페이지(/lyrics-view)의 현재 줄 하이라이트용
-        invoke('update_overlay_lyrics', { current, next, index: playingIndex }).catch(err => console.error(err));
+        // 줄 타이밍을 함께 보낸다 — 오버레이가 줄 안 진행도를 자기 시계로
+        // 그리려면 이 줄의 구간을 알아야 한다. 진행도는 60fps로 움직이므로
+        // 매 프레임 보낼 수 없고, 줄이 바뀔 때 한 번만 보낸다.
+        //
+        // 보정(offset)을 되돌려 실제 오디오 시간으로 보낸다. 오버레이의 시계는
+        // 실제 재생 위치를 세고 있어서, 보정된 시간을 그대로 주면 진행도가
+        // 보정한 만큼 어긋난다.
+        const seg = playingIndex !== -1 ? lyrics[playingIndex] : null;
+        const back = getLyricOffsetMs();
+        const words = Array.isArray(seg?.words)
+            ? seg.words
+                .filter((w) => w && Number.isFinite(w.startMs) && Number.isFinite(w.endMs))
+                .map((w) => [String(w.word || ''), Math.max(0, Math.round(w.startMs - back)), Math.max(0, Math.round(w.endMs - back))])
+            : [];
+
+        invoke('update_overlay_lyrics', {
+            current,
+            next,
+            index: playingIndex,   // 가사 뷰 페이지(/lyrics-view)의 현재 줄 하이라이트용
+            lineStartMs: seg ? Math.max(0, Math.round((seg.start || 0) * 1000 - back)) : 0,
+            lineEndMs: seg ? Math.max(0, Math.round((seg.end || 0) * 1000 - back)) : 0,
+            lineWords: words,
+        }).catch(err => console.error(err));
         lastOverlayCurrent = current;
         lastOverlayNext = next;
     }

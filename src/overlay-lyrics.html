@@ -262,6 +262,29 @@
       opacity: 1;
     }
 
+    /* 줄 안 진행도(가라오케 와이프).
+       글자 위에 같은 글자를 강조색으로 겹쳐 놓고 왼쪽부터 드러낸다.
+       background-clip 대신 겹치기를 쓰는 이유는, 외곽선(text-stroke)·그림자·
+       그라디언트 같은 기존 디자인 축과 싸우지 않기 위해서다. */
+    .lyric-line.current { position: relative; }
+
+    .lyric-wipe {
+      position: absolute;
+      left: 0; top: 0;
+      width: 100%; height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: inherit;
+      pointer-events: none;
+      overflow: hidden;
+      color: var(--accent-color, #8b5cf6);
+      /* 진행도만큼만 보인다. JS가 --wipe를 0~1로 넣는다. */
+      clip-path: inset(0 calc((1 - var(--wipe, 0)) * 100%) 0 0);
+      white-space: inherit;
+    }
+
+    .overlay-container.no-wipe .lyric-wipe { display: none; }
+
     @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
     /* 줄 전환 — 글자만 짧게 번진다. 카드 등장(lyrics-pop-*)과 분리해서,
@@ -353,7 +376,11 @@
       // side-by-side in a row — the <br> has no effect at all. Wrapping the
       // whole payload in one element makes it a single flex item, so its
       // *internal* content (including <br>) uses normal inline flow instead.
-      lyricCurrent.innerHTML = currentText && currentText.trim() ? `<span>${currentText}</span>` : '&nbsp;';
+      // 와이프용 겹침 요소를 같이 넣는다 — 같은 글자를 강조색으로 위에 얹고
+      // 진행도만큼만 드러낸다. 원본 마크업을 그대로 복제해야 줄바꿈·크기가
+      // 어긋나지 않는다.
+      const body = currentText && currentText.trim() ? `<span>${currentText}</span>` : '&nbsp;';
+      lyricCurrent.innerHTML = body + `<span class="lyric-wipe" aria-hidden="true">${body}</span>`;
       lyricNext.innerHTML = nextText && nextText.trim() ? `<span>${nextText}</span>` : '&nbsp;';
       // 3줄 모드에서 2줄 이상 보여지는 슬롯은 폰트를 줄여 고정 높이 박스 안에서
       // 잘리거나 겹치지 않게 한다(<br>로 조인되므로 그 존재 여부로 판단).
@@ -431,8 +458,40 @@
       document.documentElement.style.setProperty('--anim-duration', isHorizontal ? '0.34s' : '0.26s');
     }
 
+    // 재생 위치 시계 — 100ms 패킷 사이를 스스로 메운다(shared.js).
+    const clock = window.OverlayShared.createPositionClock();
+    let lineStartMs = 0;
+    let lineEndMs = 0;
+    let lineWords = [];
+
+    // 진행도 계산의 정본은 shared.js에 있다 — 앱 쪽 구현과 어긋나면
+    // 앱 화면과 방송 화면의 진행도가 달라진다.
+    const wipeRatio = (posMs) =>
+      window.OverlayShared.lineWipeRatio(lineWords, lineStartMs, lineEndMs, posMs);
+
+    (function paintWipe() {
+      const el = lyricCurrent;
+      if (el && lineEndMs > lineStartMs) {
+        el.style.setProperty('--wipe', wipeRatio(clock.now()).toFixed(4));
+      } else if (el) {
+        el.style.setProperty('--wipe', '0');
+      }
+      requestAnimationFrame(paintWipe);
+    })();
+
     function updateOverlay(data) {
       if (!data) return;
+
+      clock.update(
+        data.position_ms ?? data.positionMs ?? 0,
+        data.duration_ms ?? data.durationMs ?? 0,
+        data.is_playing,
+      );
+      lineStartMs = Number(data.line_start_ms ?? data.lineStartMs ?? 0) || 0;
+      lineEndMs = Number(data.line_end_ms ?? data.lineEndMs ?? 0) || 0;
+      lineWords = Array.isArray(data.line_words ?? data.lineWords)
+        ? (data.line_words ?? data.lineWords)
+        : [];
 
       // 스타일은 표시 여부와 무관하게 항상 먼저 반영한다 — 예전에는 재생
       // 중이 아닐 때 아래 early-return이 스타일 적용을 건너뛰어, 설정에서

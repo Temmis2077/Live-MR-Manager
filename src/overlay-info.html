@@ -331,6 +331,19 @@
     const keyBpmEl = document.getElementById('key-bpm');
     const progressBar = document.getElementById('progress-bar');
     const progressFill = document.getElementById('progress-fill');
+
+    // 재생 위치 시계 — 100ms 패킷 사이를 스스로 메운다(shared.js).
+    const clock = window.OverlayShared.createPositionClock();
+    let progressVisible = false;
+
+    (function paintProgress() {
+      if (progressVisible) {
+        const dur = clock.getDuration();
+        const pct = dur > 0 ? Math.max(0, Math.min(100, (clock.now() / dur) * 100)) : 0;
+        progressFill.style.width = `${pct}%`;
+      }
+      requestAnimationFrame(paintProgress);
+    })();
     const activeAnimations = {};
 
     /**
@@ -491,15 +504,16 @@
         // 디자인 축(외곽선·그림자·그라디언트)을 CSS 변수로 푼다
         window.OverlayShared.applyDesign(style);
 
-        // 진행바 — 앱이 알려준 위치만 그린다(오버레이가 시간을 세지 않는다)
+        // 진행바 — 위치는 앱이 알려주되, 패킷 사이(100ms)는 시계가 메운다.
+        // 예전에는 받은 값을 그대로 그려서 진행바가 100ms 계단으로 움직였다.
         const showProgress = on(vis.progress) && vis.progress !== undefined;
         progressBar.classList.toggle('on', showProgress === true);
-        if (showProgress) {
-          const posMs = Number(data.position_ms ?? data.positionMs ?? 0);
-          const durMs = Number(data.duration_ms ?? data.durationMs ?? 0);
-          const pct = durMs > 0 ? Math.max(0, Math.min(100, (posMs / durMs) * 100)) : 0;
-          progressFill.style.width = `${pct}%`;
-        }
+        clock.update(
+          data.position_ms ?? data.positionMs ?? 0,
+          data.duration_ms ?? data.durationMs ?? 0,
+          data.is_playing,
+        );
+        progressVisible = showProgress === true;
 
         container.classList.toggle('no-card', !on(vis.card));
         container.classList.toggle('no-label', !on(vis.label));

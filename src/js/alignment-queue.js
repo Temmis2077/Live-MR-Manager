@@ -15,10 +15,12 @@ import { state } from './state.js';
 import { parseLrc, parseMarkers, mergeAlignmentResult, getSyncText, encodeLrc, isStructureDirective } from './lrc-parser.js';
 import { showNotification } from './utils.js';
 import { buildAlignmentLyrics, isEnglishLine } from './eng-to-kor.js';
-import { attachMissingSegmentIds, gateAlignmentLines } from './alignment-quality.js';
+import { attachMissingSegmentIds, classifyAlignmentLine, gateAlignmentLines } from './alignment-quality.js';
+import { applyAlignmentMetadata, buildAlignmentMetadata } from './alignment-metadata.js';
 
 let isRunning = false;
 let listenerReady = false;
+const ALIGNMENT_PIPELINE_REVISION = 'ordered-lexical-window-v3';
 
 function createAlignmentTraceId(path) {
     const name = String(path || 'song').split(/[\\/]/).pop().replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 40) || 'song';
@@ -60,6 +62,14 @@ function traceGateSummary(gate) {
         rejectedCount: gate?.rejected?.length || 0,
         softAcceptedIds: (gate?.softAccepted || []).map((line) => line.segment_id),
         softAcceptedCount: gate?.softAccepted?.length || 0,
+        doublingAmbiguityIds: (gate?.accepted || [])
+            .filter((line) => line?.quality_flags?.includes('doubling_ambiguity'))
+            .map((line) => line.segment_id),
+        lexicalMismatchIds: (gate?.rejected || [])
+            .filter(({ reasons }) => reasons?.includes('lexical_mismatch') || reasons?.includes('vocable_mismatch'))
+            .map(({ line }) => line?.segment_id)
+            .filter(Boolean),
+        nonLexicalVocalRegions: gate?.nonLexicalVocalRegions || [],
         confidenceFloor: gate?.confidenceFloor ?? null,
     };
 }
@@ -81,7 +91,109 @@ function traceSegmentMap(originalSegments, workingSegments, entries) {
             includedInPrimary: entry ? !entry.skipPrimary : false,
             skipPrimary: entry?.skipPrimary === true,
             fallbackCandidate: entry?.fallbackCandidate === true,
+            repeated_lyric: entry?.repeatedLyric === true,
+            line_kind: entry?.lineKind || classifyAlignmentLine(entry?.text || ''),
+            anchor_trust: working?.alignmentTrust || (working?.approx ? 'acoustic_soft' : 'manual'),
+            quality_flags: working?.qualityFlags || [],
         };
+    });
+}
+
+const THIRD_PASS_INVALID_EVIDENCE_REASONS = new Set([
+    'lexical_mismatch', 'vocable_mismatch',
+    'duration', 'duration_sanity', 'outside_window',
+    'out_of_order', 'duplicate_id', 'vocal_silence',
+]);
+
+export function collectGateLexicalEvidence(gate, evidenceById, nonLexicalRegions) {
+    const candidates = [
+        ...(gate?.accepted || []).map((line) => ({ line, reasons: [], accepted: true })),
+        ...(gate?.rejected || []).map(({ line, reasons }) => ({ line, reasons: reasons || [], accepted: false })),
+    ];
+    candidates.forEach(({ line, reasons, accepted }) => {
+        const similarity = Number(line?.greedy_text_similarity);
+        if (!line?.segment_id || !Number.isFinite(similarity)) return;
+        const candidate = {
+            similarity,
+            lineKind: line.line_kind || 'lyric',
+            startMs: Number(line.start_ms),
+            endMs: Number(line.end_ms),
+            accepted,
+            rejectedReasons: [...reasons],
+            thirdPassEligible: accepted
+                || !reasons.some((reason) => THIRD_PASS_INVALID_EVIDENCE_REASONS.has(reason)),
+        };
+        const previous = evidenceById.get(line.segment_id);
+        const previousCandidates = previous?.candidates
+            || (previous ? [{
+                similarity: previous.similarity,
+                lineKind: previous.lineKind,
+                startMs: previous.startMs,
+                endMs: previous.endMs,
+            }] : []);
+        const candidatesByKey = new Map();
+        for (const item of [...previousCandidates, candidate]) {
+            const key = `${item.similarity}:${item.startMs}:${item.endMs}`;
+            const existing = candidatesByKey.get(key);
+            if (!existing || (item.thirdPassEligible !== false && existing.thirdPassEligible === false)) {
+                candidatesByKey.set(key, item);
+            }
+        }
+        const candidates = [...candidatesByKey.values()];
+        const best = candidates.reduce((current, item) =>
+            !current || item.similarity > current.similarity ? item : current, null);
+        evidenceById.set(line.segment_id, { ...best, candidates });
+    });
+    (gate?.nonLexicalVocalRegions || []).forEach((region) => nonLexicalRegions.push({ ...region }));
+}
+
+function mergeBlockedVocalRegions(regions) {
+    const sorted = (regions || [])
+        .filter((region) => Number.isFinite(region?.startMs) && Number.isFinite(region?.endMs) && region.endMs > region.startMs)
+        .sort((a, b) => a.startMs - b.startMs);
+    const merged = [];
+    for (const region of sorted) {
+        const previous = merged.at(-1);
+        if (previous && region.startMs - previous.endMs <= 200) {
+            previous.endMs = Math.max(previous.endMs, region.endMs);
+            previous.activity = Math.max(Number(previous.activity) || 0, Number(region.activity) || 0);
+            previous.segmentIds = [...new Set([...(previous.segmentIds || []), ...(region.segmentIds || [])])];
+        } else {
+            merged.push({ ...region, reason: 'non_lexical_vocal_region' });
+        }
+    }
+    return merged;
+}
+
+function hasStoredTiming(segment) {
+    if (!segment) return false;
+    const start = Number(segment.start);
+    const end = Number(segment.end);
+    return Number.isFinite(start) && Number.isFinite(end) && (start > 0 || end > 0);
+}
+
+function hasClosedTimingRange(segment) {
+    return hasStoredTiming(segment) && Number(segment.end) > Number(segment.start);
+}
+
+function markLexicalGateRejections(segments, entries, gate) {
+    const entryById = new Map((entries || []).map((entry) => [entry.id, entry]));
+    (gate?.rejected || []).forEach(({ line, reasons }) => {
+        if (!reasons?.includes('lexical_mismatch') && !reasons?.includes('vocable_mismatch')) return;
+        const entry = entryById.get(line?.segment_id);
+        const segment = entry ? segments?.[entry.segmentIndex] : null;
+        if (!segment || hasStoredTiming(segment)) return;
+        segment.approx = true;
+        segment.alignmentSource = 'unsynced_review';
+        segment.lineKind = line.line_kind || entry.lineKind || classifyAlignmentLine(entry.text);
+        if (typeof line.greedy_text_similarity === 'number') {
+            segment.greedyTextSimilarity = line.greedy_text_similarity;
+        }
+        segment.qualityFlags = Array.from(new Set([
+            ...(segment.qualityFlags || []),
+            ...reasons,
+            'non_lexical_vocal_risk',
+        ]));
     });
 }
 
@@ -89,7 +201,9 @@ function buildFallbackAnchorLines(primaryLines, provisionalLines, entries) {
     const entryById = new Map((entries || []).map((entry) => [entry.id, entry]));
     const byId = new Map();
     (primaryLines || []).forEach((line) => {
-        if (line?.segment_id) byId.set(line.segment_id, line);
+        if (line?.segment_id && line.alignment_trust !== 'acoustic_soft') {
+            byId.set(line.segment_id, line);
+        }
     });
     // The provisional pass is not saved, but its non-English line timings are
     // more useful for locating English windows than a Korean-only path that
@@ -110,6 +224,8 @@ function traceTimingAudit(beforeSegments, afterSegments) {
     const changes = [];
     const unsyncedIds = [];
     const reversePairs = [];
+    const overlapPairs = [];
+    const implausibleDurations = [];
     let previous = null;
     let textChangedCount = 0;
     (afterSegments || []).forEach((after, index) => {
@@ -120,13 +236,29 @@ function traceTimingAudit(beforeSegments, afterSegments) {
         const beforeEnd = Number(before.end || 0);
         const afterStart = Number(after?.start || 0);
         const afterEnd = Number(after?.end || 0);
-        const active = afterEnd > afterStart;
-        if (!active) unsyncedIds.push(`segment:${index}`);
+        const timed = hasStoredTiming(after);
+        const active = hasClosedTimingRange(after);
+        if (!timed) unsyncedIds.push(`segment:${index}`);
         if (beforeText !== afterText) textChangedCount++;
         if (active && previous && afterStart < previous.start) {
             reversePairs.push({ previousId: previous.id, id: `segment:${index}`, previousStart: previous.start, start: afterStart });
         }
-        if (active) previous = { id: `segment:${index}`, start: afterStart };
+        if (active && previous && afterStart < previous.end - TIMELINE_OVERLAP_TOLERANCE_SEC) {
+            overlapPairs.push({
+                previousId: previous.id,
+                id: `segment:${index}`,
+                previousEnd: previous.end,
+                start: afterStart,
+                overlapSec: previous.end - afterStart,
+            });
+        }
+        if (active) {
+            const durationCheck = lyricDurationCheck(after);
+            if (!durationCheck.plausible) {
+                implausibleDurations.push({ id: `segment:${index}`, ...durationCheck });
+            }
+            previous = { id: `segment:${index}`, start: afterStart, end: afterEnd };
+        }
         if (beforeStart !== afterStart || beforeEnd !== afterEnd) {
             changes.push({
                 id: `segment:${index}`,
@@ -142,23 +274,176 @@ function traceTimingAudit(beforeSegments, afterSegments) {
     return {
         changedCount: changes.length,
         changes,
-        appliedIds: changes.filter((change) => change.after.end > change.after.start).map((change) => change.id),
+        appliedIds: changes.filter((change) => change.after.start > 0 || change.after.end > 0).map((change) => change.id),
         unsyncedIds,
         reversePairs,
+        overlapPairs,
+        implausibleDurations,
         textChangedCount,
         activeCount: (afterSegments || []).length - unsyncedIds.length,
         sourceTextOrderPreserved: textChangedCount === 0,
-        monotonicOrderPreserved: reversePairs.length === 0,
+        monotonicOrderPreserved: reversePairs.length === 0 && overlapPairs.length === 0,
+        durationSanityPreserved: implausibleDurations.length === 0,
+    };
+}
+
+/**
+ * Detects a broad text/audio-fit problem after structural timeline checks have
+ * succeeded. This is deliberately advisory: doubling, an alternate song
+ * version, missing/reordered source lyrics, or transcription errors can all
+ * produce the same CTC evidence.
+ */
+export function assessLyricsSourceMismatch({ entries = [], primaryGate = null, timingAudit = null } = {}) {
+    const lineCount = entries.length;
+    const structurallyHealthy = timingAudit?.sourceTextOrderPreserved === true
+        && timingAudit?.monotonicOrderPreserved === true
+        && timingAudit?.durationSanityPreserved === true;
+    const confidenceFloor = Number(primaryGate?.confidenceFloor || 0);
+    const evidenceIds = new Set();
+    const doublingIds = new Set();
+
+    (primaryGate?.rejected || []).forEach(({ line, reasons }) => {
+        const activity = Number(line?.vocal_activity);
+        const coverage = Number(line?.token_coverage);
+        const confidence = Number(line?.confidence);
+        const lowTextFit = (reasons || []).includes('confidence')
+            || (reasons || []).includes('lexical_mismatch')
+            || (reasons || []).includes('vocable_mismatch')
+            || (confidenceFloor > 0 && Number.isFinite(confidence) && confidence < confidenceFloor);
+        if (line?.segment_id && lowTextFit
+            && Number.isFinite(activity) && activity >= 0.25
+            && Number.isFinite(coverage) && coverage >= 0.90) {
+            evidenceIds.add(line.segment_id);
+        }
+    });
+    (primaryGate?.accepted || []).forEach((line) => {
+        if (!line?.segment_id || line.alignment_trust !== 'acoustic_soft') return;
+        evidenceIds.add(line.segment_id);
+        if (line.quality_flags?.includes('doubling_ambiguity')) doublingIds.add(line.segment_id);
+    });
+
+    const evidenceCount = evidenceIds.size;
+    const evidenceRatio = lineCount > 0 ? evidenceCount / lineCount : 0;
+    const entryOrder = new Map(entries.map((entry, index) => [entry.id, index]));
+    const evidenceIndices = [...evidenceIds]
+        .map((id) => entryOrder.get(id))
+        .filter(Number.isInteger)
+        .sort((a, b) => a - b);
+    let longestConsecutiveRun = 0;
+    let currentRun = 0;
+    let previousIndex = null;
+    evidenceIndices.forEach((index) => {
+        currentRun = previousIndex != null && index === previousIndex + 1 ? currentRun + 1 : 1;
+        longestConsecutiveRun = Math.max(longestConsecutiveRun, currentRun);
+        previousIndex = index;
+    });
+
+    const broadMismatch = evidenceCount >= 4
+        && evidenceRatio >= 0.30
+        && (longestConsecutiveRun >= 3 || evidenceRatio >= 0.45);
+    const suspected = lineCount >= 8 && structurallyHealthy && broadMismatch;
+    const reasons = [];
+    if (suspected) {
+        reasons.push('high_vocal_activity_but_low_text_fit');
+        if ((primaryGate?.rejected || []).some(({ reasons: lineReasons }) => lineReasons?.includes('lexical_mismatch'))) {
+            reasons.push('broad_lexical_mismatch');
+        }
+        if (longestConsecutiveRun >= 3) reasons.push('consecutive_text_fit_failures');
+        if (doublingIds.size > 0) reasons.push('doubling_or_repeated_vocal_ambiguity');
+    }
+    return {
+        suspected,
+        reasons,
+        metrics: {
+            lineCount,
+            structurallyHealthy,
+            evidenceCount,
+            evidenceRatio,
+            evidenceIds: [...evidenceIds],
+            longestConsecutiveRun,
+            doublingAmbiguityCount: doublingIds.size,
+            confidenceFloor,
+        },
     };
 }
 
 const TIMELINE_ORDER_TOLERANCE_SEC = 0.08;
+const TIMELINE_OVERLAP_TOLERANCE_SEC = 0.02;
+const MIN_LINE_DURATION_MS = 180;
+const MIN_MS_PER_SINGABLE_UNIT = 50;
+const MAX_BASE_LINE_DURATION_MS = 3_000;
+const MAX_MS_PER_SINGABLE_UNIT = 1_000;
+const MAX_LINE_DURATION_MS = 15_000;
+const VOCABLE_MAX_LINE_DURATION_MS = 8_000;
+
+function singableUnitCount(text) {
+    return Array.from(String(text || '')).filter((char) => /[\p{L}\p{N}]/u.test(char)).length;
+}
+
+function lyricDurationCheck(segment) {
+    const units = Math.max(1, singableUnitCount(getSyncText(segment)));
+    const durationMs = Math.round((Number(segment?.end) - Number(segment?.start)) * 1000);
+    const lineKind = segment?.lineKind || classifyAlignmentLine(getSyncText(segment));
+    const minimumMs = Math.max(MIN_LINE_DURATION_MS, units * MIN_MS_PER_SINGABLE_UNIT);
+    const maximumMs = lineKind === 'vocable'
+        ? VOCABLE_MAX_LINE_DURATION_MS
+        : Math.min(
+            MAX_LINE_DURATION_MS,
+            Math.max(MAX_BASE_LINE_DURATION_MS, units * MAX_MS_PER_SINGABLE_UNIT),
+        );
+    const reason = durationMs < minimumMs
+        ? 'duration_too_short_for_lyrics'
+        : (durationMs > maximumMs ? 'duration_too_long_for_lyrics' : null);
+    return { plausible: reason == null, reason, durationMs, units, lineKind, minimumMs, maximumMs };
+}
 
 function clearAutoTiming(segment) {
     if (!segment || segment.approx !== true) return false;
     segment.start = 0;
     segment.end = 0;
+    segment.alignmentTrust = null;
+    segment.alignmentSource = null;
     return true;
+}
+
+/** Explicit AI reruns replace prior automatic timings but never manual work. */
+export function resetAutomaticTimingsForRealignment(segments) {
+    const reset = [];
+    (segments || []).forEach((segment, index) => {
+        if (!segment || segment.approx !== true || !hasStoredTiming(segment)) return;
+        reset.push({
+            id: `segment:${index}`,
+            start: segment.start,
+            end: segment.end,
+            alignmentTrust: segment.alignmentTrust || 'acoustic_soft',
+            alignmentSource: segment.alignmentSource || null,
+        });
+        segment.start = 0;
+        segment.end = 0;
+        delete segment.confidence;
+        delete segment.alignmentTrust;
+        delete segment.alignmentSource;
+        delete segment.gateDecision;
+        delete segment.qualityFlags;
+        delete segment.greedyTextSimilarity;
+    });
+    return reset;
+}
+
+function alignmentTrustOf(segment) {
+    if (!hasStoredTiming(segment)) return null;
+    if (segment.approx !== true) return 'manual';
+    if (!hasClosedTimingRange(segment)) return 'acoustic_soft';
+    if (segment.alignmentTrust) return segment.alignmentTrust;
+    if (segment.alignmentSource === 'anchor_interpolation') return 'estimated';
+    // Unknown automatic timings are deliberately weak. Only an explicitly
+    // classified acoustic result may constrain a later rescue window.
+    return 'acoustic_soft';
+}
+
+function isStrongAlignmentAnchor(segment) {
+    const trust = alignmentTrustOf(segment);
+    return trust === 'manual' || (trust === 'acoustic_strong' && hasClosedTimingRange(segment));
 }
 
 /**
@@ -169,14 +454,34 @@ function clearAutoTiming(segment) {
  */
 export function enforceAiTimelineOrder(segments) {
     const dropped = [];
+    // 먼저 문장 길이에 비해 물리적으로 불가능한 자동 결과를 제거한다.
+    for (let index = 0; index < (segments || []).length; index++) {
+        const segment = segments[index];
+        if (!segment || !hasClosedTimingRange(segment) || segment.approx !== true) continue;
+        const durationCheck = lyricDurationCheck(segment);
+        if (durationCheck.plausible) continue;
+        if (!clearAutoTiming(segment)) continue;
+        dropped.push({
+            id: `segment:${index}`,
+            index,
+            text: getSyncText(segment),
+            reason: durationCheck.reason,
+            confidence: Number(segment.confidence) || 0,
+            durationCheck,
+        });
+    }
     let changed = true;
     while (changed) {
         changed = false;
         let previous = null;
         for (let index = 0; index < (segments || []).length; index++) {
             const current = segments[index];
-            if (!current || !(current.end > current.start)) continue;
-            if (!previous || current.start >= previous.segment.start - TIMELINE_ORDER_TOLERANCE_SEC) {
+            if (!current || !hasStoredTiming(current)) continue;
+            const startsInOrder = !previous
+                || current.start >= previous.segment.start - TIMELINE_ORDER_TOLERANCE_SEC;
+            const doesNotOverlap = !previous
+                || current.start >= previous.segment.end - TIMELINE_OVERLAP_TOLERANCE_SEC;
+            if (startsInOrder && doesNotOverlap) {
                 previous = { index, segment: current };
                 continue;
             }
@@ -192,10 +497,16 @@ export function enforceAiTimelineOrder(segments) {
                 dropIndex = previous.index;
                 reason = 'out_of_order_against_manual';
             } else if (!previousManual && !currentManual) {
+                const trustRank = (segment) => ({ acoustic_strong: 3, acoustic_soft: 2, estimated: 1 }[alignmentTrustOf(segment)] || 0);
+                const previousTrust = trustRank(previous.segment);
+                const currentTrust = trustRank(current);
                 const previousConfidence = Number(previous.segment.confidence) || 0;
                 const currentConfidence = Number(current.confidence) || 0;
-                dropIndex = currentConfidence > previousConfidence ? previous.index : index;
-                reason = 'out_of_order_weaker_auto';
+                dropIndex = currentTrust > previousTrust
+                    || (currentTrust === previousTrust && currentConfidence > previousConfidence)
+                    ? previous.index
+                    : index;
+                reason = startsInOrder ? 'overlap_weaker_auto' : 'out_of_order_weaker_auto';
             } else {
                 // 두 수동 싱크가 모순되면 어느 쪽도 자동으로 수정하지 않는다.
                 previous = { index, segment: current };
@@ -504,12 +815,14 @@ export function buildSecondPassWindows({ rescueEntries, segments, entries, marke
     const activeAnchors = (entries || [])
         .map((entry) => {
             const segment = segments?.[entry.segmentIndex];
-            if (!segment || !(segment.end > segment.start)) return null;
+            if (!segment || !isStrongAlignmentAnchor(segment)) return null;
             return {
+                id: entry.id,
                 segmentIndex: entry.segmentIndex,
                 startMs: Math.round(segment.start * 1000),
                 endMs: Math.round(segment.end * 1000),
                 manual: segment.approx !== true,
+                trust: alignmentTrustOf(segment),
             };
         })
         .filter(Boolean)
@@ -533,6 +846,14 @@ export function buildSecondPassWindows({ rescueEntries, segments, entries, marke
         const lastIndex = group.entries.at(-1).segmentIndex;
         const previousAnchor = activeAnchors.filter((anchor) => anchor.segmentIndex < firstIndex).at(-1);
         const nextAnchor = activeAnchors.find((anchor) => anchor.segmentIndex > lastIndex);
+        const skippedSoftAnchors = (entries || []).map((entry) => {
+            const segment = segments?.[entry.segmentIndex];
+            const trust = alignmentTrustOf(segment);
+            if (entry.segmentIndex <= (previousAnchor?.segmentIndex ?? -1)
+                || entry.segmentIndex >= (nextAnchor?.segmentIndex ?? Infinity)
+                || (trust !== 'acoustic_soft' && trust !== 'estimated')) return null;
+            return { id: entry.id, segmentIndex: entry.segmentIndex, trust };
+        }).filter(Boolean);
         const estimatedSpanMs = Math.max(6_000, group.entries.length * 4_500);
         const vocalStartMs = Number.isFinite(markers?.vocalStartSec)
             ? Math.round(markers.vocalStartSec * 1000)
@@ -551,6 +872,7 @@ export function buildSecondPassWindows({ rescueEntries, segments, entries, marke
             nextAnchor: nextAnchor || null,
             estimatedSpanMs,
             language: group.language,
+            softAnchorSkipped: skippedSoftAnchors,
         };
         if (!Number.isFinite(windowEndMs) || windowEndMs - windowStartMs < 800) {
             return { ...group, skipReason: 'invalid_rescue_window', windowStartMs, windowEndMs, windowContext };
@@ -566,8 +888,7 @@ export function buildSecondPassWindows({ rescueEntries, segments, entries, marke
 }
 
 function singableWeight(text) {
-    const units = Array.from(String(text || '')).filter((char) => /[\p{L}\p{N}]/u.test(char)).length;
-    return Math.max(1, units);
+    return Math.max(1, singableUnitCount(text));
 }
 
 /** 2차까지 남은 실제 가사를 원문 순서의 연속 그룹으로 묶고 앵커 경계를 고정한다. */
@@ -575,18 +896,19 @@ export function buildFinalEstimateGroups(segments, entries, markers = {}) {
     const orderedEntries = [...(entries || [])].sort((a, b) => a.segmentIndex - b.segmentIndex);
     const anchors = orderedEntries.map((entry) => {
         const segment = segments?.[entry.segmentIndex];
-        if (!segment || !(segment.end > segment.start)) return null;
+        if (!segment || !isStrongAlignmentAnchor(segment)) return null;
         return {
             id: entry.id,
             segmentIndex: entry.segmentIndex,
             startMs: Math.round(segment.start * 1000),
             endMs: Math.round(segment.end * 1000),
             manual: segment.approx !== true,
+            trust: alignmentTrustOf(segment),
         };
     }).filter(Boolean);
     const missing = orderedEntries.filter((entry) => {
         const segment = segments?.[entry.segmentIndex];
-        return segment && !(segment.end > segment.start);
+        return segment && !hasStoredTiming(segment);
     });
     const groups = [];
     for (const entry of missing) {
@@ -609,6 +931,14 @@ export function buildFinalEstimateGroups(segments, entries, markers = {}) {
         const lastIndex = group.entries.at(-1).segmentIndex;
         const previousAnchor = anchors.filter((anchor) => anchor.segmentIndex < firstIndex).at(-1) || null;
         const nextAnchor = anchors.find((anchor) => anchor.segmentIndex > lastIndex) || null;
+        const skippedSoftAnchors = orderedEntries.map((entry) => {
+            const segment = segments?.[entry.segmentIndex];
+            const trust = alignmentTrustOf(segment);
+            if (entry.segmentIndex <= (previousAnchor?.segmentIndex ?? -1)
+                || entry.segmentIndex >= (nextAnchor?.segmentIndex ?? Infinity)
+                || (trust !== 'acoustic_soft' && trust !== 'estimated')) return null;
+            return { id: entry.id, segmentIndex: entry.segmentIndex, trust };
+        }).filter(Boolean);
         return {
             ...group,
             previousAnchor,
@@ -616,6 +946,7 @@ export function buildFinalEstimateGroups(segments, entries, markers = {}) {
             lowerBoundMs: previousAnchor?.endMs ?? vocalStartMs,
             upperBoundMs: nextAnchor?.startMs ?? null,
             interludes,
+            skippedSoftAnchors,
         };
     });
 }
@@ -721,13 +1052,26 @@ export function estimateUnsyncedTimings(groups, diagnostics = {}) {
             activity: Number(region.activity),
         }))
         .filter((region) => Number.isFinite(region.startMs) && Number.isFinite(region.endMs) && region.endMs > region.startMs);
+    const lexicalEvidenceById = diagnostics.lexical_evidence_by_id
+        ?? diagnostics.lexicalEvidenceById
+        ?? {};
+    const nonLexicalVocalRegions = (diagnostics.non_lexical_vocal_regions
+        ?? diagnostics.nonLexicalVocalRegions
+        ?? [])
+        .map((region) => ({
+            startMs: Number(region.start_ms ?? region.startMs),
+            endMs: Number(region.end_ms ?? region.endMs),
+            reason: 'non_lexical_vocal_region',
+        }))
+        .filter((region) => Number.isFinite(region.startMs) && Number.isFinite(region.endMs) && region.endMs > region.startMs);
     const estimates = [];
+    const rejectedGroups = [];
 
     for (const group of groups || []) {
         if (!group.entries?.length) continue;
         let lowerBoundMs = Math.max(0, Number(group.lowerBoundMs) || 0);
         const lastVocalEndMs = vocalRegions.at(-1)?.endMs || 0;
-        let upperBoundMs = Number(group.upperBoundMs);
+        let upperBoundMs = group.upperBoundMs == null ? Number.NaN : Number(group.upperBoundMs);
         if (!Number.isFinite(upperBoundMs)) {
             upperBoundMs = audioDurationMs > lowerBoundMs
                 ? audioDurationMs
@@ -748,8 +1092,11 @@ export function estimateUnsyncedTimings(groups, diagnostics = {}) {
             }
         }
 
-        const available = subtractBlockedIntervals(lowerBoundMs, upperBoundMs, group.interludes);
-        const fallbackIntervals = available.length ? available : [{ startMs: lowerBoundMs, endMs: upperBoundMs, activity: 1 }];
+        const blockedIntervals = [...(group.interludes || []), ...nonLexicalVocalRegions];
+        const available = subtractBlockedIntervals(lowerBoundMs, upperBoundMs, blockedIntervals);
+        // If interludes/non-lexical vocals consume the whole window, do not
+        // silently restore the blocked interval as a time-weighted fallback.
+        const fallbackIntervals = available;
         const activeIntervals = intersectVocalIntervals(fallbackIntervals, vocalRegions);
         const selectedVocalIntervals = selectVocalIntervalsForGroup(activeIntervals, group.entries.length);
         const allocationIntervals = selectedVocalIntervals.length ? selectedVocalIntervals : fallbackIntervals;
@@ -757,11 +1104,109 @@ export function estimateUnsyncedTimings(groups, diagnostics = {}) {
         const weights = group.entries.map((entry) => singableWeight(entry.text));
         const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
         const availableDuration = allocationIntervals.reduce((sum, interval) => sum + interval.endMs - interval.startMs, 0);
-        const minimumGapMs = Math.max(20, Math.min(200, Math.floor(availableDuration / Math.max(1, group.entries.length * 4))));
-        const effectiveGapMs = Math.max(1, Math.min(
-            minimumGapMs,
-            Math.floor((upperBoundMs - lowerBoundMs) / Math.max(1, group.entries.length + 1)),
-        ));
+        const requiredDurationMs = Math.max(group.entries.length * 1_000, totalWeight * 90);
+        const windowDensity = availableDuration / Math.max(1, group.entries.length);
+        const lexicalEligibility = group.entries.map((entry) => {
+            const evidence = lexicalEvidenceById instanceof Map
+                ? lexicalEvidenceById.get(entry.id)
+                : lexicalEvidenceById[entry.id];
+            const allCandidates = Array.isArray(evidence?.candidates) && evidence.candidates.length
+                ? evidence.candidates
+                : (evidence ? [evidence] : []);
+            const windowCandidates = allCandidates.filter((candidate) => candidate?.thirdPassEligible !== false)
+              .filter((candidate) => {
+                const startMs = Number(candidate?.startMs);
+                const endMs = Number(candidate?.endMs);
+                if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return true;
+                return endMs >= lowerBoundMs - 500 && startMs <= upperBoundMs + 500;
+            });
+            const selectedEvidence = windowCandidates.reduce((best, candidate) =>
+                !best || Number(candidate?.similarity) > Number(best?.similarity) ? candidate : best, null);
+            const lineKind = entry.lineKind || selectedEvidence?.lineKind
+                || evidence?.lineKind || classifyAlignmentLine(entry.text);
+            const requiredSimilarity = lineKind === 'vocable' ? 0.50 : 0.25;
+            const similarity = Number(selectedEvidence?.similarity);
+            return {
+                id: entry.id,
+                lineKind,
+                similarity: Number.isFinite(similarity) ? similarity : null,
+                requiredSimilarity,
+                eligible: Number.isFinite(similarity) && similarity >= requiredSimilarity,
+                evidenceWindowMatched: windowCandidates.length > 0,
+                evidenceCandidateCount: allCandidates.length,
+                selectedEvidenceStartMs: Number.isFinite(Number(selectedEvidence?.startMs))
+                    ? Number(selectedEvidence.startMs) : null,
+                selectedEvidenceEndMs: Number.isFinite(Number(selectedEvidence?.endMs))
+                    ? Number(selectedEvidence.endMs) : null,
+                selectedEvidenceAccepted: selectedEvidence?.accepted === true,
+                selectedEvidenceRejectedReasons: Array.isArray(selectedEvidence?.rejectedReasons)
+                    ? [...selectedEvidence.rejectedReasons] : [],
+            };
+        });
+        const lexicallyIneligibleIndices = lexicalEligibility
+            .map((item, index) => item.eligible ? null : index)
+            .filter((index) => index != null);
+        if (lexicallyIneligibleIndices.length > 0) {
+            const ineligibleEntries = lexicallyIneligibleIndices.map((index) => group.entries[index]);
+            rejectedGroups.push({
+                segmentIds: ineligibleEntries.map((entry) => entry.id),
+                entries: ineligibleEntries,
+                previousAnchor: group.previousAnchor,
+                nextAnchor: group.nextAnchor,
+                skippedSoftAnchors: group.skippedSoftAnchors || [],
+                usedRegions: allocationIntervals,
+                excludedNonLexicalRegions: nonLexicalVocalRegions,
+                method,
+                weights: lexicallyIneligibleIndices.map((index) => weights[index]),
+                lexicalEligibility: lexicallyIneligibleIndices.map((index) => lexicalEligibility[index]),
+                availableDurationMs: Math.round(availableDuration),
+                requiredDurationMs: Math.round(requiredDurationMs),
+                windowDensity: Math.round(windowDensity),
+                rejectedReason: 'no_lexical_evidence',
+            });
+            if (lexicallyIneligibleIndices.length === group.entries.length) continue;
+        }
+        if (availableDuration < requiredDurationMs) {
+            rejectedGroups.push({
+                segmentIds: group.entries.map((entry) => entry.id),
+                entries: group.entries,
+                previousAnchor: group.previousAnchor,
+                nextAnchor: group.nextAnchor,
+                skippedSoftAnchors: group.skippedSoftAnchors || [],
+                usedRegions: allocationIntervals,
+                method,
+                weights,
+                lexicalEligibility,
+                excludedNonLexicalRegions: nonLexicalVocalRegions,
+                availableDurationMs: Math.round(availableDuration),
+                requiredDurationMs: Math.round(requiredDurationMs),
+                windowDensity: Math.round(windowDensity),
+                rejectedReason: 'insufficient_window_density',
+            });
+            continue;
+        }
+        const minimumGapMs = Math.max(80, Math.min(200, Math.floor(availableDuration / Math.max(1, group.entries.length * 4))));
+        const timelineGapCapacity = Math.floor((upperBoundMs - lowerBoundMs) / Math.max(1, group.entries.length + 1));
+        if (timelineGapCapacity < 80) {
+            rejectedGroups.push({
+                segmentIds: group.entries.map((entry) => entry.id),
+                entries: group.entries,
+                previousAnchor: group.previousAnchor,
+                nextAnchor: group.nextAnchor,
+                skippedSoftAnchors: group.skippedSoftAnchors || [],
+                usedRegions: allocationIntervals,
+                excludedNonLexicalRegions: nonLexicalVocalRegions,
+                method,
+                weights,
+                lexicalEligibility,
+                availableDurationMs: Math.round(availableDuration),
+                requiredDurationMs: Math.round(requiredDurationMs),
+                windowDensity: Math.round(windowDensity),
+                rejectedReason: 'insufficient_window_density',
+            });
+            continue;
+        }
+        const effectiveGapMs = Math.min(minimumGapMs, timelineGapCapacity);
         let cumulative = 0;
         let previousStartMs = -Infinity;
 
@@ -776,19 +1221,19 @@ export function estimateUnsyncedTimings(groups, diagnostics = {}) {
         });
 
         cumulative = 0;
-        group.entries.forEach((entry, index) => {
+        const groupEstimates = group.entries.map((entry, index) => {
             cumulative += weights[index];
             const rawEndMs = pointAtWeightedRatio(allocationIntervals, cumulative / totalWeight);
             const intervalEndMs = intervalEndAt(allocationIntervals, starts[index]);
             const nextStartMs = starts[index + 1] ?? upperBoundMs;
             let endMs = Math.min(rawEndMs, intervalEndMs, nextStartMs, upperBoundMs);
-            if (endMs <= starts[index]) endMs = Math.min(upperBoundMs, starts[index] + Math.max(20, minimumGapMs));
-            estimates.push({
+            if (endMs <= starts[index]) endMs = Math.min(upperBoundMs, starts[index] + minimumGapMs);
+            return {
                 segment_id: entry.id,
                 segmentIndex: entry.segmentIndex,
                 text: entry.text,
                 start_ms: Math.round(starts[index]),
-                end_ms: Math.max(Math.round(starts[index]) + 1, Math.round(endMs)),
+                end_ms: Math.max(Math.round(starts[index]) + 80, Math.round(endMs)),
                 confidence: 0,
                 alignmentSource: 'anchor_interpolation',
                 method,
@@ -796,10 +1241,75 @@ export function estimateUnsyncedTimings(groups, diagnostics = {}) {
                 previousAnchor: group.previousAnchor,
                 nextAnchor: group.nextAnchor,
                 usedRegions: allocationIntervals,
-            });
+                excludedNonLexicalRegions: nonLexicalVocalRegions,
+                lexicalEligibility: lexicalEligibility[index],
+                availableDurationMs: Math.round(availableDuration),
+                requiredDurationMs: Math.round(requiredDurationMs),
+                windowDensity: Math.round(windowDensity),
+            };
         });
+        const perLineDurationChecks = groupEstimates.map((estimate, index) => {
+            const units = Math.max(1, weights[index]);
+            const durationMs = estimate.end_ms - estimate.start_ms;
+            const minimumDurationMs = Math.max(MIN_LINE_DURATION_MS, units * MIN_MS_PER_SINGABLE_UNIT);
+            return {
+                id: estimate.segment_id,
+                durationMs,
+                minimumDurationMs,
+                plausible: durationMs >= minimumDurationMs,
+            };
+        });
+        const invalidEstimateIndices = perLineDurationChecks
+            .map((check, index) => lexicalEligibility[index].eligible && !check.plausible ? index : null)
+            .filter((index) => index != null);
+        if (invalidEstimateIndices.length > 0) {
+            const invalidEntries = invalidEstimateIndices.map((index) => group.entries[index]);
+            rejectedGroups.push({
+                segmentIds: invalidEntries.map((entry) => entry.id),
+                entries: invalidEntries,
+                previousAnchor: group.previousAnchor,
+                nextAnchor: group.nextAnchor,
+                skippedSoftAnchors: group.skippedSoftAnchors || [],
+                usedRegions: allocationIntervals,
+                excludedNonLexicalRegions: nonLexicalVocalRegions,
+                method,
+                weights: invalidEstimateIndices.map((index) => weights[index]),
+                lexicalEligibility: invalidEstimateIndices.map((index) => lexicalEligibility[index]),
+                perLineDurationChecks: invalidEstimateIndices.map((index) => perLineDurationChecks[index]),
+                availableDurationMs: Math.round(availableDuration),
+                requiredDurationMs: Math.round(requiredDurationMs),
+                windowDensity: Math.round(windowDensity),
+                rejectedReason: 'insufficient_per_line_duration',
+            });
+        }
+        estimates.push(...groupEstimates.filter((_estimate, index) =>
+            lexicalEligibility[index].eligible && !invalidEstimateIndices.includes(index)));
     }
-    return estimates;
+    return { estimates, rejectedGroups };
+}
+
+/** 추정이 물리적으로 불가능한 그룹은 타임코드를 만들지 않고 검토 상태로 남긴다. */
+export function markRejectedEstimateGroups(segments, rejectedGroups) {
+    const markedIds = [];
+    for (const group of rejectedGroups || []) {
+        for (const entry of group.entries || []) {
+            const segment = segments?.[entry.segmentIndex];
+            if (!segment || hasStoredTiming(segment)) continue;
+            segment.start = 0;
+            segment.end = 0;
+            segment.approx = true;
+            segment.confidence = 0;
+            segment.alignmentTrust = 'estimated';
+            segment.alignmentSource = 'unsynced_review';
+            segment.qualityFlags = Array.from(new Set([
+                ...(segment.qualityFlags || []),
+                group.rejectedReason || 'estimate_rejected',
+                ...(group.rejectedReason === 'no_lexical_evidence' ? ['non_lexical_vocal_risk'] : []),
+            ]));
+            markedIds.push(entry.id);
+        }
+    }
+    return [...new Set(markedIds)];
 }
 
 /** 수동/기존 AI 타임은 건드리지 않고 완전 미싱크 세그먼트에만 추정값을 적용한다. */
@@ -807,12 +1317,13 @@ export function applyEstimatedTimings(segments, estimates) {
     let applied = 0;
     for (const estimate of estimates || []) {
         const segment = segments?.[estimate.segmentIndex];
-        if (!segment || segment.end > segment.start) continue;
+        if (!segment || hasStoredTiming(segment)) continue;
         if (!Number.isFinite(estimate.start_ms) || !Number.isFinite(estimate.end_ms)) continue;
         segment.start = Math.max(0, estimate.start_ms / 1000);
-        segment.end = Math.max(segment.start + 0.001, estimate.end_ms / 1000);
+        segment.end = Math.max(segment.start + 0.08, estimate.end_ms / 1000);
         segment.approx = true;
         segment.confidence = 0;
+        segment.alignmentTrust = 'estimated';
         segment.alignmentSource = 'anchor_interpolation';
         applied++;
     }
@@ -843,6 +1354,12 @@ function applyFallbackLines(segments, entries, fallbackLines) {
         seg.end = end;
         seg.approx = true;
         if (typeof line.confidence === 'number') seg.confidence = line.confidence;
+        seg.alignmentTrust = line.alignment_trust || 'acoustic_strong';
+        seg.gateDecision = line.gate_decision || 'accepted';
+        seg.qualityFlags = Array.isArray(line.quality_flags) ? [...line.quality_flags] : [];
+        if (typeof line.greedy_text_similarity === 'number') seg.greedyTextSimilarity = line.greedy_text_similarity;
+        seg.lineKind = line.line_kind || entry.lineKind || classifyAlignmentLine(entry.text);
+        if (line.repeated_lyric === true || entry.repeatedLyric === true) seg.repeatedLyric = true;
         if (!wasSynced) applied++;
     });
     return applied;
@@ -856,12 +1373,31 @@ function copyAlignmentTiming(originalSegments, alignedSegments) {
         const aligned = alignedSegments?.[index];
         if (!original || !aligned) return;
         if (!(original.start === 0 && original.end === 0)) return;
-        if (!(aligned.start > 0 || aligned.end > 0)) return;
-        original.start = aligned.start;
-        original.end = aligned.end;
-        original.approx = aligned.approx;
+        if (aligned.start > 0 || aligned.end > 0) {
+            original.start = aligned.start;
+            original.end = aligned.end;
+            original.approx = aligned.approx;
+        } else if (aligned.alignmentSource === 'unsynced_review') {
+            original.approx = true;
+        }
         if (typeof aligned.confidence === 'number') original.confidence = aligned.confidence;
         if (aligned.alignmentSource) original.alignmentSource = aligned.alignmentSource;
+        if (aligned.alignmentTrust) original.alignmentTrust = aligned.alignmentTrust;
+        if (aligned.gateDecision) original.gateDecision = aligned.gateDecision;
+        if (Array.isArray(aligned.qualityFlags)) original.qualityFlags = [...aligned.qualityFlags];
+        if (typeof aligned.greedyTextSimilarity === 'number') original.greedyTextSimilarity = aligned.greedyTextSimilarity;
+        if (aligned.lineKind) original.lineKind = aligned.lineKind;
+        if (aligned.repeatedLyric === true) original.repeatedLyric = true;
+        // 단어별 타임스탬프 — 모델이 Viterbi 백트레이스에서 이미 만든 값이다.
+        // 여기서 들고 가지 않으면 사이드카 저장 단계까지 도달하지 못하고,
+        // 줄 안 진행도는 선형 보간밖에 못 그린다.
+        if (Array.isArray(aligned.words) && aligned.words.length > 0) {
+            original.words = aligned.words.map((w) => ({
+                word: String(w.word ?? w.text ?? ''),
+                startMs: Number(w.start_ms ?? w.startMs) || 0,
+                endMs: Number(w.end_ms ?? w.endMs) || 0,
+            }));
+        }
     });
     return originalSegments;
 }
@@ -964,8 +1500,10 @@ export function collectAlignmentAnchors(segments, markers, { skipPureEnglish = f
             id: `segment:${segmentIndex}`,
             segmentIndex,
             text: t,
+            lineKind: classifyAlignmentLine(t),
             skipPrimary,
             fallbackCandidate: skipPrimary && isEnglishLine(sourceText),
+            repeatedLyric: false,
         });
         const synced = !(s.start === 0 && s.end === 0);
         // 이번/현재 세션에서 AI가 채운 approx 줄은 다음 정렬의 하드 앵커가
@@ -975,6 +1513,20 @@ export function collectAlignmentAnchors(segments, markers, { skipPureEnglish = f
             anchors.push([idx, Math.round(s.start * 1000)]);
         }
     }
+    const repeatCounts = new Map();
+    const repeatKey = (text) => String(text || '')
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}]+/gu, '');
+    entries.forEach((entry) => {
+        const key = repeatKey(entry.text);
+        entry.repeatKey = key;
+        if (key) repeatCounts.set(key, (repeatCounts.get(key) || 0) + 1);
+    });
+    entries.forEach((entry) => {
+        entry.repeatedLyric = !!entry.repeatKey && repeatCounts.get(entry.repeatKey) > 1;
+        const segment = segments?.[entry.segmentIndex];
+        if (segment) segment.repeatedLyric = entry.repeatedLyric;
+    });
     // vocalStartSec와 interludes는 재생/표시용 마커다.
     // AI 정렬의 시간축에는 절대 하드 앵커로 사용하지 않는다.
     // 정렬은 실제 가사와 사용자가 직접 확정한 가사 싱크만 기준으로 한다.
@@ -995,7 +1547,17 @@ async function processOne(item) {
         item.status = 'no-lyrics';
         return;
     }
-    const segments = parseLrc(lrcContent, 0);
+    let segments = parseLrc(lrcContent, 0);
+    let metadataRestore = { appliedCount: 0, skippedCount: 0, reason: 'load_failed' };
+    try {
+        const storedMetadata = await invoke('load_alignment_metadata', { audioPath: item.path });
+        metadataRestore = applyAlignmentMetadata(segments, storedMetadata);
+        segments = metadataRestore.segments;
+    } catch (err) {
+        console.warn('[AlignQueue] alignment metadata load failed:', err);
+    }
+    const restoredSegments = segments.map((segment) => ({ ...segment }));
+    const automaticTimingsReset = resetAutomaticTimingsForRealignment(segments);
     const alignmentMode = getAlignmentMode();
     // The phonetic mode creates a temporary alignment representation only.
     // It is never written back over the original LRC text.
@@ -1014,17 +1576,27 @@ async function processOne(item) {
         { skipPureEnglish: alignmentMode === 'en-ko' },
     );
     await traceAlignment(traceId, 'input_prepared', {
+        alignmentPipelineRevision: ALIGNMENT_PIPELINE_REVISION,
+        policy: {
+            sourceOrder: 'immutable_segment_id',
+            automaticAnchor: 'absolute_confidence_plus_lexical_nonrepeated',
+            thirdPassLexicalEvidence: 'same_anchor_window_per_line',
+            unsafeResult: 'unsynced_review',
+        },
         audioPath: item.path,
         alignmentMode,
         markerSummary: markers,
         originalLrc: lrcContent,
-        originalSegments: segments,
+        originalSegments: restoredSegments,
+        metadataRestore,
+        automaticTimingsReset,
         temporaryAlignmentSegments: workingSegments,
         alignmentEntries: entries,
         alignmentTexts: allTexts,
         inputSummary: traceInputSummary(allTexts, entries),
         segmentMap: traceSegmentMap(segments, workingSegments, entries),
         primarySkippedSegmentIds: entries.filter((entry) => entry.skipPrimary).map((entry) => entry.id),
+        repeatedLyricIds: entries.filter((entry) => entry.repeatedLyric).map((entry) => entry.id),
         manualAnchors: anchors,
     });
     const hasUnsynced = workingSegments.some(
@@ -1056,18 +1628,28 @@ async function processOne(item) {
     const primaryModelSpecs = alignmentMode === 'en-ko'
         ? modelSpecs.filter((spec) => spec.lang === 'ko')
         : modelSpecs;
+    const hasPrimaryText = allTexts.some((text) => String(text || '').trim().length > 0);
     await traceAlignment(traceId, 'pipeline_plan', {
         alignmentMode,
         modelSpecs,
         primaryModelSpecs,
         primaryInput: traceInputSummary(allTexts, entries),
+        primarySkippedBecauseEmpty: !hasPrimaryText,
         primarySkippedIds: entries.filter((entry) => entry.skipPrimary).map((entry) => entry.id),
+        repeated_lyric: entries.filter((entry) => entry.repeatedLyric).map((entry) => entry.id),
         provisionalPass: alignmentMode === 'en-ko' && entries.some((entry) => entry.skipPrimary && entry.fallbackCandidate),
         fallbackEnabled: alignmentMode === 'en-ko' && prepared.entries?.some((entry) => entry.fallbackCandidate) === true,
     });
     const passResults = [];
     let primaryDiagnostics = null;
-    for (let pi = 0; pi < primaryModelSpecs.length; pi++) {
+    if (!hasPrimaryText) {
+        await traceAlignment(traceId, 'primary_model_skipped', {
+            reason: 'no_primary_language_tokens',
+            requestedIds: entries.map((entry) => entry.id),
+            skippedIds: entries.filter((entry) => entry.skipPrimary).map((entry) => entry.id),
+        });
+    }
+    for (let pi = 0; hasPrimaryText && pi < primaryModelSpecs.length; pi++) {
         const { lang, model } = primaryModelSpecs[pi];
         item.progressOffset = (100 / primaryModelSpecs.length) * pi;
         item.progressScale = 1 / primaryModelSpecs.length;
@@ -1111,12 +1693,26 @@ async function processOne(item) {
     let lines = passResults[0] || [];
     const primaryRawLines = lines;
     const primaryGate = gateAlignmentLines(lines, entries);
+    const sourceEvidenceGate = {
+        accepted: [...primaryGate.accepted],
+        rejected: [...primaryGate.rejected],
+        confidenceFloor: primaryGate.confidenceFloor,
+    };
+    const lexicalEvidenceById = new Map();
+    const nonLexicalVocalRegionCandidates = [];
+    collectGateLexicalEvidence(primaryGate, lexicalEvidenceById, nonLexicalVocalRegionCandidates);
+    markLexicalGateRejections(workingSegments, entries, primaryGate);
     lines = primaryGate.accepted;
+    const acceptedAcousticLines = [...lines];
     await traceAlignment(traceId, 'primary_quality_gate', {
         confidenceFloor: primaryGate.confidenceFloor,
         accepted: primaryGate.accepted,
         rejected: primaryGate.rejected,
         summary: traceGateSummary(primaryGate),
+        doubling_ambiguity: primaryGate.accepted
+            .filter((line) => line.quality_flags?.includes('doubling_ambiguity'))
+            .map((line) => line.segment_id),
+        non_lexical_vocal_regions: primaryGate.nonLexicalVocalRegions || [],
     });
     let rejectedCount = primaryGate.rejected.length;
     let appliedCount = mergeAlignmentResult(workingSegments, lines, entries);
@@ -1124,6 +1720,7 @@ async function processOne(item) {
     // Optional per-line fallback: only English phonetic candidates with no
     // usable Korean-model result are retried, and only when the English model
     // is already installed. Batch processing never prompts for a download.
+    const unavailableEnglishModelIds = [];
     if (alignmentMode === 'en-ko' && prepared.entries?.some((e) => e.fallbackCandidate)) {
         let installedModels = [];
         try { installedModels = await invoke('get_model_list'); } catch (_) { installedModels = []; }
@@ -1154,6 +1751,7 @@ async function processOne(item) {
                         (provisionalResult && provisionalResult.lines) || [],
                         entries,
                     );
+                    if (!primaryDiagnostics) primaryDiagnostics = provisionalResult?.diagnostics || null;
                     await traceAlignment(traceId, 'phonetic_provisional_result', {
                         request: {
                             lyrics: provisionalTexts,
@@ -1219,11 +1817,13 @@ async function processOne(item) {
                         id: entry.id,
                         segmentIndex: entry.segmentIndex,
                         text: entry.text,
+                        lineKind: entry.lineKind || classifyAlignmentLine(entry.text),
                     }));
                     const rawFallbackLines = attachMissingSegmentIds(
                         (fallbackResult && fallbackResult.lines) || [],
                         fallbackAlignmentEntries,
                     );
+                    if (!primaryDiagnostics) primaryDiagnostics = fallbackResult?.diagnostics || null;
                     const fallbackGate = gateAlignmentLines(rawFallbackLines, fallbackAlignmentEntries, {
                         windowStartMs: fallbackWindow.windowStartMs,
                         windowEndMs: fallbackWindow.windowEndMs,
@@ -1232,7 +1832,12 @@ async function processOne(item) {
                         // neighboring lines provide the acoustic context.
                         confidenceScale: 0.25,
                     });
+                    sourceEvidenceGate.accepted.push(...fallbackGate.accepted);
+                    sourceEvidenceGate.rejected.push(...fallbackGate.rejected);
+                    collectGateLexicalEvidence(fallbackGate, lexicalEvidenceById, nonLexicalVocalRegionCandidates);
+                    markLexicalGateRejections(workingSegments, fallbackAlignmentEntries, fallbackGate);
                     const fallbackLines = fallbackGate.accepted;
+                    acceptedAcousticLines.push(...fallbackLines);
                     await traceAlignment(traceId, 'english_fallback', {
                         window: fallbackWindow,
                         entries: fallbackAlignmentEntries,
@@ -1253,6 +1858,15 @@ async function processOne(item) {
                     );
                 }
             }
+        } else {
+            unavailableEnglishModelIds.push(...prepared.entries
+                .filter((entry) => entry.fallbackCandidate)
+                .map((entry) => `segment:${entry.segmentIndex}`));
+            await traceAlignment(traceId, 'english_fallback_unavailable', {
+                reason: 'english_model_not_installed',
+                segmentIds: unavailableEnglishModelIds,
+                sourceTextPreserved: true,
+            });
         }
     }
     const initialTimelineDropped = enforceAiTimelineOrder(workingSegments);
@@ -1274,7 +1888,7 @@ async function processOne(item) {
     const rescueEntries = entries
         .filter((entry) => {
             const segment = workingSegments[entry.segmentIndex];
-            return segment && !(segment.end > segment.start);
+            return segment && !hasStoredTiming(segment);
         })
         .map((entry) => {
             const preparedEntry = preparedByIndex.get(entry.segmentIndex);
@@ -1334,6 +1948,7 @@ async function processOne(item) {
             id: entry.id,
             segmentIndex: entry.segmentIndex,
             text: entry.text,
+            lineKind: entry.lineKind || classifyAlignmentLine(entry.text),
         }));
         try {
             const rescueResult = await invoke('run_forced_alignment', {
@@ -1355,7 +1970,12 @@ async function processOne(item) {
                 windowEndMs: rescueWindow.windowEndMs,
                 confidenceScale: rescueWindow.language === 'en' ? 0.30 : 0.50,
             });
+            sourceEvidenceGate.accepted.push(...rescueGate.accepted);
+            sourceEvidenceGate.rejected.push(...rescueGate.rejected);
+            collectGateLexicalEvidence(rescueGate, lexicalEvidenceById, nonLexicalVocalRegionCandidates);
+            markLexicalGateRejections(workingSegments, alignmentEntries, rescueGate);
             const applied = applyFallbackLines(workingSegments, rescueWindow.entries, rescueGate.accepted);
+            acceptedAcousticLines.push(...rescueGate.accepted);
             rescueAppliedCount += applied;
             rescueRejectedCount += rescueGate.rejected.length;
             await traceAlignment(traceId, 'second_pass_rescue', {
@@ -1398,12 +2018,22 @@ async function processOne(item) {
     // 3차 안전망: 음향 필터와 local rescue를 모두 통과하지 못한 실제 가사만
     // 앞뒤 앵커 사이의 보컬 활동량에 따라 추정 배치한다. 기존 싱크와 원문은
     // 읽기 전용이며, 추정값은 강한 검토 대상으로 명시한다.
+    const nonLexicalVocalRegions = mergeBlockedVocalRegions(nonLexicalVocalRegionCandidates);
+    const estimateDiagnostics = {
+        ...(primaryDiagnostics || {}),
+        lexical_evidence_by_id: Object.fromEntries(lexicalEvidenceById),
+        non_lexical_vocal_regions: nonLexicalVocalRegions,
+    };
     const estimateGroups = buildFinalEstimateGroups(workingSegments, entries, markers);
-    const estimatedLines = estimateUnsyncedTimings(estimateGroups, primaryDiagnostics || {});
+    const estimateResult = estimateUnsyncedTimings(estimateGroups, estimateDiagnostics);
+    const estimatedLines = estimateResult.estimates;
+    const estimateRejectedGroups = estimateResult.rejectedGroups;
     const estimatedAppliedCount = applyEstimatedTimings(workingSegments, estimatedLines);
+    const unsyncedReviewIds = markRejectedEstimateGroups(workingSegments, estimateRejectedGroups);
     appliedCount += estimatedAppliedCount;
     await traceAlignment(traceId, 'third_pass_estimate', {
-        diagnostics: primaryDiagnostics || null,
+        diagnostics: estimateDiagnostics,
+        non_lexical_vocal_region: nonLexicalVocalRegions,
         groupCount: estimateGroups.length,
         groups: estimateGroups.map((group) => ({
             segmentIds: group.entries.map((entry) => entry.id),
@@ -1412,42 +2042,107 @@ async function processOne(item) {
             lowerBoundMs: group.lowerBoundMs,
             upperBoundMs: group.upperBoundMs,
             excludedInterludes: group.interludes,
+            third_pass_lexical_eligibility: group.entries.map((entry) => ({
+                id: entry.id,
+                line_kind: entry.lineKind || classifyAlignmentLine(entry.text),
+                evidence: lexicalEvidenceById.get(entry.id) || null,
+            })),
+            softAnchorSkipped: group.skippedSoftAnchors,
+            repeated_lyric: group.entries.filter((entry) => entry.repeatedLyric).map((entry) => entry.id),
+            anchor_trust: {
+                previous: group.previousAnchor?.trust || null,
+                next: group.nextAnchor?.trust || null,
+            },
+            soft_anchor_used: false,
+            soft_anchor_skipped: group.skippedSoftAnchors,
         })),
         estimates: estimatedLines,
+        rejectedGroups: estimateRejectedGroups,
+        estimate_rejections: estimateRejectedGroups.map((group) => ({
+            segment_ids: group.segmentIds,
+            window_density: group.windowDensity,
+            required_duration_ms: group.requiredDurationMs,
+            available_duration_ms: group.availableDurationMs,
+            estimate_rejected_reason: group.rejectedReason,
+            third_pass_lexical_eligibility: group.lexicalEligibility || [],
+        })),
+        estimateRejectedReasons: estimateRejectedGroups.reduce((counts, group) => {
+            counts[group.rejectedReason] = (counts[group.rejectedReason] || 0) + 1;
+            return counts;
+        }, {}),
+        unsyncedReviewIds,
+        unsynced_review_ids: unsyncedReviewIds,
         appliedCount: estimatedAppliedCount,
+    });
+
+    const finalTimelineDropped = enforceAiTimelineOrder(workingSegments);
+    const finalTimelineUnsyncedIds = [];
+    for (const dropped of finalTimelineDropped) {
+        const segment = workingSegments?.[dropped.index];
+        if (!segment) continue;
+        segment.approx = true;
+        segment.confidence = 0;
+        segment.alignmentTrust = 'estimated';
+        segment.alignmentSource = 'unsynced_review';
+        segment.qualityFlags = Array.from(new Set([
+            ...(segment.qualityFlags || []),
+            dropped.reason || 'final_timeline_conflict',
+        ]));
+        finalTimelineUnsyncedIds.push(dropped.id);
+    }
+    if (finalTimelineDropped.length > 0) {
+        appliedCount = Math.max(0, appliedCount - finalTimelineDropped.length);
+        rejectedCount += finalTimelineDropped.length;
+    }
+    await traceAlignment(traceId, 'post_merge_timeline_gate', {
+        phase: 'after_third_pass',
+        dropped: finalTimelineDropped,
+        droppedCount: finalTimelineDropped.length,
+        unsynced_review_ids: finalTimelineUnsyncedIds,
+        reason: finalTimelineDropped.length > 0 ? 'third_pass_reversed_original_order' : null,
     });
 
     const finalUnsyncedEntries = entries.filter((entry) => {
         const segment = workingSegments[entry.segmentIndex];
-        return !segment || !(segment.end > segment.start);
+        return !segment || !hasStoredTiming(segment);
     });
     const finalUnsyncedCount = finalUnsyncedEntries.length;
-    if (finalUnsyncedCount > 0) {
-        item.status = 'error';
-        item.error = `최종 추정 후에도 ${finalUnsyncedCount}줄이 미싱크로 남아 저장을 중단했습니다.`;
-        await traceAlignment(traceId, 'stopped', {
-            reason: 'final_unsynced_integrity_failure',
-            finalUnsyncedIds: finalUnsyncedEntries.map((entry) => entry.id),
-            estimatedIds: estimatedLines.map((line) => line.segment_id),
-        });
-        return;
-    }
-    if (appliedCount === 0) {
-        item.status = 'error';
-        item.error = 'AI가 정렬한 줄과 일치하는 미싱크 가사를 찾지 못했습니다.';
-        return;
-    }
 
     // 4. 저장 (마커 줄 보존)
     const beforeSaveSegments = segments.map((segment) => ({ ...segment }));
     const savedSegments = copyAlignmentTiming(segments, workingSegments);
     const content = encodeLrc(savedSegments, extractMarkerLines(lrcContent));
     const timingAudit = traceTimingAudit(beforeSaveSegments, savedSegments);
+    if (!timingAudit.sourceTextOrderPreserved
+        || !timingAudit.monotonicOrderPreserved
+        || !timingAudit.durationSanityPreserved) {
+        item.status = 'error';
+        item.error = '최종 가사 순서·겹침·길이 감사에 실패해 저장하지 않았습니다.';
+        await traceAlignment(traceId, 'stopped', {
+            reason: 'final_timeline_integrity_failure',
+            timingAudit,
+            finalUnsyncedIds: finalUnsyncedEntries.map((entry) => entry.id),
+        });
+        return;
+    }
+    const lyricsSourceAssessment = assessLyricsSourceMismatch({
+        entries,
+        primaryGate: sourceEvidenceGate,
+        timingAudit,
+    });
+    if (lyricsSourceAssessment.suspected) {
+        await traceAlignment(traceId, 'lyrics_source_warning', {
+            warning: 'verify_lyrics_source_or_song_version',
+            ...lyricsSourceAssessment,
+        });
+    }
     await traceAlignment(traceId, 'before_save', {
         appliedCount,
         attemptRejectedCount: rejectedCount,
         finalUnsyncedCount,
         finalUnsyncedIds: finalUnsyncedEntries.map((entry) => entry.id),
+        unavailableEnglishModelIds,
+        unsynced_review_ids: [...new Set([...unsyncedReviewIds, ...finalTimelineUnsyncedIds])],
         acceptedPrimaryLines: lines,
         secondPass: {
             windowCount: rescueWindows.length,
@@ -1458,6 +2153,13 @@ async function processOne(item) {
                 windowEndMs: window.windowEndMs,
                 windowSource: window.windowSource || null,
                 skipReason: window.skipReason || null,
+                anchorTrust: {
+                    previous: window.windowContext?.previousAnchor?.trust || null,
+                    next: window.windowContext?.nextAnchor?.trust || null,
+                },
+                softAnchorSkipped: window.windowContext?.softAnchorSkipped || [],
+                soft_anchor_used: false,
+                soft_anchor_skipped: window.windowContext?.softAnchorSkipped || [],
             })),
             rescueAppliedCount,
             rescueRejectedCount,
@@ -1470,11 +2172,27 @@ async function processOne(item) {
                 return counts;
             }, {}),
             estimatedIds: estimatedLines.map((line) => line.segment_id),
+            rejectedGroups: estimateRejectedGroups,
+            unsyncedReviewIds,
+            unsynced_review_ids: unsyncedReviewIds,
         },
         timingAudit,
+        lyricsSourceAssessment,
         finalOriginalSegments: savedSegments,
         outputLrc: content,
     });
+    try {
+        await invoke('save_alignment_metadata', {
+            audioPath: item.path,
+            metadata: buildAlignmentMetadata(savedSegments),
+        });
+    } catch (err) {
+        await traceAlignment(traceId, 'alignment_metadata_save_error', { error: String(err) });
+        item.status = 'error';
+        item.error = 'AI 정렬 신뢰도 메타데이터를 저장하지 못해 LRC 저장을 중단했습니다.';
+        console.warn('[AlignQueue] alignment metadata save failed; LRC save stopped:', err);
+        return;
+    }
     await invoke('save_lrc_file', { audioPath: item.path, content });
     await traceAlignment(traceId, 'saved', {
         outputLrc: content,
@@ -1486,16 +2204,27 @@ async function processOne(item) {
     const song = state.songLibrary.find((s) => s.path === item.path);
     if (song) {
         song.hasLyrics = true; song.has_lyrics = true;
-        song.lyricSyncStatus = 'synced'; song.lyric_sync_status = 'synced';
+        const syncStatus = finalUnsyncedCount > 0 ? 'unsynced' : 'synced';
+        song.lyricSyncStatus = syncStatus; song.lyric_sync_status = syncStatus;
     }
 
     item.status = 'done';
     item.note = finalUnsyncedCount > 0
         ? `${appliedCount}줄 배치됨 · ${finalUnsyncedCount}줄 미싱크`
         : `${appliedCount}줄 배치됨`;
+    if (unavailableEnglishModelIds.length > 0) {
+        item.note += ` · 영어 모델 없음 ${unavailableEnglishModelIds.length}줄`;
+    }
+    if (lyricsSourceAssessment.suspected) {
+        item.note += ' · 가사 원문 확인 권장';
+        showNotification(
+            '정렬 시간 구조는 정상이지만 여러 가사가 음향과 충분히 맞지 않습니다. 가사 원문·발음 표기·곡 버전 또는 정렬 모델 언어가 맞는지 다시 확인해 주세요.',
+            'warning',
+        );
+    }
 
     // 이 곡이 지금 가사 싱크 에디터에 열려 있으면 결과를 즉시 반영.
-    notifyItemComplete(item.path, [...lines, ...estimatedLines], savedSegments);
+    notifyItemComplete(item.path, [...acceptedAcousticLines, ...estimatedLines], savedSegments);
 }
 
 async function runQueue() {
