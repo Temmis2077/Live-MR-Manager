@@ -5,8 +5,9 @@ import { parseLrc } from './lyrics.js';
 import { parseMarkers, formatMarkerLine, isTriplet, getSyncText, getDisplayLines, getShowTranslation, setShowTranslation, mergeAlignmentResult, resolveQueueCompletionSegments, encodeLrc, suggestVocalStartFromSegments, parseTimeInput, formatTimeInput, groupTripletLines } from './lrc-parser.js';
 import { getLyricSyncStatus } from './library-filters.js';
 import { isTextEntryDescriptor, shouldToggleAlignmentPlayback } from './alignment-input-policy.js';
-import { applyAlignmentMetadata, buildAlignmentMetadata } from './alignment-metadata.js';
+import { applyAlignmentMetadata, buildAlignmentMetadata, readVocalRegions, snapToVocalEdge } from './alignment-metadata.js';
 import { hasOpenLayer } from './ui/layer-stack.js';
+import { findNextStarted, findPrevStarted, planSegmentEnd, planSegmentStart } from './segment-bounds.js';
 import { openOverlayModal, closeOverlayModal } from './ui/modals.js';
 
 /** Enter로 줄을 찍었을 때 임시로 줄 끝에 주는 길이(초). 다음 줄을 찍으면
@@ -41,6 +42,12 @@ export class ForcedAlignmentViewer {
             // 고정되고, 파형·플레이바로 시간을 옮기면 그 시각의 블럭으로 따라간다.
             // currentSyncIndex(다음에 스탬프 찍을 위치)와는 별개의 개념.
             selectedSegmentIndex: -1,
+            // 보컬 활동 구간(사이드카). 파형 음영과 경계 스냅에 쓴다.
+            // 정렬한 적 없는 곡에는 비어 있고, 그때는 스냅 없이 그대로 동작한다.
+            vocalRegions: [],
+            // 경계를 끌 때 보컬 온셋에 붙일지. 기본 켬 — 손으로 ms를 맞추는 것보다
+            // 낫지만, 일부러 어긋나게 두고 싶을 때가 있어 Alt로 잠시 끌 수 있다.
+            snapToVocal: true,
             // 보컬 시작 지점(초) — 진짜 목소리가 나오는 시작. 재생 시 인트로
             // 자동 건너뛰기의 기준([vocalstart] 마커로 저장). null이면 미지정.
             vocalStartSec: null,
@@ -449,7 +456,10 @@ export class ForcedAlignmentViewer {
             if (this.state.isResizing && this.state.resizeTarget) {
                 const rect = this.canvas.getBoundingClientRect();
                 const x = e.clientX - rect.left;
-                const newTime = Math.max(0, Math.min(this.state.duration, this.xToTime(x)));
+                // 보컬 온셋에 붙인다 — 드래그로 10ms를 집는 건 사실상 불가능해서,
+                // 실제로 노래가 시작·끝나는 자리에 자석처럼 붙여 준다.
+                // Alt를 누르고 있으면 잠시 끈다(일부러 어긋나게 둘 때).
+                const newTime = this.snapTime(this.xToTime(x), e.altKey);
 
                 const idx = this.state.resizeTarget.index;
                 const seg = this.state.segments[idx];
@@ -481,7 +491,7 @@ export class ForcedAlignmentViewer {
             if (this.state.isResizingInterlude && this.state.interludeResizeTarget) {
                 const rect = this.canvas.getBoundingClientRect();
                 const x = e.clientX - rect.left;
-                const newTime = Math.max(0, Math.min(this.state.duration, this.xToTime(x)));
+                const newTime = this.snapTime(this.xToTime(x), e.altKey);
 
                 const idx = this.state.interludeResizeTarget.index;
                 const il = this.state.interludes[idx];
@@ -563,47 +573,16 @@ export class ForcedAlignmentViewer {
                 }
             }
 
-            if (this.state.selectedTarget) {
-                const seg = this.state.segments[this.state.selectedTarget.index];
-                if (!seg) return;
-
-                const step = e.shiftKey ? 0.1 : 0.01;
-                let changed = false;
-
-                if (e.key === 'ArrowLeft') {
-                    this.recordSyncHistory('가사 경계 미세 조정', true);
-                    if (this.state.selectedTarget.type === 'start') {
-                        seg.start = Math.max(0, seg.start - step);
-                    } else {
-                        seg.end = Math.max(seg.start + 0.05, seg.end - step);
-                    }
-                    seg.approx = false;
-                    changed = true;
-                } else if (e.key === 'ArrowRight') {
-                    this.recordSyncHistory('가사 경계 미세 조정', true);
-                    if (this.state.selectedTarget.type === 'start') {
-                        seg.start = Math.min(seg.end - 0.05, seg.start + step);
-                    } else {
-                        seg.end = Math.min(this.state.duration, seg.end + step);
-                    }
-                    seg.approx = false;
-                    changed = true;
-                } else if (e.key === 'Escape' || e.key === 'Enter') {
-                    this.state.selectedTarget = null;
-                    changed = true;
-                }
-
-                if (changed) {
-                    e.preventDefault();
-                    this.drawWaveform();
-                    this.renderLyricList();
-                    if (e.key !== 'Escape' && e.key !== 'Enter') {
-                        this.markDirtyAndScheduleSave();
-                    }
-                }
-            } else if (state.activeView === 'alignment') {
+            if (state.activeView === 'alignment') {
                 // 가사 싱크 탭 전용 단축키. Space가 재생/정지와 싱크 맞추기를
                 // 겸해서 헷갈리던 것을 분리: Space=재생/정지, Enter=싱크 맞추기.
+                //
+                // Enter는 경계를 선택한 상태에서도 반드시 여기로 와야 한다.
+                // 예전에는 selectedTarget이 있으면 위쪽 분기가 Enter를 '선택
+                // 해제'로 먼저 먹어서, 목록에서 줄을 클릭해 둔 채 Shift+Enter를
+                // 누르면 끝이 안 찍혔다. 게다가 markLineEnd가 스스로
+                // selectedTarget을 세우므로 성공한 바로 다음 Enter도 삼켜졌다.
+                // 선택 해제는 Escape 하나로 충분하다.
                 if (e.code === 'Enter') {
                     e.preventDefault();
                     // Enter = 가사 시작, Shift+Enter = 가사 끝.
@@ -616,6 +595,11 @@ export class ForcedAlignmentViewer {
                     const dir = e.code === 'ArrowRight' ? 1 : -1;
                     const step = e.shiftKey ? 0.1 : 0.01;
                     if (this.nudgeSelectedBoundary(dir * step)) e.preventDefault();
+                } else if (e.key === 'Escape' && this.state.selectedTarget) {
+                    e.preventDefault();
+                    this.state.selectedTarget = null;
+                    this.drawWaveform();
+                    this.renderLyricList();
                 } else if (e.code === 'KeyV') {
                     // 현재 재생 위치에 보컬 시작 지점 지정
                     e.preventDefault();
@@ -885,6 +869,9 @@ export class ForcedAlignmentViewer {
                         const storedMetadata = await this.invoke('load_alignment_metadata', { audioPath: path });
                         if (isStale()) return;
                         normalizedSegments = applyAlignmentMetadata(normalizedSegments, storedMetadata).segments;
+                        // 보컬 활동 구간 — 곡 단위라 가사를 고쳐도 유효하다.
+                        // 파형 음영과 경계 스냅에 쓴다.
+                        this.state.vocalRegions = readVocalRegions(storedMetadata);
                     } catch (metadataErr) {
                         console.warn('[Alignment] metadata restore failed:', metadataErr);
                     }
@@ -1091,6 +1078,28 @@ export class ForcedAlignmentViewer {
         const startTime = this.state.scrollTime;
         const endTime = startTime + visibleDuration;
 
+        // 0. 보컬 활동 구간 — 실제로 목소리가 나는 자리를 바탕에 옅게 깐다.
+        //
+        // 정렬 모델이 20ms 프레임 활동도를 구간으로 압축해 이미 만들어 두는
+        // 값이다(사이드카). 파형만 보면 반주와 목소리가 구분되지 않아 경계를
+        // 어디에 둬야 할지 눈으로 알기 어려웠다.
+        //
+        // 가장 아래 층에 그린다 — 가사 블럭·간주·마커를 가리면 안 된다.
+        // 활동도가 높을수록 진하게 해서 "여기서 확실히 노래한다"를 구분한다.
+        if (Array.isArray(this.state.vocalRegions) && this.state.vocalRegions.length > 0) {
+            for (const r of this.state.vocalRegions) {
+                const s0 = r.startMs / 1000;
+                const s1 = r.endMs / 1000;
+                if (s1 < startTime || s0 > endTime) continue;
+                const x0 = this.timeToX(Math.max(s0, startTime));
+                const x1 = this.timeToX(Math.min(s1, endTime));
+                const w = Math.max(1, x1 - x0);
+                const alpha = 0.05 + Math.min(0.13, Math.max(0, r.activity) * 0.13);
+                this.ctx.fillStyle = `rgba(34, 197, 94, ${alpha.toFixed(3)})`;
+                this.ctx.fillRect(x0, 0, w, height);
+            }
+        }
+
         // 0a. Interludes (confirmed) — hatched region + draggable edge handles
         const drawInterludeBand = (il, idx, confirmed) => {
             if (il.end < startTime || il.start > endTime) return;
@@ -1281,6 +1290,26 @@ export class ForcedAlignmentViewer {
             this.ctx.lineTo(px, height);
             this.ctx.stroke();
         }
+    }
+
+    /**
+     * 시각을 곡 범위로 자르고, 근처에 보컬 온셋이 있으면 거기에 붙인다.
+     *
+     * 정렬 모델이 만든 보컬 활동 구간(사이드카)의 시작·끝이 후보다. 없으면
+     * (정렬한 적 없는 곡) 자르기만 하고 그대로 돌려준다 — 스냅이 없다고
+     * 편집이 막히면 안 된다.
+     *
+     * @param {number} timeSec  원래 시각(초)
+     * @param {boolean} disable Alt 등으로 잠시 끌 때
+     */
+    snapTime(timeSec, disable = false) {
+        const clamped = Math.max(0, Math.min(this.state.duration, timeSec));
+        if (disable || !this.state.snapToVocal) return clamped;
+
+        const snapped = snapToVocalEdge(this.state.vocalRegions, clamped * 1000, 120);
+        if (snapped == null) return clamped;
+        this.state.lastSnapMs = snapped;   // 파형에 붙은 자리를 표시하려고
+        return Math.max(0, Math.min(this.state.duration, snapped / 1000));
     }
 
     /**
@@ -1824,25 +1853,15 @@ export class ForcedAlignmentViewer {
             return;
         }
 
-        const MIN_LEN = 0.05;
-        // 다음 줄이 이미 찍혀 있으면 그 앞까지만. 없으면 곡 끝까지.
-        let nextStarted = null;
-        for (let j = idx + 1; j < this.state.segments.length; j++) {
-            if (this.state.segments[j].start > 0) { nextStarted = this.state.segments[j]; break; }
-        }
-        const upper = nextStarted ? nextStarted.start : this.state.duration;
-        const lower = seg.start + MIN_LEN;
-        if (upper <= lower) {
+        const requested = this.state.currentTime;
+        this.recordSyncHistory('가사 끝 지정');
+
+        const res = this.applySegmentEnd(idx, requested);
+        if (!res) {
             this.updateActionHint(false, '다음 가사가 너무 가까워 끝을 잡을 자리가 없습니다.', true);
             showNotification('다음 가사와 너무 가까워 끝 지점을 적용하지 않았습니다.', 'warning');
             return;
         }
-
-        const requested = this.state.currentTime;
-        const now = Math.max(lower, Math.min(requested, upper));
-        this.recordSyncHistory('가사 끝 지정');
-        seg.end = now;
-        seg.approx = false;
 
         // 끝을 명시했으면 그 줄을 보여 준다 — 무엇이 바뀌었는지 눈으로 확인.
         this.state.selectedSegmentIndex = idx;
@@ -1851,8 +1870,11 @@ export class ForcedAlignmentViewer {
         this.drawWaveform();
         this.markDirtyAndScheduleSave();
 
-        if (Math.abs(now - requested) > 0.001) {
-            this.updateActionHint(false, '앞뒤 가사를 침범하지 않도록 끝 위치를 제한했습니다. Ctrl+Z로 복구할 수 있습니다.');
+        // 무슨 일이 있었는지 알려 준다 — 조용히 다른 줄을 건드리면 안 된다.
+        if (res.pushed) {
+            this.updateActionHint(false, '다음 가사 시작을 여기까지 밀었습니다. Ctrl+Z로 되돌릴 수 있습니다.');
+        } else if (Math.abs(res.applied - requested) > 0.001) {
+            this.updateActionHint(false, '다음 가사를 통째로 덮지 않도록 끝 위치를 제한했습니다. Ctrl+Z로 복구할 수 있습니다.');
         }
     }
 
@@ -1869,28 +1891,70 @@ export class ForcedAlignmentViewer {
     }
 
     /**
+     * 이 줄의 끝을 옮긴다. 뒤 줄과 겹치면 **뒤 줄 시작을 밀어준다.**
+     *
+     * 예전에는 뒤 줄 시작 앞에서 잘라 버렸는데, AI 정렬을 한 번 돌리면 모든 줄에
+     * 시작이 들어가 있어서 "다음 줄 시작이 틀렸는데 그 앞을 못 넘는" 상태가 됐다.
+     * 사용자가 "여기까지가 이 줄"이라고 찍은 것이므로 다음 줄이 그 뒤로 물러나는
+     * 게 맞다. 다만 다음 줄을 통째로 삼키지는 않는다 — 그 줄도 최소 길이는 남긴다.
+     *
+     * @returns {{applied:number, pushed:boolean}|null} 적용 못 하면 null
+     */
+    applySegmentEnd(idx, requestedEnd) {
+        const seg = this.state.segments[idx];
+        if (!seg) return null;
+
+        // 아직 안 찍은 줄(start<=0)은 벽이 아니다.
+        const next = findNextStarted(this.state.segments, idx);
+        const plan = planSegmentEnd({ seg, next, duration: this.state.duration, requestedEnd });
+        if (!plan) return null;
+
+        seg.end = plan.applied;
+        seg.approx = false;
+        if (plan.pushNextStartTo !== null) next.start = plan.pushNextStartTo;
+
+        return { applied: plan.applied, pushed: plan.pushNextStartTo !== null };
+    }
+
+    /**
+     * 이 줄의 시작을 옮긴다. 앞 줄과 겹치면 **앞 줄 끝을 당겨준다.**
+     * 끝 쪽(applySegmentEnd)과 같은 규칙을 앞뒤 대칭으로 적용한 것이다.
+     */
+    applySegmentStart(idx, requestedStart) {
+        const seg = this.state.segments[idx];
+        if (!seg) return null;
+
+        const prev = findPrevStarted(this.state.segments, idx);
+        const plan = planSegmentStart({ seg, prev, requestedStart });
+        if (!plan) return null;
+
+        seg.start = plan.applied;
+        seg.approx = false;
+        if (plan.pullPrevEndTo !== null) prev.end = plan.pullPrevEndTo;
+
+        return { applied: plan.applied, pushed: plan.pullPrevEndTo !== null };
+    }
+
+    /**
      * 선택한 경계를 아주 조금 움직인다(방향키). 드래그로는 10ms 단위를 집을 수
      * 없어서, 실제 미세조정은 키보드로 해야 한다.
+     *
+     * Shift+Enter(끝 지정)와 **같은 규칙**을 쓴다. 예전에는 이 함수가 이웃을
+     * 존중하는데 정작 키 처리는 다른 인라인 코드로 흘러가 이웃을 침범해서,
+     * 같은 편집기 안에서 규칙이 정반대였다.
      */
     nudgeSelectedBoundary(deltaSec) {
         const target = this.state.selectedTarget;
         if (!target) return false;
-        const idx = target.index;
-        const seg = this.state.segments[idx];
+        const seg = this.state.segments[target.index];
         if (!seg) return false;
-        this.recordSyncHistory('가사 경계 미세 조정', true);
 
-        const MIN_LEN = 0.05;
-        if (target.type === 'start') {
-            const prev = idx > 0 ? this.state.segments[idx - 1] : null;
-            const lo = prev ? Math.max(0, prev.end) : 0;
-            seg.start = Math.max(lo, Math.min(seg.start + deltaSec, seg.end - MIN_LEN));
-        } else {
-            const next = this.state.segments[idx + 1];
-            const hi = (next && next.start > 0) ? next.start : this.state.duration;
-            seg.end = Math.min(hi, Math.max(seg.end + deltaSec, seg.start + MIN_LEN));
-        }
-        seg.approx = false;
+        this.recordSyncHistory('가사 경계 미세 조정', true);
+        const res = target.type === 'start'
+            ? this.applySegmentStart(target.index, seg.start + deltaSec)
+            : this.applySegmentEnd(target.index, seg.end + deltaSec);
+        if (!res) return false;
+
         this.renderLyricList();
         this.drawWaveform();
         this.markDirtyAndScheduleSave();
@@ -2858,7 +2922,13 @@ export class ForcedAlignmentViewer {
             try {
                 await this.invoke('save_alignment_metadata', {
                     audioPath: this.state.currentPath,
-                    metadata: buildAlignmentMetadata(syncableSegments),
+                    // 보컬 구간을 같이 넘긴다 — 안 넘기면 사용자가 손으로
+                    // 한 번 저장할 때마다 정렬이 만든 값이 지워진다.
+                    metadata: buildAlignmentMetadata(syncableSegments, {
+                        vocalRegions: (this.state.vocalRegions || []).map((r) => ({
+                            start_ms: r.startMs, end_ms: r.endMs, activity: r.activity,
+                        })),
+                    }),
                 });
             } catch (metadataErr) {
                 throw new Error('정렬 신뢰도 메타데이터 저장 실패: ' + metadataErr);

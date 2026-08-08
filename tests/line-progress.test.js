@@ -8,7 +8,10 @@
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { lineProgress, buildAlignmentMetadata, applyAlignmentMetadata } from '../src/js/alignment-metadata.js';
+import {
+  lineProgress, buildAlignmentMetadata, applyAlignmentMetadata,
+  readVocalRegions, snapToVocalEdge,
+} from '../src/js/alignment-metadata.js';
 
 /** 오버레이 쪽 정본 구현(shared.js는 클래식 스크립트라 이렇게 불러온다). */
 function loadOverlayRatio() {
@@ -170,5 +173,91 @@ describe('두 구현이 어긋나지 않는다', () => {
       const overlay = overlayRatio(words, start * 1000, end * 1000, t);
       expect(overlay).toBeCloseTo(app, 6);
     }
+  });
+});
+
+describe('보컬 활동 구간 — 저장·복원', () => {
+  const regions = [
+    { start_ms: 1000, end_ms: 2500, activity: 0.82 },
+    { start_ms: 4000, end_ms: 6000, activity: 0.41 },
+  ];
+
+  it('사이드카 최상위에 담긴다 (곡 단위 값이라 줄과 무관)', () => {
+    const s = buildAlignmentMetadata([{ text: 'a', start: 1, end: 2 }], { vocalRegions: regions });
+    expect(s.vocalRegions).toEqual([
+      { s: 1000, e: 2500, a: 0.82 },
+      { s: 4000, e: 6000, a: 0.41 },
+    ]);
+  });
+
+  it('없으면 필드를 만들지 않는다', () => {
+    const s = buildAlignmentMetadata([{ text: 'a', start: 1, end: 2 }]);
+    expect(s.vocalRegions).toBeUndefined();
+  });
+
+  it('망가진 구간은 버린다', () => {
+    const s = buildAlignmentMetadata([{ text: 'a', start: 0, end: 1 }], {
+      vocalRegions: [
+        { start_ms: 100, end_ms: 50 },    // 끝이 시작보다 앞
+        { start_ms: 'x', end_ms: 200 },   // 숫자가 아님
+        { start_ms: 300, end_ms: 400, activity: 0.5 },
+      ],
+    });
+    expect(s.vocalRegions).toEqual([{ s: 300, e: 400, a: 0.5 }]);
+  });
+
+  it('읽으면 카멜케이스로 돌아온다', () => {
+    const s = buildAlignmentMetadata([{ text: 'a', start: 1, end: 2 }], { vocalRegions: regions });
+    expect(readVocalRegions(s)).toEqual([
+      { startMs: 1000, endMs: 2500, activity: 0.82 },
+      { startMs: 4000, endMs: 6000, activity: 0.41 },
+    ]);
+  });
+
+  it('사이드카가 없거나 비어도 빈 배열', () => {
+    expect(readVocalRegions(null)).toEqual([]);
+    expect(readVocalRegions({})).toEqual([]);
+  });
+
+  it('가사를 고쳐 줄이 바뀌어도 보컬 구간은 유효하다', () => {
+    // 곡 단위 값이라 sourceFingerprint 검사와 무관해야 한다.
+    const s = buildAlignmentMetadata([{ text: 'a', start: 1, end: 2 }], { vocalRegions: regions });
+    const { appliedCount } = applyAlignmentMetadata([{ text: '완전히 다른 줄', start: 9, end: 10 }], s);
+    expect(appliedCount).toBe(0);          // 줄 복원은 거부되지만
+    expect(readVocalRegions(s)).toHaveLength(2);  // 오디오 기반 값은 그대로 읽힌다
+  });
+});
+
+describe('경계 스냅', () => {
+  const regions = [
+    { startMs: 1000, endMs: 2500, activity: 0.8 },
+    { startMs: 4000, endMs: 6000, activity: 0.4 },
+  ];
+
+  it('가까운 온셋에 붙는다', () => {
+    expect(snapToVocalEdge(regions, 1040)).toBe(1000);
+    expect(snapToVocalEdge(regions, 2460)).toBe(2500);
+    expect(snapToVocalEdge(regions, 3950)).toBe(4000);
+  });
+
+  it('허용 범위 밖이면 붙지 않는다 (원래 값을 쓰게 null)', () => {
+    expect(snapToVocalEdge(regions, 3000)).toBeNull();
+    expect(snapToVocalEdge(regions, 1200)).toBeNull();
+  });
+
+  it('허용 범위는 조절할 수 있다', () => {
+    expect(snapToVocalEdge(regions, 1200, 300)).toBe(1000);
+  });
+
+  it('두 온셋 사이면 더 가까운 쪽', () => {
+    // 2500과 4000 사이 — 2900은 2500 쪽(400) vs 4000 쪽(1100)
+    expect(snapToVocalEdge(regions, 2900, 500)).toBe(2500);
+    expect(snapToVocalEdge(regions, 3800, 500)).toBe(4000);
+  });
+
+  it('구간이 없으면 null — 정렬한 적 없는 곡에서도 편집이 막히면 안 된다', () => {
+    expect(snapToVocalEdge([], 1000)).toBeNull();
+    expect(snapToVocalEdge(null, 1000)).toBeNull();
+    expect(snapToVocalEdge(regions, NaN)).toBeNull();
   });
 });

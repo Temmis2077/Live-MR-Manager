@@ -86,13 +86,44 @@ function copyPersistedMetadata(segment) {
   return metadata;
 }
 
-/** Build a sidecar that preserves timing provenance without modifying LRC text. */
-export function buildAlignmentMetadata(segments) {
+/**
+ * 보컬 활동 구간을 저장 가능한 형태로 줄인다.
+ *
+ * 정렬이 20ms 프레임 활동도를 구간으로 압축해 이미 만들어 두는 값
+ * (AlignmentDiagnostics.vocal_regions)인데, 정렬이 끝나면 버려졌다.
+ * 곡 단위 값이라 줄이 아니라 사이드카 최상위에 둔다.
+ *
+ * 키를 짧게(s/e/a) 쓰는 이유는 줄 단위 words와 같다 — 구간이 수백 개다.
+ */
+function copyVocalRegions(regions) {
+  if (!Array.isArray(regions)) return null;
+  const out = [];
+  for (const r of regions) {
+    const s = Number(r?.start_ms ?? r?.startMs);
+    const e = Number(r?.end_ms ?? r?.endMs);
+    const a = Number(r?.activity);
+    if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s) continue;
+    out.push({ s: Math.round(s), e: Math.round(e), a: Number.isFinite(a) ? Number(a.toFixed(3)) : 0 });
+  }
+  return out.length > 0 ? out : null;
+}
+
+/**
+ * Build a sidecar that preserves timing provenance without modifying LRC text.
+ *
+ * @param {Array} segments 줄 목록
+ * @param {object} [extras] 곡 단위 파생 데이터. `vocalRegions`를 받는다.
+ */
+export function buildAlignmentMetadata(segments, extras = {}) {
   const values = segments || [];
+  const vocalRegions = copyVocalRegions(extras?.vocalRegions);
   return {
     schemaVersion: ALIGNMENT_METADATA_SCHEMA_VERSION,
     sourceFingerprint: sourceFingerprint(values),
     segmentCount: values.length,
+    // 곡 단위 — 줄과 무관하므로 sourceFingerprint 검사에 걸리지 않는다.
+    // 가사를 고쳐 줄이 바뀌어도 오디오가 그대로면 이 값은 유효하다.
+    ...(vocalRegions ? { vocalRegions } : {}),
     segments: values.map((segment, index) => ({
       id: `segment:${index}`,
       sourceKey: fnv1a64(JSON.stringify(sourceIdentity(segment))),
@@ -170,6 +201,39 @@ export function applyAlignmentMetadata(segments, sidecar) {
  * @param {number} positionMs 현재 재생 위치(ms)
  * @returns {number} 0~1
  */
+export function readVocalRegions(sidecar) {
+  const raw = sidecar?.vocalRegions;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((r) => ({ startMs: Number(r?.s) || 0, endMs: Number(r?.e) || 0, activity: Number(r?.a) || 0 }))
+    .filter((r) => r.endMs > r.startMs);
+}
+
+/**
+ * 주어진 시각 근처의 보컬 시작·끝 지점 중 가장 가까운 것을 찾는다.
+ *
+ * 편집기에서 경계를 끌 때 "노래가 실제로 시작하는 자리"에 붙이는 데 쓴다.
+ * 지금은 ms를 눈과 손으로 맞춰야 한다.
+ *
+ * @param {Array} regions readVocalRegions() 결과
+ * @param {number} timeMs 기준 시각
+ * @param {number} toleranceMs 이 안에 후보가 없으면 스냅하지 않는다
+ * @returns {number|null} 붙일 시각(ms). 없으면 null — 호출부는 원래 값을 쓴다.
+ */
+export function snapToVocalEdge(regions, timeMs, toleranceMs = 120) {
+  if (!Array.isArray(regions) || regions.length === 0) return null;
+  if (!Number.isFinite(timeMs)) return null;
+  let best = null;
+  let bestDist = Infinity;
+  for (const r of regions) {
+    for (const edge of [r.startMs, r.endMs]) {
+      const d = Math.abs(edge - timeMs);
+      if (d < bestDist) { bestDist = d; best = edge; }
+    }
+  }
+  return bestDist <= toleranceMs ? best : null;
+}
+
 export function lineProgress(segment, positionMs) {
   if (!segment) return 0;
   const pos = Number(positionMs);

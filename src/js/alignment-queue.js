@@ -2184,7 +2184,12 @@ async function processOne(item) {
     try {
         await invoke('save_alignment_metadata', {
             audioPath: item.path,
-            metadata: buildAlignmentMetadata(savedSegments),
+            // 보컬 활동 구간은 곡 단위 파생 데이터다 — 정렬이 이미 계산해
+            // 놓고 여태 버려졌다. 편집기의 경계 스냅·구간 음영이 이걸 쓴다.
+            metadata: buildAlignmentMetadata(savedSegments, {
+                vocalRegions: primaryDiagnostics?.vocal_regions
+                    ?? primaryDiagnostics?.vocalRegions,
+            }),
         });
     } catch (err) {
         await traceAlignment(traceId, 'alignment_metadata_save_error', { error: String(err) });
