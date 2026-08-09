@@ -8,13 +8,15 @@
  * 옮기고(appendChild) 닫을 때 원래 자리로 되돌린다. 그래야 프리셋·슬라이더·
  * 리셋 버튼에 붙어 있는 핸들러와 상태가 하나로 유지된다.
  */
+import { pushLayer, popLayer } from './layer-stack.js';
+
 const $ = (id) => document.getElementById(id);
 
 let host = null;        // 떠 있는 패널
 let slot = null;        // 설정 UI가 들어갈 자리
 let homeParent = null;  // 원래 부모
 let homeNext = null;    // 원래 다음 형제 (순서 복원용)
-let lastFocus = null;
+let layer = null;       // 레이어 스택 핸들 (Esc·포커스 복귀 담당)
 
 function build() {
   if (host) return;
@@ -42,10 +44,8 @@ function build() {
   host.querySelectorAll('[data-ov-close]').forEach((el) => {
     el.addEventListener('click', close);
   });
-
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !host.hidden) close();
-  });
+  // Esc는 ui/layer-stack.js가 맡는다 — 여러 개가 떠 있을 때 최상단 하나만
+  // 닫히도록 앱 전체가 같은 규칙을 쓴다.
 }
 
 /**
@@ -117,11 +117,25 @@ function restructureIntoPanes(tab) {
   if (visibilityCard) left.appendChild(visibilityCard);
   if (designCard) left.appendChild(designCard);
 
+  // 위 목록에 없는 나머지도 전부 왼쪽으로 쓸어 담는다.
+  //
+  // 예전에는 아는 카드만 옮기고 끝냈다. 그래서 설정 화면에 카드를 새로 넣으면
+  // 그 카드만 .ov-panes 바깥에 남아 패널을 뚫고 나갔다(가사 타이밍 보정 카드가
+  // 실제로 그렇게 됐다). 오버레이와 무관한 작업이 이 화면을 깨뜨리면 안 된다.
+  // 순서는 위에서 정한 것이 유지되고, 모르는 카드는 그 아래에 붙는다.
+  Array.from(container.children).forEach((child) => {
+    if (child !== panes) left.appendChild(child);
+  });
+
   tab.dataset.paned = '1';
 }
 
 export function openOverlayFloat() {
   build();
+  // 이미 열려 있으면 아무것도 하지 않는다. 그대로 두면 pushLayer가 한 번 더
+  // 불려 앞의 핸들을 잃어버리고, 그 레이어가 스택에 영영 남는다.
+  if (!host.hidden) return;
+
   const tab = $('overlay-tab');
   if (!tab) return;
   restructureIntoPanes(tab);
@@ -133,7 +147,6 @@ export function openOverlayFloat() {
     slot.appendChild(tab);
   }
 
-  lastFocus = document.activeElement;
   host.hidden = false;
   document.body.classList.add('ov-float-open');
 
@@ -144,9 +157,13 @@ export function openOverlayFloat() {
   const iframe = $('overlay-iframe');
   if (iframe && !iframe.src) iframe.src = 'overlay-info.html?preview=true';
 
-  // 키보드 사용자가 패널 안에서 시작하도록 초점을 옮긴다. 보이게 된 직후
-  // 바로 잡아야 한다 — rAF로 미루면 그 사이에 초점이 body로 빠진다.
-  host.querySelector('.ov-float-close')?.focus();
+  // 레이어에 올리면 초점 이동·Tab 순환·닫은 뒤 초점 복귀를 한 번에 받는다.
+  // 보이게 된 직후 바로 올려야 한다 — 미루면 그 사이 초점이 body로 빠진다.
+  layer = pushLayer({
+    id: 'overlay-float',
+    el: host.querySelector('.ov-float-panel'),
+    close,
+  });
 
   // 숨겨져 있던 동안 미리보기 크기 계산이 밀려 있다 — 보이게 된 뒤 한 번 알린다.
   requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
@@ -168,8 +185,8 @@ export function close() {
     }
   }
 
-  if (lastFocus && document.contains(lastFocus)) lastFocus.focus();
-  lastFocus = null;
+  popLayer(layer);
+  layer = null;
 }
 
 export function isOpen() {

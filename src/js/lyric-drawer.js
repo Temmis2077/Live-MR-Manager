@@ -5,7 +5,7 @@ import { listen, invoke } from './tauri-bridge.js';
 import { state } from './state.js';
 import { registerAppHandler, callAppHandler } from './app-context.js';
 import { getDisplayLines } from './lrc-parser.js';
-import { findUpcomingIndex } from './live-performance.js';
+import { findUpcomingIndex, resolveLineWindow } from './live-performance.js';
 
 let lastOverlayCurrent = null;
 let lastOverlayNext = null;
@@ -417,12 +417,21 @@ function syncLyricsWithTime(currentTime) {
                 .map((w) => [String(w.word || ''), Math.max(0, Math.round(w.startMs - back)), Math.max(0, Math.round(w.endMs - back))])
             : [];
 
+        // 구간은 라이브 본문과 같은 규칙으로 정한다(resolveLineWindow).
+        //
+        // 예전에는 여기서 seg.start/seg.end를 그대로 보냈다. 그런데 라이브
+        // 본문은 끝 시각이 없으면 다음 줄 시작까지로 보고 그 간격에 상한도
+        // 둔다. 그래서 같은 줄인데 두 화면의 채워진 정도가 달랐다 —
+        // 끝 시각이 0인 줄은 오버레이만 아예 안 차기도 했다.
+        const win = seg ? resolveLineWindow(seg, lyrics[playingIndex + 1] || null) : null;
+        const toMs = (sec) => Math.max(0, Math.round((sec || 0) * 1000 - back));
+
         invoke('update_overlay_lyrics', {
             current,
             next,
             index: playingIndex,   // 가사 뷰 페이지(/lyrics-view)의 현재 줄 하이라이트용
-            lineStartMs: seg ? Math.max(0, Math.round((seg.start || 0) * 1000 - back)) : 0,
-            lineEndMs: seg ? Math.max(0, Math.round((seg.end || 0) * 1000 - back)) : 0,
+            lineStartMs: win?.startSec != null ? toMs(win.startSec) : 0,
+            lineEndMs: win?.endSec != null ? toMs(win.endSec) : 0,
             lineWords: words,
         }).catch(err => console.error(err));
         lastOverlayCurrent = current;

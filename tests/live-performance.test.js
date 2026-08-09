@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { appendLiveHistory, buildPerformerLyricModel, findUpcomingIndex, getLiveSectionState, isMrReady, moveQueueItem, nextLiveQueuePath, resolveNextLiveQueuePath, takePreviousLivePath } from '../src/js/live-performance.js';
+import { appendLiveHistory, buildPerformerLyricModel, findUpcomingIndex, getLiveSectionState, isMrReady, moveQueueItem, nextLiveQueuePath, resolveNextLiveQueuePath, takePreviousLivePath, resolveLineWindow } from '../src/js/live-performance.js';
 
 describe('live performer timing model', () => {
   const lyrics = [
@@ -223,5 +223,49 @@ describe('진행도 — 단어 타임을 쓴다 (계산이 한 곳)', () => {
   it('시작 0초는 여전히 "아직 안 정해짐" 센티널이다', () => {
     // 이 규칙을 깨면 미싱크 줄이 진행도를 그리기 시작한다.
     expect(buildPerformerLyricModel([{ start: 0, end: 4, text: 'x' }], 0, 2, M).progress).toBe(0);
+  });
+});
+
+describe('resolveLineWindow — 두 화면이 같은 구간을 쓴다', () => {
+  it('끝 시각이 있으면 그대로', () => {
+    expect(resolveLineWindow({ start: 10, end: 12 }, { start: 12 }))
+      .toEqual({ startSec: 10, endSec: 12 });
+  });
+
+  it('끝 시각이 없으면 다음 줄 시작까지', () => {
+    // LRC로 가져온 가사는 끝 시각이 없는 게 흔하다. 예전에는 오버레이가
+    // end=0을 그대로 받아 진행도를 아예 안 그렸다.
+    expect(resolveLineWindow({ start: 10, end: 0 }, { start: 13 }))
+      .toEqual({ startSec: 10, endSec: 13 });
+  });
+
+  it('간격이 너무 길면 상한을 쓴다', () => {
+    // 마지막 줄·간주 앞 줄은 다음 줄까지 수십 초라, 그대로 두면 진행도가
+    // 기어가듯 움직인다.
+    expect(resolveLineWindow({ start: 10, end: 0 }, { start: 90 }))
+      .toEqual({ startSec: 10, endSec: 20 });
+    expect(resolveLineWindow({ start: 10, end: 90 }, null))
+      .toEqual({ startSec: 10, endSec: 20 });
+  });
+
+  it('다음 줄이 없고 끝도 없으면 끝을 정하지 않는다', () => {
+    expect(resolveLineWindow({ start: 10, end: 0 }, null))
+      .toEqual({ startSec: 10, endSec: null });
+  });
+
+  it('시작 0초는 "아직 안 정해짐"이라 값으로 치지 않는다', () => {
+    expect(resolveLineWindow({ start: 0, end: 4 }, null).startSec).toBeNull();
+  });
+
+  it('buildPerformerLyricModel과 같은 구간을 낸다', () => {
+    // 모델이 안에서 쓰는 구간과 오버레이로 보내는 구간이 갈리면, 같은 줄인데
+    // 두 화면의 채워진 정도가 달라진다.
+    const M = { vocalStartSec: null, interludes: [] };
+    const list = [{ start: 10, end: 0, text: 'a' }, { start: 90, text: 'b' }];
+    const win = resolveLineWindow(list[0], list[1]);
+    const model = buildPerformerLyricModel(list, 0, 15, M);
+    // 구간이 10~20이면 15초는 정확히 절반이다.
+    expect(win).toEqual({ startSec: 10, endSec: 20 });
+    expect(model.progress).toBeCloseTo(0.5, 3);
   });
 });

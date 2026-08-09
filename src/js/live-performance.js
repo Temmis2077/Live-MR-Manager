@@ -15,6 +15,31 @@ export function isMrReady(song) {
     || song.mr_path || song.hasMr || song.has_mr || song.mrReady);
 }
 
+/**
+ * 한 줄의 진행도를 그릴 구간(초)을 정한다.
+ *
+ * 진행도를 그리는 화면이 둘이다 — 라이브 본문과 OBS 오버레이. 두 화면이 구간을
+ * 각자 정하면 같은 줄인데 채워진 정도가 다르게 보인다(실제로 그랬다).
+ * 그래서 이 규칙은 여기 한 곳에만 둔다.
+ *
+ * - 끝 시각이 없으면(LRC로 가져온 가사는 흔하다) 다음 줄 시작까지로 본다.
+ * - 그 간격이 너무 길면 상한을 쓴다. 마지막 줄이나 간주 앞 줄은 다음 줄까지가
+ *   수십 초라, 그대로 두면 진행도가 기어가듯 움직인다.
+ * - 0은 "아직 안 정해짐" 센티널이라 값으로 치지 않는다(definedTime).
+ *
+ * @returns {{startSec: number|null, endSec: number|null}}
+ */
+export function resolveLineWindow(current, upcoming) {
+  const startSec = definedTime(current?.start);
+  const upcomingStart = definedTime(upcoming?.start);
+  const rawEnd = definedTime(current?.end)
+    ?? (startSec != null && upcomingStart != null && upcomingStart > startSec ? upcomingStart : null);
+  const endSec = rawEnd == null || startSec == null
+    ? rawEnd
+    : Math.min(rawEnd, startSec + MAX_SWEEP_SEC);
+  return { startSec, endSec };
+}
+
 const validTime = (value) => value !== null && value !== '' && Number.isFinite(Number(value)) ? Number(value) : null;
 
 /**
@@ -140,14 +165,7 @@ export function buildPerformerLyricModel(segments, currentIndex, positionSec, ma
   const next = pending ? (list[upcomingIndex + 1] || null) : upcoming;
 
   const nextStartSec = definedTime(next?.start);
-  const currentStart = definedTime(current?.start);
-  // 끝 시각이 없으면 다음 줄 시작까지로 보되, 그 간격이 너무 길면 상한을 쓴다.
-  const upcomingStart = definedTime(upcoming?.start);
-  const rawEnd = definedTime(current?.end)
-    ?? (currentStart != null && upcomingStart != null && upcomingStart > currentStart ? upcomingStart : null);
-  const currentEnd = rawEnd == null || currentStart == null
-    ? rawEnd
-    : Math.min(rawEnd, currentStart + MAX_SWEEP_SEC);
+  const { startSec: currentStart, endSec: currentEnd } = resolveLineWindow(current, upcoming);
 
   // 진행도 계산은 lineProgress 한 곳에서만 한다.
   //
