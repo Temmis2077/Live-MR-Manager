@@ -1,3 +1,4 @@
+import { lineProgress } from '../src/js/alignment-metadata.js';
 import { describe, expect, it } from 'vitest';
 import { appendLiveHistory, buildPerformerLyricModel, findUpcomingIndex, getLiveSectionState, isMrReady, moveQueueItem, nextLiveQueuePath, resolveNextLiveQueuePath, takePreviousLivePath, resolveLineWindow } from '../src/js/live-performance.js';
 
@@ -267,5 +268,33 @@ describe('resolveLineWindow — 두 화면이 같은 구간을 쓴다', () => {
     // 구간이 10~20이면 15초는 정확히 절반이다.
     expect(win).toEqual({ startSec: 10, endSec: 20 });
     expect(model.progress).toBeCloseTo(0.5, 3);
+  });
+});
+
+describe('진행도는 오버레이로 보낸 값 하나만 쓴다', () => {
+  // 예전에는 라이브가 buildPerformerLyricModel로 진행도를 따로 냈다. 노래하는
+  // 동안은 같았지만, 그 모델은 공연자용 규칙(다음 줄 미리 보기·끝난 줄 잠깐
+  // 붙들기)이라 줄 사이 구간에서 오버레이와 달랐다 — 끝난 줄이 100%로 남았다.
+  const M = { vocalStartSec: null, interludes: [] };
+  const list = [
+    { start: 10, end: 13, text: 'a' },
+    { start: 14, end: 17, text: 'b' },
+  ];
+
+  it('줄이 끝난 뒤 모델은 그 줄을 계속 보여주지만 진행도는 100%로 남는다', () => {
+    // 이 동작 자체는 공연자용으로 의도된 것이다. 다만 진행도를 여기서 가져다
+    // 쓰면 안 된다는 근거로 남긴다 — 이 값이 오버레이와 갈라지는 지점이다.
+    const m = buildPerformerLyricModel(list, -1, 13.4, M);
+    expect(m.current?.text).toBe('a');
+    expect(m.progress).toBe(1);
+  });
+
+  it('오버레이가 쓰는 구간 계산은 그 구간 밖에서 0이다', () => {
+    // 라이브도 이제 이 값을 쓴다 — 그래서 둘이 같아진다.
+    const win = resolveLineWindow(list[0], list[1]);
+    expect(lineProgress({ start: win.startSec, end: win.endSec }, 13400)).toBe(1);
+    // 다만 그 줄이 '현재 줄'이 아니게 되면 라이브는 아예 0을 쓴다(win.index 불일치).
+    // 그 판정은 live-screen.js가 하고, 여기서는 계산이 같다는 것만 확인한다.
+    expect(lineProgress({ start: win.startSec, end: win.endSec }, 11500)).toBeCloseTo(0.5, 3);
   });
 });

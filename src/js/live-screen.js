@@ -17,6 +17,7 @@ import { state } from './state.js';
 import { invoke } from './tauri-bridge.js';
 import { formatTime, getThumbnailUrl, showNotification } from './utils.js';
 import { lineHtml, paintLiveLyricProgress } from './live-lyrics.js';
+import { lineProgress } from './alignment-metadata.js';
 import { appendLiveHistory, buildPerformerLyricModel, isMrReady, moveQueueItem, resolveNextLiveQueuePath, takePreviousLivePath } from './live-performance.js';
 import { pushLayer, popLayer } from './ui/layer-stack.js';
 import { getSyncText } from './lrc-parser.js';
@@ -320,7 +321,9 @@ function renderPerformerView(positionSec) {
         renderedKaraokeKey = key;
       }
       currentEl.classList.toggle('pending', model.pending);
-      currentEl.style.setProperty('--karaoke-progress', `${Math.round(model.progress * 1000) / 10}%`);
+      // 진행도(--karaoke-progress)는 여기서 쓰지 않는다. 200ms 틱이라 뚝뚝
+      // 끊기고, model.progress는 공연자용 규칙이 섞여 오버레이와 어긋난다.
+      // rAF 루프(startLyricProgressLoop)가 오버레이와 같은 값으로 칠한다.
     } else { currentEl.textContent = '다음 가사 대기'; currentEl.classList.remove('pending'); renderedKaraokeKey = ''; }
   }
   if (nextEl) nextEl.innerHTML = model.next ? lineHtml(model.next) : '';
@@ -1356,6 +1359,22 @@ export function showLiveScreen() {
 let lyricRafId = null;
 
 /**
+ * 오버레이가 쓰는 것과 같은 진행도 계산.
+ *
+ * 오버레이(shared.js의 lineWipeRatio)는 [단어, 시작ms, 끝ms] 배열을 받고,
+ * 앱 쪽 정본(alignment-metadata.js의 lineProgress)은 세그먼트를 받는다.
+ * 같은 규칙이라 형태만 맞춰 넘긴다 — tests/line-progress.test.js가 두 구현이
+ * 어긋나지 않는지 같은 표로 대조한다.
+ */
+function progressRatio(words, startMs, endMs, posMs) {
+  return lineProgress({
+    start: startMs / 1000,
+    end: endMs / 1000,
+    words: (words || []).map(([word, s, e]) => ({ word, startMs: s, endMs: e })),
+  }, posMs);
+}
+
+/**
  * 현재 줄의 진행도를 프레임마다 칠한다(중앙 큰 가사 + 오른쪽 패널).
  *
  * 위치는 state.currentProgressMs를 쓴다 — player.js가 tempo까지 반영해
@@ -1369,19 +1388,26 @@ function startLyricProgressLoop() {
     const curEl = document.getElementById('live-current-lyric');
     if (!curEl) return;
 
-    const model = buildPerformerLyricModel(
-      state.currentLyrics,
-      state.currentLyricIndex,
-      (state.currentProgressMs || 0) / 1000,
-      state.currentMarkers,
-    );
-    if (!model.hasSyncedLyrics || model.sectionState.kind !== 'singing' || !model.current) return;
+    // 진행도는 오버레이로 보낸 값을 그대로 쓴다(lyric-drawer가 넣어 둔다).
+    // 계산을 여기서 또 하면 공연자용 규칙(다음 줄 미리 보기·끝난 줄 붙들기)이
+    // 섞여 오버레이와 어긋난다 — 실제로 끝난 줄이 100%로 남아 있었다.
+    const win = state.overlayLyricWindow;
+    const list = state.currentLyrics || [];
+    const shown = state.currentLyricIndex;
 
-    const pct = `${(model.progress * 100).toFixed(2)}%`;
+    // 지금 화면에 띄운 줄이 오버레이가 말하는 줄과 다르면(리드인으로 미리
+    // 띄운 다음 줄 등) 아직 부르기 전이므로 0으로 둔다. 남아 있던 값을 그대로
+    // 두면 새 줄이 이미 절반쯤 칠해진 채로 나타난다.
+    let ratio = 0;
+    if (win && win.index >= 0 && win.index === shown && win.endMs > win.startMs) {
+      ratio = progressRatio(win.words, win.startMs, win.endMs, state.currentProgressMs || 0);
+    }
+
+    const pct = `${(ratio * 100).toFixed(2)}%`;
     if (curEl.style.getPropertyValue('--karaoke-progress') !== pct) {
       curEl.style.setProperty('--karaoke-progress', pct);
     }
-    paintLiveLyricProgress(model.progress);
+    paintLiveLyricProgress(ratio);
   };
   lyricRafId = requestAnimationFrame(frame);
 }

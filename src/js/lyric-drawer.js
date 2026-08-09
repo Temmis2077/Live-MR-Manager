@@ -426,12 +426,24 @@ function syncLyricsWithTime(currentTime) {
         const win = seg ? resolveLineWindow(seg, lyrics[playingIndex + 1] || null) : null;
         const toMs = (sec) => Math.max(0, Math.round((sec || 0) * 1000 - back));
 
+        const lineStartMs = win?.startSec != null ? toMs(win.startSec) : 0;
+        const lineEndMs = win?.endSec != null ? toMs(win.endSec) : 0;
+
+        // 라이브 본문도 이 값을 그대로 쓴다.
+        //
+        // 예전에는 라이브가 buildPerformerLyricModel로 진행도를 따로 냈다.
+        // 노래하는 동안은 같았지만, 그 모델은 공연자용 규칙(다음 줄 미리
+        // 보여주기·끝난 줄 잠깐 붙들기)을 갖고 있어서 줄 사이 구간에서
+        // 오버레이와 다른 값을 냈다 — 끝난 줄을 100%로 붙든 채였다.
+        // 계산을 두 번 맞추는 대신 보내는 값을 공유해 구조적으로 못 어긋나게 한다.
+        state.overlayLyricWindow = { index: playingIndex, startMs: lineStartMs, endMs: lineEndMs, words };
+
         invoke('update_overlay_lyrics', {
             current,
             next,
             index: playingIndex,   // 가사 뷰 페이지(/lyrics-view)의 현재 줄 하이라이트용
-            lineStartMs: win?.startSec != null ? toMs(win.startSec) : 0,
-            lineEndMs: win?.endSec != null ? toMs(win.endSec) : 0,
+            lineStartMs,
+            lineEndMs,
             lineWords: words,
         }).catch(err => console.error(err));
         lastOverlayCurrent = current;
