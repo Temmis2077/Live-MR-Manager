@@ -451,9 +451,12 @@ function tick() {
   }
   updateWaveCue(pos / 1000);
   drawDetailedWaveform(pos / 1000);
-  // 중앙 가사(텍스트·진행도)는 여기서 그리지 않는다 — 200ms 틱이라 줄이
-  // 바뀌는 순간이 최대 200ms 늦게 보였다(오버레이는 rAF로 즉시 나간다).
-  // startLyricProgressLoop의 rAF가 맡는다.
+  // 중앙 가사 텍스트는 여기서 그린다. rAF로 옮겨 봤더니 카운트다운 같은
+  // 매 프레임 바뀌는 문구까지 60fps로 갈아치워져 읽을 수 없었다.
+  // 진행도(칠하기)만 rAF가 맡는다 — 그건 프레임마다 움직여야 한다.
+  // 시각은 진행도와 같은 시계에서 읽는다 — 텍스트와 칠하기가 다른 시간을
+  // 보면 줄이 바뀌는 순간과 진행도가 어긋난다.
+  renderPerformerView((getPlaybackClockMs() ?? pos) / 1000);
 
   const posEl = $('live-pos');
   const durEl = $('live-dur');
@@ -1394,16 +1397,18 @@ function startLyricProgressLoop() {
     const curEl = document.getElementById('live-current-lyric');
     if (!curEl) return;
 
-    // 텍스트도 여기서 그린다. 예전에는 200ms 틱에 있어서 줄이 바뀌는 순간이
-    // 최대 200ms 늦게 보였다 — 오버레이는 rAF로 즉시 나가므로 그만큼 밀렸다.
-    // renderPerformerView는 내용이 그대로면 DOM을 건드리지 않으므로(키 비교)
-    // 프레임마다 불러도 싸다.
     // 시각은 오버레이와 같은 시계에서 읽는다. state.currentProgressMs는
     // player.js가 ±500ms 안에서만 보정하는 값이라 오버레이와 벌어진다.
     // 시계가 아직 안 붙었으면(로드 전) 기존 값으로 물러난다.
     const posMs = getPlaybackClockMs() ?? (state.currentProgressMs || 0);
 
-    renderPerformerView(posMs / 1000);
+    // 여기서는 **진행도만** 칠한다.
+    //
+    // 한때 renderPerformerView(텍스트 전체)도 이 루프에서 불렀다. 그런데 그
+    // 함수는 카운트다운("다음 가사 N초 후")처럼 매 프레임 값이 바뀌는 문구까지
+    // 함께 쓴다 — 60fps로 돌리자 여러 글자가 빠르게 갈아치워지며 아무것도
+    // 읽을 수 없게 됐다. 텍스트는 200ms 틱이 맡는다(사람이 읽는 속도에는
+    // 그걸로 충분하다). 진행도만 프레임마다 움직이면 된다.
 
     // 진행도는 오버레이로 보낸 값을 그대로 쓴다(lyric-drawer가 넣어 둔다).
     // 계산을 여기서 또 하면 공연자용 규칙(다음 줄 미리 보기·끝난 줄 붙들기)이
