@@ -108,16 +108,13 @@ export function renderLiveLyrics(list) {
     return;
   }
 
-  // 현재 줄에만 진행도를 칠할 수 있게, 줄마다 겹침 요소를 함께 넣는다.
-  // (중앙 큰 가사와 같은 방식 — .live-karaoke-base / .live-karaoke-fill)
+  // 진행도는 같은 글자에 그라디언트를 잘라 넣어 칠한다(background-clip: text).
+  //
+  // 처음엔 중앙 큰 가사처럼 같은 글자를 하나 더 겹쳐 놓고 왼쪽부터 드러냈는데,
+  // 겹친 요소가 원본과 8px 어긋났다 — 절대 위치 박스와 인라인 글자의 상자가
+  // 달라서다. 같은 글자 하나에 칠하면 어긋날 여지가 없다.
   body.innerHTML = segments
-    .map((s, i) => {
-      const html = lineHtml(s);
-      return `<div class="live-lyric-line" data-index="${i}">`
-        + `<span class="live-lyric-base">${html}</span>`
-        + `<span class="live-lyric-fill" aria-hidden="true">${html}</span>`
-        + `</div>`;
-    })
+    .map((s, i) => `<div class="live-lyric-line" data-index="${i}">${lineHtml(s)}</div>`)
     .join('');
 }
 

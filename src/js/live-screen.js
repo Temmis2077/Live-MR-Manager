@@ -18,6 +18,7 @@ import { invoke } from './tauri-bridge.js';
 import { formatTime, getThumbnailUrl, showNotification } from './utils.js';
 import { lineHtml, paintLiveLyricProgress } from './live-lyrics.js';
 import { lineProgress } from './alignment-metadata.js';
+import { getPlaybackClockMs } from './lyric-drawer.js';
 import { appendLiveHistory, buildPerformerLyricModel, isMrReady, moveQueueItem, resolveNextLiveQueuePath, takePreviousLivePath } from './live-performance.js';
 import { pushLayer, popLayer } from './ui/layer-stack.js';
 import { getSyncText } from './lrc-parser.js';
@@ -447,7 +448,9 @@ function tick() {
   }
   updateWaveCue(pos / 1000);
   drawDetailedWaveform(pos / 1000);
-  renderPerformerView(pos / 1000);
+  // 중앙 가사(텍스트·진행도)는 여기서 그리지 않는다 — 200ms 틱이라 줄이
+  // 바뀌는 순간이 최대 200ms 늦게 보였다(오버레이는 rAF로 즉시 나간다).
+  // startLyricProgressLoop의 rAF가 맡는다.
 
   const posEl = $('live-pos');
   const durEl = $('live-dur');
@@ -1388,11 +1391,21 @@ function startLyricProgressLoop() {
     const curEl = document.getElementById('live-current-lyric');
     if (!curEl) return;
 
+    // 텍스트도 여기서 그린다. 예전에는 200ms 틱에 있어서 줄이 바뀌는 순간이
+    // 최대 200ms 늦게 보였다 — 오버레이는 rAF로 즉시 나가므로 그만큼 밀렸다.
+    // renderPerformerView는 내용이 그대로면 DOM을 건드리지 않으므로(키 비교)
+    // 프레임마다 불러도 싸다.
+    // 시각은 오버레이와 같은 시계에서 읽는다. state.currentProgressMs는
+    // player.js가 ±500ms 안에서만 보정하는 값이라 오버레이와 벌어진다.
+    // 시계가 아직 안 붙었으면(로드 전) 기존 값으로 물러난다.
+    const posMs = getPlaybackClockMs() ?? (state.currentProgressMs || 0);
+
+    renderPerformerView(posMs / 1000);
+
     // 진행도는 오버레이로 보낸 값을 그대로 쓴다(lyric-drawer가 넣어 둔다).
     // 계산을 여기서 또 하면 공연자용 규칙(다음 줄 미리 보기·끝난 줄 붙들기)이
     // 섞여 오버레이와 어긋난다 — 실제로 끝난 줄이 100%로 남아 있었다.
     const win = state.overlayLyricWindow;
-    const list = state.currentLyrics || [];
     const shown = state.currentLyricIndex;
 
     // 지금 화면에 띄운 줄이 오버레이가 말하는 줄과 다르면(리드인으로 미리
@@ -1400,7 +1413,7 @@ function startLyricProgressLoop() {
     // 두면 새 줄이 이미 절반쯤 칠해진 채로 나타난다.
     let ratio = 0;
     if (win && win.index >= 0 && win.index === shown && win.endMs > win.startMs) {
-      ratio = progressRatio(win.words, win.startMs, win.endMs, state.currentProgressMs || 0);
+      ratio = progressRatio(win.words, win.startMs, win.endMs, posMs);
     }
 
     const pct = `${(ratio * 100).toFixed(2)}%`;

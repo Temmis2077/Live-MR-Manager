@@ -1645,39 +1645,23 @@
 
 
 /* ── 오른쪽 가사 패널의 줄 안 진행도 ─────────────────────────────
-   중앙 큰 가사와 같은 방식(겹쳐 놓고 왼쪽부터 드러내기). 같은 화면의 두
-   가사 표시가 다르게 움직이면 안 되므로 진행도 값도 같은 계산을 쓴다. */
-.live-lyric-line {
-  position: relative;
-}
-
-.live-lyric-fill {
-  position: absolute;
-  inset: 0;
-  padding: inherit;
-  color: var(--accent-secondary);
-  /* 현재 줄이 아니면 --lyric-progress가 없어 0%가 되고 아무것도 안 보인다. */
-  clip-path: inset(0 calc(100% - var(--lyric-progress, 0%)) 0 0);
-  pointer-events: none;
-  white-space: inherit;
-  overflow: hidden;
-}
-
-/* 현재 줄이 아닐 때는 겹침 요소를 아예 숨긴다 — 스크롤 중에 잔상이 남지
-   않게, 그리고 렌더 비용을 아끼려고. */
-.live-lyric-line:not(.active) .live-lyric-fill {
-  display: none;
-}
-
+   같은 글자에 그라디언트를 잘라 넣는다. 겹침 요소를 쓰면 절대 위치 박스와
+   인라인 글자의 상자가 달라 어긋난다(실제로 8px 밀렸다).
+   진행도 값은 오버레이가 보낸 것과 같은 계산에서 온다. */
 .live-lyric-line.active {
-  padding-left: 8px;
+  background-image: linear-gradient(
+    90deg,
+    var(--accent-secondary) var(--lyric-progress, 0%),
+    var(--text-main) var(--lyric-progress, 0%)
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
 }
 
-.live-lyric-line.active .live-lyric-fill {
-  left: 8px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .live-karaoke-fill,
-  .live-lyric-fill { transition: none !important; }
+/* 3줄 모드의 차음·번역은 원문과 같이 칠해지면 읽기 어렵다 — 원래 색으로. */
+.live-lyric-line.active .live-lyric-sub {
+  -webkit-text-fill-color: var(--text-dim);
+  color: var(--text-dim);
 }

@@ -77,8 +77,34 @@ export function syncLyricsAtPosition(positionMs) {
     syncLyricsWithTime(Math.max(0, shifted) / 1000);
 }
 
+/**
+ * 재생 위치 시계 — 오버레이가 쓰는 것과 **같은 구현**을 쓴다.
+ *
+ * 예전에는 라이브 본문이 state.currentProgressMs를 봤다. 그 값은 player.js가
+ * tempo 슬라이더로 더해 나가다 ±500ms를 벗어날 때만 되돌리는 방식이라,
+ * 설계상 최대 0.5초까지 어긋난 채로 굴러간다. 오버레이는 패킷 간격에서 재생
+ * 속도를 추정하고 매 프레임 조금씩 수렴한다 — 세는 방식 자체가 달랐다.
+ * 그래서 같은 줄·같은 계산을 써도 두 화면의 진행도가 벌어졌다.
+ *
+ * shared.js는 클래식 스크립트지만 import/export가 없어 모듈로 실행된다.
+ * 실행되면 window.OverlayShared가 채워진다 — 구현을 복제하지 않는다.
+ */
+let playbackClock = null;
+import('./overlay/shared.js')
+    .then(() => {
+        playbackClock = window.OverlayShared?.createPositionClock?.() || null;
+    })
+    .catch((err) => console.warn('[Lyrics] 위치 시계 로드 실패:', err));
+
+/** 오버레이와 같은 기준의 현재 재생 위치(ms). 시계가 없으면 null. */
+export function getPlaybackClockMs() {
+    return playbackClock ? playbackClock.now() : null;
+}
+
 function applyProgress(positionMs, durationMs) {
     lastDurationMs = durationMs;
+    // 오버레이로 나가는 패킷과 **같은 값**으로 시계를 맞춘다.
+    if (playbackClock) playbackClock.update(positionMs, durationMs, !!state.isPlaying);
     // 재생 중에는 rAF가 더 촘촘하게 줄 판정을 돌린다. 여기서는 멈춰 있을 때
     // (rAF 루프가 꺼진 상태)를 위해서만 한 번 돌린다 — seek 직후 정지 상태로
     // 가사가 갱신되지 않으면 화면이 이전 줄에 멈춰 있게 된다.

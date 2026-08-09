@@ -422,8 +422,12 @@ export async function selectTrack(index) {
 /** 가사 줄 판정 함수. 프레임마다 동적 import 프라미스를 만들지 않도록
  *  한 번만 붙잡아 둔다(60fps로 도는 자리다). */
 let lyricSync = null;
+let lyricClock = null;
 import('./lyric-drawer.js')
-  .then((m) => { lyricSync = m.syncLyricsAtPosition; })
+  .then((m) => {
+    lyricSync = m.syncLyricsAtPosition;
+    lyricClock = m.getPlaybackClockMs;
+  })
   .catch(() => {});
 
 export function updateProgressBar(timestamp) {
@@ -470,7 +474,15 @@ export function updateProgressBar(timestamp) {
   // 오버레이로 나가는 IPC는 늘지 않는다 — syncLyricsWithTime은 현재/다음 줄
   // 텍스트가 바뀔 때만 update_overlay_lyrics를 부른다(내부 dedupe).
   // 위치 패킷(update_overlay_progress)은 지금처럼 100ms 이벤트에서만 보낸다.
-  if (!state.isSeeking && lyricSync) lyricSync(state.currentProgressMs);
+  // 가사 줄 판정도 오버레이와 같은 시계로 한다.
+  //
+  // currentProgressMs는 tempo로 더해 나가다 ±500ms를 벗어날 때만 되돌리는
+  // 값이라, 오버레이 시계와 최대 0.5초까지 벌어진다 — 같은 계산을 써도 줄이
+  // 바뀌는 순간이 두 화면에서 달랐다. 진행바·남은 시간은 지금처럼
+  // currentProgressMs를 그대로 쓴다(사용자에게 보이는 재생 위치는 하나여야 한다).
+  if (!state.isSeeking && lyricSync) {
+    lyricSync(lyricClock ? (lyricClock() ?? state.currentProgressMs) : state.currentProgressMs);
+  }
 
   if (state.isPlaying || state.isLoading) {
     state.rafId = requestAnimationFrame(updateProgressBar);
