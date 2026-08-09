@@ -1296,7 +1296,8 @@
   color: var(--accent-secondary);
   clip-path: inset(0 calc(100% - var(--karaoke-progress)) 0 0);
   filter: drop-shadow(0 0 7px rgb(var(--accent-rgb) / .24));
-  transition: clip-path .1s linear;
+  /* transition 없음 — 값이 rAF로 프레임마다 오므로, 여기에 0.1s를 걸면
+     그만큼 뒤늦게 따라오는 지연만 더해진다(200ms 틱 시절의 잔재). */
   pointer-events: none;
 }
 
@@ -1640,4 +1641,43 @@
 .live-offset-val.changed {
   border-color: rgb(var(--accent-rgb) / 0.5);
   color: var(--accent-secondary);
+}
+
+
+/* ── 오른쪽 가사 패널의 줄 안 진행도 ─────────────────────────────
+   중앙 큰 가사와 같은 방식(겹쳐 놓고 왼쪽부터 드러내기). 같은 화면의 두
+   가사 표시가 다르게 움직이면 안 되므로 진행도 값도 같은 계산을 쓴다. */
+.live-lyric-line {
+  position: relative;
+}
+
+.live-lyric-fill {
+  position: absolute;
+  inset: 0;
+  padding: inherit;
+  color: var(--accent-secondary);
+  /* 현재 줄이 아니면 --lyric-progress가 없어 0%가 되고 아무것도 안 보인다. */
+  clip-path: inset(0 calc(100% - var(--lyric-progress, 0%)) 0 0);
+  pointer-events: none;
+  white-space: inherit;
+  overflow: hidden;
+}
+
+/* 현재 줄이 아닐 때는 겹침 요소를 아예 숨긴다 — 스크롤 중에 잔상이 남지
+   않게, 그리고 렌더 비용을 아끼려고. */
+.live-lyric-line:not(.active) .live-lyric-fill {
+  display: none;
+}
+
+.live-lyric-line.active {
+  padding-left: 8px;
+}
+
+.live-lyric-line.active .live-lyric-fill {
+  left: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-karaoke-fill,
+  .live-lyric-fill { transition: none !important; }
 }

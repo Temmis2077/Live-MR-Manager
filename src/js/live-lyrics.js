@@ -37,7 +37,7 @@ function esc(s) {
  * getDisplayLines가 인앱 표시 설정('app' 스코프)을 보고 정한다 — 드로어·
  * 오버레이와 같은 규칙을 써야 화면마다 다르게 보이지 않는다.
  */
-function lineHtml(seg) {
+export function lineHtml(seg) {
   if (seg == null) return '';
   if (typeof seg === 'string') return esc(seg);
 
@@ -57,7 +57,9 @@ export function getSide() {
 }
 
 export function isHidden() {
-  return localStorage.getItem(HIDDEN_KEY) === '1';
+  // 기본은 접힌 상태다. 중앙에 큰 현재 가사가 이미 있고, 전체 목록은 필요할
+  // 때만 보면 된다 — 상시로 펼쳐 두면 300px이 중앙 가사에서 빠진다.
+  return localStorage.getItem(HIDDEN_KEY) !== '0';
 }
 
 function applyLayout() {
@@ -82,6 +84,11 @@ function applyLayout() {
 
   const showBtn = $('live-lyrics-show');
   if (showBtn) showBtn.hidden = !hidden;
+  const centralToggle = $('live-full-lyrics-toggle');
+  if (centralToggle) {
+    centralToggle.setAttribute('aria-expanded', hidden ? 'false' : 'true');
+    centralToggle.textContent = hidden ? '전체 가사' : '전체 가사 닫기';
+  }
 }
 
 /** 전체 가사 목록을 다시 그린다. lyric-drawer.js의 updateLyrics가 호출한다. */
@@ -101,9 +108,32 @@ export function renderLiveLyrics(list) {
     return;
   }
 
+  // 현재 줄에만 진행도를 칠할 수 있게, 줄마다 겹침 요소를 함께 넣는다.
+  // (중앙 큰 가사와 같은 방식 — .live-karaoke-base / .live-karaoke-fill)
   body.innerHTML = segments
-    .map((s, i) => `<div class="live-lyric-line" data-index="${i}">${lineHtml(s)}</div>`)
+    .map((s, i) => {
+      const html = lineHtml(s);
+      return `<div class="live-lyric-line" data-index="${i}">`
+        + `<span class="live-lyric-base">${html}</span>`
+        + `<span class="live-lyric-fill" aria-hidden="true">${html}</span>`
+        + `</div>`;
+    })
     .join('');
+}
+
+/**
+ * 현재 줄의 진행도를 칠한다. 라이브 화면의 tick이 프레임마다 부른다.
+ *
+ * 계산은 alignment-metadata.js의 lineProgress 한 곳에서만 한다 — 중앙 큰
+ * 가사·오버레이와 같은 규칙이어야 세 화면이 어긋나지 않는다.
+ */
+export function paintLiveLyricProgress(ratio) {
+  const body = $('live-lyrics-body');
+  if (!body || activeIndex < 0) return;
+  const cur = body.querySelectorAll('.live-lyric-line')[activeIndex];
+  if (!cur) return;
+  const pct = Math.max(0, Math.min(1, Number(ratio) || 0));
+  cur.style.setProperty('--lyric-progress', `${(pct * 100).toFixed(2)}%`);
 }
 
 /** 현재 부르는 줄 표시. 인덱스가 -1이면 표시를 지운다. */
@@ -140,6 +170,11 @@ export function initLiveLyrics() {
 
   $('live-lyrics-show')?.addEventListener('click', () => {
     localStorage.setItem(HIDDEN_KEY, '0');
+    applyLayout();
+  });
+
+  $('live-full-lyrics-toggle')?.addEventListener('click', () => {
+    localStorage.setItem(HIDDEN_KEY, isHidden() ? '0' : '1');
     applyLayout();
   });
 

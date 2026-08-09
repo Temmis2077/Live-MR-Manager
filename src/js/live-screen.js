@@ -16,7 +16,7 @@
 import { state } from './state.js';
 import { invoke } from './tauri-bridge.js';
 import { formatTime, getThumbnailUrl, showNotification } from './utils.js';
-import { lineHtml } from './live-lyrics.js';
+import { lineHtml, paintLiveLyricProgress } from './live-lyrics.js';
 import { appendLiveHistory, buildPerformerLyricModel, isMrReady, moveQueueItem, resolveNextLiveQueuePath, takePreviousLivePath } from './live-performance.js';
 import { pushLayer, popLayer } from './ui/layer-stack.js';
 import { getSyncText } from './lrc-parser.js';
@@ -1344,9 +1344,56 @@ export function showLiveScreen() {
     tick();
     renderSeparation();
   }, 200);
+
+  // 가사 진행도만 따로 rAF로 돈다.
+  //
+  // 200ms 틱으로 칠하면 와이프가 초당 다섯 번만 움직여 뚝뚝 끊긴다. 진행도
+  // 계산과 style 대입 두 번은 프레임마다 해도 싸다 — 무거운 갱신(파형·큐·
+  // 분리 진행)만 200ms에 남긴다.
+  startLyricProgressLoop();
+}
+
+let lyricRafId = null;
+
+/**
+ * 현재 줄의 진행도를 프레임마다 칠한다(중앙 큰 가사 + 오른쪽 패널).
+ *
+ * 위치는 state.currentProgressMs를 쓴다 — player.js가 tempo까지 반영해
+ * 프레임 단위로 보간해 둔 값이라, 백엔드 폴링(100ms)의 계단이 없다.
+ * 진행도 계산은 buildPerformerLyricModel → lineProgress 한 곳에서만 한다.
+ */
+function startLyricProgressLoop() {
+  if (lyricRafId != null) return;
+  const frame = () => {
+    lyricRafId = requestAnimationFrame(frame);
+    const curEl = document.getElementById('live-current-lyric');
+    if (!curEl) return;
+
+    const model = buildPerformerLyricModel(
+      state.currentLyrics,
+      state.currentLyricIndex,
+      (state.currentProgressMs || 0) / 1000,
+      state.currentMarkers,
+    );
+    if (!model.hasSyncedLyrics || model.sectionState.kind !== 'singing' || !model.current) return;
+
+    const pct = `${(model.progress * 100).toFixed(2)}%`;
+    if (curEl.style.getPropertyValue('--karaoke-progress') !== pct) {
+      curEl.style.setProperty('--karaoke-progress', pct);
+    }
+    paintLiveLyricProgress(model.progress);
+  };
+  lyricRafId = requestAnimationFrame(frame);
+}
+
+function stopLyricProgressLoop() {
+  if (lyricRafId == null) return;
+  cancelAnimationFrame(lyricRafId);
+  lyricRafId = null;
 }
 
 export function hideLiveScreen() {
+  stopLyricProgressLoop();
   if (tickTimer) {
     clearInterval(tickTimer);
     tickTimer = null;
