@@ -1276,30 +1276,33 @@
   overflow-wrap: anywhere;
 }
 
-.live-karaoke-base,
-.live-karaoke-fill {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
+/* 진행도는 같은 글자에 그라디언트를 잘라 넣어 칠한다 — 전체 가사 패널·
+   오버레이와 같은 방식이다.
+
+   예전에는 같은 글자를 하나 더 겹쳐 놓고, **바탕 글자를 --text-dim(회색)**으로
+   두고 와이프가 지나가야 밝아지게 했다. 그래서 줄이 제때 떠도 와이프가
+   닿기 전까지 읽히지 않아 "메인 가사만 한참 늦게 나온다"로 보였다.
+   오버레이와 전체 가사는 바탕이 밝은 색이라 뜨는 즉시 읽힌다 — 그 차이였다.
+
+   이제 안 부른 부분도 --text-main으로 또렷하고, 부른 만큼만 강조색이 된다. */
+.live-current-lyric {
+  background-image: linear-gradient(
+    90deg,
+    var(--accent-secondary) var(--karaoke-progress, 0%),
+    var(--text-main) var(--karaoke-progress, 0%)
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
 }
 
-.live-karaoke-base { color: var(--text-dim); }
-
-/* 아직 부르기 전 미리 띄운 줄. 진행도 0%라 이미 흐린 색이지만, "부르는 중인데
-   진행이 안 나간다"와 "아직 차례가 아니다"는 구분돼야 한다. */
-.live-current-lyric.pending { opacity: 0.66; }
-.live-karaoke-fill {
-  position: absolute;
-  inset: 0;
-  color: var(--accent-secondary);
-  clip-path: inset(0 calc(100% - var(--karaoke-progress)) 0 0);
-  filter: drop-shadow(0 0 7px rgb(var(--accent-rgb) / .24));
-  /* transition 없음 — 값이 rAF로 프레임마다 오므로, 여기에 0.1s를 걸면
-     그만큼 뒤늦게 따라오는 지연만 더해진다(200ms 틱 시절의 잔재). */
-  pointer-events: none;
+/* 3줄 모드의 차음·번역은 원문과 같이 칠하면 읽기 어렵다 — 제 색으로. */
+.live-current-lyric .live-lyric-sub {
+  -webkit-text-fill-color: var(--text-muted);
+  color: var(--text-muted);
 }
+
 
 .live-next-lyric {
   flex: 0 0 auto;

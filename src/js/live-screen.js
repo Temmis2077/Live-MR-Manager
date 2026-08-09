@@ -318,7 +318,10 @@ function renderPerformerView(positionSec) {
       // 상태 표시(.pending)만 어긋난 채 남는다.
       const key = `${model.pending ? 'pre' : 'sing'}|${html}`;
       if (renderedKaraokeKey !== key) {
-        currentEl.innerHTML = `<span class="live-karaoke-base">${html}</span><span class="live-karaoke-fill" aria-hidden="true">${html}</span>`;
+        // 글자를 하나만 둔다. 예전에는 같은 글자를 겹쳐 놓고 위 것만 드러냈는데,
+        // 바탕 글자가 회색이라 와이프가 닿기 전엔 읽히지 않았다("늦게 나온다").
+        // 이제 CSS가 같은 글자에 그라디언트를 잘라 넣는다.
+        currentEl.innerHTML = html;
         renderedKaraokeKey = key;
       }
       currentEl.classList.toggle('pending', model.pending);
