@@ -294,6 +294,22 @@ function updateWaveCue(positionSec) {
     : cue.textContent;
 }
 
+/** ?lyricdebug=1 이면 중앙 가사가 바뀔 때마다 무엇이 왜 바뀌었는지 남긴다.
+ *  깜빡임이 다시 보이면 콘솔에서 어떤 분기가 오가는지 바로 알 수 있다. */
+const LYRIC_DEBUG = new URLSearchParams(location.search).get('lyricdebug') === '1';
+let lastDebugBranch = '';
+function debugBranch(name, pos, model) {
+  if (!LYRIC_DEBUG || name === lastDebugBranch) return;
+  lastDebugBranch = name;
+  console.log('[가사]', name, {
+    pos: Math.round(pos * 1000),
+    idx: state.currentLyricIndex,
+    kind: model?.sectionState?.kind,
+    lines: (state.currentLyrics || []).length,
+    markers: state.currentMarkers,
+  });
+}
+
 function renderPerformerView(positionSec) {
   const model = buildPerformerLyricModel(
     state.currentLyrics,
@@ -308,10 +324,21 @@ function renderPerformerView(positionSec) {
   const timingEl = $('live-next-timing');
 
   if (currentEl) {
-    if (!state.currentTrack) { currentEl.textContent = '곡을 선택하면 현재 가사가 표시됩니다'; renderedKaraokeKey = ''; }
-    else if (!model.hasSyncedLyrics) { currentEl.textContent = '가사 싱크 없음'; renderedKaraokeKey = ''; }
-    else if (model.sectionState.kind !== 'singing') { currentEl.textContent = model.sectionState.label; renderedKaraokeKey = ''; }
+    // 이 자리는 **가사만** 보여준다.
+    //
+    // 예전에는 전주·간주·보컬 진입 구간에서 이 자리를 '전주'·'간주' 같은 구간
+    // 라벨로 덮어썼다. 그 라벨은 바로 위 #live-section-label에 이미 나오는
+    // 정보인데, 여기까지 뺏어 쓰는 바람에 구간 판정(sectionState.kind)이 한 번
+    // 흔들릴 때마다 가사와 고정 라벨이 번갈아 나타나 아무것도 읽을 수 없었다.
+    // 구간 판정은 마커에서 나오고 마커는 싱크를 고칠 때마다 바뀐다 — 즉 이
+    // 구조는 언제든 다시 깜빡일 수 있었다.
+    //
+    // 이제 구간 정보는 제자리(#live-section-label)에서만 알리고, 여기서는
+    // 부를 줄을 계속 보여준다. 간주 중에 다음 줄이 보이는 편이 공연에도 낫다.
+    if (!state.currentTrack) { debugBranch('곡없음', positionSec, model); currentEl.textContent = '곡을 선택하면 현재 가사가 표시됩니다'; renderedKaraokeKey = ''; }
+    else if (!model.hasSyncedLyrics) { debugBranch('싱크없음', positionSec, model); currentEl.textContent = '가사 싱크 없음'; renderedKaraokeKey = ''; }
     else if (model.current) {
+      debugBranch('가사', positionSec, model);
       const html = lineHtml(model.current);
       // 리드인과 가창은 같은 줄을 같은 자리에 그린다. 여기서 키를 나눠 두지
       // 않으면 부르기 시작하는 순간 내용이 같아 다시 그리지 않아도 되는데,
@@ -324,11 +351,22 @@ function renderPerformerView(positionSec) {
         currentEl.innerHTML = html;
         renderedKaraokeKey = key;
       }
-      currentEl.classList.toggle('pending', model.pending);
+      // 구간 중(전주·간주·보컬 진입)에도 줄은 계속 보여주되, 아직 부를 때가
+      // 아니라는 것은 흐리게 해서 알린다 — 라벨로 덮지 않는다.
+      currentEl.classList.toggle('pending', model.pending || model.sectionState.kind !== 'singing');
       // 진행도(--karaoke-progress)는 여기서 쓰지 않는다. 200ms 틱이라 뚝뚝
       // 끊기고, model.progress는 공연자용 규칙이 섞여 오버레이와 어긋난다.
       // rAF 루프(startLyricProgressLoop)가 오버레이와 같은 값으로 칠한다.
-    } else { currentEl.textContent = '다음 가사 대기'; currentEl.classList.remove('pending'); renderedKaraokeKey = ''; }
+    } else if (!renderedKaraokeKey) {
+      debugBranch('대기', positionSec, model);
+      // 부를 줄을 아직 못 정했을 때만 안내를 띄운다.
+      //
+      // 예전에는 조건 없이 덮어써서, model.current가 한 프레임이라도 비면
+      // 이미 떠 있던 가사가 '다음 가사 대기'로 바뀌었다가 되돌아왔다 —
+      // 깜빡임의 또 다른 통로였다. 이미 줄을 보여주고 있으면 그대로 둔다.
+      currentEl.textContent = '다음 가사 대기';
+      currentEl.classList.remove('pending');
+    }
   }
   if (nextEl) nextEl.innerHTML = model.next ? lineHtml(model.next) : '';
   if (sectionEl) {

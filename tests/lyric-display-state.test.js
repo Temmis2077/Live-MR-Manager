@@ -83,3 +83,36 @@ describe('싱크를 저장한 뒤에도 사이드카를 다시 읽는다', () =>
     expect(block).toMatch(/setDisplayLyrics/);
   });
 });
+
+describe('중앙 가사 자리는 가사만 보여준다', () => {
+  const src = fs.readFileSync(path.join(SRC, 'live-screen.js'), 'utf-8');
+  const fn = (() => {
+    const i = src.indexOf('function renderPerformerView');
+    return src.slice(i, src.indexOf('\n}', i) + 2);
+  })();
+
+  it('구간 라벨로 가사를 덮어쓰지 않는다', () => {
+    // 예전에는 전주·간주에 sectionState.label로 이 자리를 덮었다. 그 라벨은
+    // #live-section-label에 이미 나오는 정보인데 가사를 밀어내서, 구간 판정이
+    // 흔들릴 때마다 가사와 고정 라벨이 번갈아 나타났다(읽을 수 없었다).
+    expect(fn).not.toMatch(/currentEl\.textContent\s*=\s*model\.sectionState\.label/);
+  });
+
+  it('구간 라벨은 제 자리(#live-section-label)에서 그린다', () => {
+    expect(src).toMatch(/sectionEl\.textContent\s*=\s*model\.sectionState\.label/);
+  });
+
+  it("'다음 가사 대기'는 이미 줄을 보여주는 중이면 덮어쓰지 않는다", () => {
+    // 조건 없이 덮으면 model.current가 한 프레임 비는 순간 가사가 사라졌다.
+    const idx = fn.indexOf('다음 가사 대기');
+    expect(idx).toBeGreaterThan(-1);
+    const before = fn.slice(Math.max(0, idx - 400), idx);
+    expect(before).toMatch(/!renderedKaraokeKey/);
+  });
+
+  it('진행도는 이 함수에서 쓰지 않는다 (rAF가 맡는다)', () => {
+    // 200ms 틱에서 칠하면 뚝뚝 끊기고, model.progress는 공연자용 규칙이 섞여
+    // 오버레이와 어긋난다.
+    expect(fn).not.toMatch(/setProperty\('--karaoke-progress'/);
+  });
+});
