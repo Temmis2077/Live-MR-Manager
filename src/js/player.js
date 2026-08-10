@@ -251,10 +251,7 @@ export async function selectTrack(index) {
   // 오버레이와 라이브 가사창에 엉뚱한 줄이 떴다. 로드가 실패하면(.catch가
   // 없었다) 그 상태가 곡이 끝날 때까지 유지됐고, 옛 마커의 vocalStartSec이
   // 남아 있으면 isInInstrumental이 계속 참이라 오버레이가 아예 비어 보였다.
-  state.currentLyrics = [];
-  state.currentMarkers = { vocalStartSec: null, interludes: [] };
-  state.currentLyricIndex = -1;
-  import('./lyric-drawer.js').then((m) => m.updateLyrics?.([])).catch(() => {});
+  import('./lyric-drawer.js').then((m) => m.setDisplayLyrics([], null)).catch(() => {});
 
   // Load Lyrics for the selected track
   // Guarded by mySequence: if the user switches tracks again before this
@@ -262,13 +259,9 @@ export async function selectTrack(index) {
   // with the previous song's (a stale response arriving after a later one).
   loadLyricsAndMarkers(song.path, parseDurationToMs(song.duration) / 1000).then(({ segments, markers }) => {
     if (mySequence !== state.playbackSequence) return;
-    state.currentLyrics = segments;
-    // 전주·간주에서 오버레이를 비우려면 마커도 함께 들고 있어야 한다.
-    state.currentMarkers = markers;
-    state.currentLyricIndex = -1;
-    // Trigger drawer update if it's initialized
+    // 가사·마커·인덱스·오버레이 구간을 한 번에 갈아끼운다(setDisplayLyrics).
     import('./lyric-drawer.js').then(m => {
-      if (m.updateLyrics) m.updateLyrics(segments);
+      m.setDisplayLyrics(segments, markers);
       if (m.syncLyricDrawerHeader) m.syncLyricDrawerHeader();
     });
   }).catch((err) => {

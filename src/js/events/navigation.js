@@ -262,10 +262,8 @@ export async function openAlignmentForTrack(path, options = {}) {
       const { loadLyricsAndMarkers } = await import('../lyrics.js');
       const { durationToSeconds } = await import('../duration.js');
       const { segments: lyrics, markers } = await loadLyricsAndMarkers(path, durationToSeconds(track.duration) || 0);
-      state.currentLyrics = lyrics;
-      state.currentMarkers = markers;
       const drawer = await import('../lyric-drawer.js');
-      drawer.updateLyrics?.(lyrics);
+      drawer.setDisplayLyrics(lyrics, markers);
       drawer.syncLyricDrawerHeader?.();
     }
   }

@@ -295,6 +295,37 @@ export function initLyricDrawer() {
 }
 
 /**
+ * 표시용 가사를 통째로 갈아끼운다. **가사가 바뀌는 모든 경로는 여기를 쓴다.**
+ *
+ * 예전에는 갈아끼우는 곳이 셋이었고(곡 선택·편집기에서 열기·싱크 저장) 각자
+ * 다른 것만 치웠다:
+ *   - 곡 선택: 가사·마커·인덱스를 다 치움
+ *   - 편집기에서 열기: 가사·마커·인덱스
+ *   - 싱크 저장: 가사·인덱스만 — **마커를 안 치웠다**
+ * 그래서 싱크를 고치면 간주·보컬 시작 마커가 옛것으로 남아, isInInstrumental이
+ * 엉뚱한 구간에서 참이 되고 오버레이가 이유 없이 비었다. 여기 모아 두면
+ * 무엇을 치워야 하는지 한 곳만 보면 된다.
+ *
+ * @param {Array} segments 새 가사 줄
+ * @param {object} [markers] 새 구간 마커. 주지 않으면 빈 것으로 초기화한다 —
+ *   옛 마커를 남기는 것이 마커 없음보다 위험하다(위 버그가 그것이었다).
+ */
+export function setDisplayLyrics(segments, markers) {
+    state.currentLyrics = Array.isArray(segments) ? segments : [];
+    state.currentMarkers = markers || { vocalStartSec: null, interludes: [] };
+    state.currentLyricIndex = -1;
+    // 오버레이로 보낸 줄 구간은 옛 배열의 인덱스를 들고 있다 — 새 가사에
+    // 그대로 쓰면 엉뚱한 줄의 시간으로 진행도를 칠한다.
+    state.overlayLyricWindow = null;
+    // 중복 억제 캐시도 비운다. 새 가사의 첫 줄 글자가 옛 줄과 같으면 "안
+    // 바뀌었다"로 보고 오버레이 푸시를 건너뛴다.
+    lastOverlayCurrent = null;
+    lastOverlayNext = null;
+
+    updateLyrics(state.currentLyrics);
+}
+
+/**
  * Updates the drawer content with new segments
  * @param {Array} segments 
  */

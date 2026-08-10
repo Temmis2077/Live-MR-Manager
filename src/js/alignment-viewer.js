@@ -42,6 +42,14 @@ export class ForcedAlignmentViewer {
             // 고정되고, 파형·플레이바로 시간을 옮기면 그 시각의 블럭으로 따라간다.
             // currentSyncIndex(다음에 스탬프 찍을 위치)와는 별개의 개념.
             selectedSegmentIndex: -1,
+            // "지금 손대고 있는 줄"(-1 = 없음). Shift+Enter(끝 지정)의 대상이다.
+            //
+            // currentSyncIndex로 대신하면 안 된다 — 그 값은 경로마다 의미가 한 칸
+            // 다르다. Enter로 찍으면 '다음에 찍을 줄'로 넘어가고(그래서 방금 찍은
+            // 줄은 -1), 목록에서 클릭하면 '클릭한 줄' 그 자체가 된다. 예전에는
+            // 끝 지정이 늘 currentSyncIndex-1을 봐서, 줄을 클릭한 뒤 Shift+Enter를
+            // 누르면 **그 앞 줄**의 끝이 바뀌고 클릭한 줄이 끌려왔다.
+            lastTappedIndex: -1,
             // 보컬 활동 구간(사이드카). 파형 음영과 경계 스냅에 쓴다.
             // 정렬한 적 없는 곡에는 비어 있고, 그때는 스냅 없이 그대로 동작한다.
             vocalRegions: [],
@@ -347,6 +355,7 @@ export class ForcedAlignmentViewer {
                     s.approx = false;
                 });
                 this.state.currentSyncIndex = 0;
+                this.state.lastTappedIndex = -1;
                 this.state.selectedTarget = null;
                 this.renderLyricList();
                 this.drawWaveform();
@@ -824,6 +833,7 @@ export class ForcedAlignmentViewer {
             this.state.segments = [];
             this.clearSyncHistory();
             this.state.currentSyncIndex = 0;
+            this.state.lastTappedIndex = -1;
             this.state.isSyncMode = false;
             this.state.vocalStartSec = null;
             this.state.interludes = [];
@@ -1624,6 +1634,7 @@ export class ForcedAlignmentViewer {
         if (!hasAnyText) {
             this.state.segments = [];
             this.state.currentSyncIndex = 0;
+            this.state.lastTappedIndex = -1;
             this.renderLyricList();
             this.markDirtyAndScheduleSave();
             return;
@@ -1697,6 +1708,7 @@ export class ForcedAlignmentViewer {
             segments: this.state.segments.map((segment) => ({ ...segment })),
             currentSyncIndex: this.state.currentSyncIndex,
             selectedSegmentIndex: this.state.selectedSegmentIndex,
+            lastTappedIndex: this.state.lastTappedIndex,
             vocalStartSec: this.state.vocalStartSec,
             interludes: this.state.interludes.map((interlude) => ({ ...interlude })),
             tripletMode: this.state.tripletMode,
@@ -1730,6 +1742,8 @@ export class ForcedAlignmentViewer {
         this.state.segments = snapshot.segments.map((segment) => ({ ...segment }));
         this.state.currentSyncIndex = snapshot.currentSyncIndex;
         this.state.selectedSegmentIndex = snapshot.selectedSegmentIndex;
+        // 옛 스냅샷에는 없는 값이라 기본값으로 되돌린다(undefined가 새면 안 된다).
+        this.state.lastTappedIndex = snapshot.lastTappedIndex ?? -1;
         this.state.selectedTarget = null;
         this.state.vocalStartSec = snapshot.vocalStartSec;
         this.state.interludes = snapshot.interludes.map((interlude) => ({ ...interlude }));
@@ -1820,6 +1834,9 @@ export class ForcedAlignmentViewer {
         const preservedEnd = oldDuration > 0 ? now + oldDuration : now + TAP_PROVISIONAL_SEC;
         seg.end = Math.min(Math.max(now + 0.05, preservedEnd), hardLimit);
 
+        // 방금 찍은 줄이 Shift+Enter(끝 지정)의 대상이다.
+        this.state.lastTappedIndex = idx;
+
         let nextIndex = idx + 1;
         while (nextIndex < this.state.segments.length && !getSyncText(this.state.segments[nextIndex]).trim()) nextIndex++;
         this.state.currentSyncIndex = nextIndex;
@@ -1839,13 +1856,18 @@ export class ForcedAlignmentViewer {
      * Enter가 줄의 시작이므로 그 짝으로 끝을 찍는다. 가사가 끊기는 지점을
      * 귀로 듣는 순간 바로 누를 수 있어야 해서, 다음 줄로 넘어가지 않는다.
      *
-     * 대상은 마지막으로 시작을 찍은 줄(currentSyncIndex 바로 앞)이다. 아직
-     * 아무 줄도 안 찍었으면 할 일이 없다.
+     * 대상은 **지금 손대고 있는 줄**(lastTappedIndex)이다. Enter로 방금 찍은
+     * 줄이거나, 목록에서 클릭해 고른 줄이다. 아직 아무 줄도 안 골랐으면 할 일이
+     * 없다. (currentSyncIndex-1로 계산하면 안 된다 — lastTappedIndex 주석 참고.)
      */
     markLineEnd() {
         if (this.state.duration <= 0) return;
 
-        let idx = this.state.currentSyncIndex - 1;
+        // 옛 저장 상태나 예외 경로에서 lastTappedIndex가 비어 있으면, 예전 규칙인
+        // '마지막으로 찍은 줄'로 물러난다.
+        let idx = this.state.lastTappedIndex >= 0
+            ? this.state.lastTappedIndex
+            : this.state.currentSyncIndex - 1;
         while (idx >= 0 && !getSyncText(this.state.segments[idx]).trim()) idx--;
         const seg = idx >= 0 ? this.state.segments[idx] : null;
         if (!seg || !(seg.start > 0)) {
@@ -1884,7 +1906,11 @@ export class ForcedAlignmentViewer {
      * 단축키에서는 빠졌다 — 목록에서 그 줄을 클릭한 뒤 Enter로도 된다.)
      */
     retapPrevious() {
-        const idx = this.state.currentSyncIndex - 1;
+        // 방금 손댄 줄을 다시 찍는다. currentSyncIndex-1로 계산하면 목록에서
+        // 줄을 클릭해 둔 경우 한 칸 어긋난다(lastTappedIndex 주석 참고).
+        const idx = this.state.lastTappedIndex >= 0
+            ? this.state.lastTappedIndex
+            : this.state.currentSyncIndex - 1;
         if (idx < 0 || idx >= this.state.segments.length) return;
         this.state.currentSyncIndex = idx;
         this.handleTap();
@@ -2400,6 +2426,9 @@ export class ForcedAlignmentViewer {
                 // 자동으로 다음 줄로 넘기면 사용자가 보고 선택한 대상과 실제 수정
                 // 대상이 달라져 가장 비싼 휴먼 에러가 생긴다.
                 this.state.currentSyncIndex = idx;
+                // Shift+Enter(끝 지정)도 같은 줄을 본다. 이 둘이 어긋나면
+                // 클릭한 줄이 아니라 그 앞 줄이 바뀐다.
+                this.state.lastTappedIndex = idx;
 
                 // 클릭한 가사를 타겟으로 고정 — 재생하거나 다른 조작을 해도
                 // 시간이 이 블럭을 벗어나기 전까지는 계속 선택 상태로 남는다.
@@ -2963,12 +2992,20 @@ export class ForcedAlignmentViewer {
             const editedIsPlaying = !!state.currentTrack
                 && state.currentTrack.path === this.state.currentPath;
             if (editedIsPlaying) {
-                const parsedLyrics = parseLrc(content, this.state.duration || 0);
-                state.currentLyrics = parsedLyrics;
-                state.currentLyricIndex = -1;
-                import('./lyric-drawer.js').then(m => {
-                    if (m.updateLyrics) m.updateLyrics(parsedLyrics);
-                });
+                // 방금 저장한 파일을 그대로 다시 읽어 반영한다.
+                //
+                // 예전에는 여기서 parseLrc만 하고 가사·인덱스만 갈아끼웠다.
+                // 그래서 두 가지가 빠졌다:
+                //  1) 마커(간주·보컬 시작) — 옛것이 남아 isInInstrumental이
+                //     엉뚱한 구간에서 참이 되고 오버레이가 이유 없이 비었다.
+                //  2) 사이드카(단어 타임) — 편집 직후 단어 단위 진행도가
+                //     조용히 사라지고 줄 단위 선형으로 되돌아갔다.
+                // loadLyricsAndMarkers가 둘 다 해 주므로 그걸 그대로 쓴다.
+                const { loadLyricsAndMarkers } = await import('./lyrics.js');
+                const { segments: freshSegments, markers: freshMarkers } =
+                    await loadLyricsAndMarkers(this.state.currentPath, this.state.duration || 0);
+                const drawer = await import('./lyric-drawer.js');
+                drawer.setDisplayLyrics(freshSegments, freshMarkers);
             }
             import('./ui/components.js').then(m => {
                 if (m.updateAiTogglesState) m.updateAiTogglesState();
