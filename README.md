@@ -1,4 +1,4 @@
-# 🌊 OSW — Open Stem Wave
+#  OSW — Open Stem Wave
 
 > 노래 방송과 연습을 위한 로컬 AI 스템 분리·가사 싱크·OBS 연동 Windows 앱
 
