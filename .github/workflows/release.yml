@@ -63,10 +63,8 @@ jobs:
         shell: pwsh
         run: |
           npm run generate:ipc
+          git ls-files --error-unmatch src/generated/ipc.ts docs/IPC_CATALOG.md
           git diff --exit-code -- src/generated/ipc.ts docs/IPC_CATALOG.md
-          if (git status --porcelain -- src/generated/ipc.ts docs/IPC_CATALOG.md) {
-            throw "Generated IPC files are missing from the commit."
-          }
 
       - name: verify frontend IPC boundary
         run: npm run check:ipc
