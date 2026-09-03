@@ -44,6 +44,9 @@ jobs:
       - name: install frontend dependencies
         run: npm ci
 
+      - name: stage ONNX Runtime for Tauri
+        run: npm run prepare:runtime
+
       - name: test frontend
         run: npm test
 
