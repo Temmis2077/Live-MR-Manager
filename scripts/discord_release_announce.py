@@ -60,7 +60,7 @@ def build_payload(tag: str, description: str) -> dict:
                     },
                     {
                         "name": "도움말",
-                        "value": "[FAQ](https://lmrm.vercel.app/faq)",
+                        "value": "[FAQ](https://companion-six-kappa.vercel.app/faq)",
                         "inline": True,
                     },
                 ],
