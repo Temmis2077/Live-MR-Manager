@@ -35,6 +35,9 @@ REQUIRED_DLLS = [
 # 파트당 목표 원본 크기(압축 전). deflate ~70% 를 감안해 압축 후 한도(2GB) 아래로.
 DEFAULT_TARGET_BYTES = 2_400_000_000
 
+# GitHub 릴리즈 에셋 1개의 상한. 압축 후 이걸 넘으면 업로드 자체가 거부된다.
+GITHUB_ASSET_LIMIT = 2 * 1024**3
+
 
 def sha256_file(path):
     h = hashlib.sha256()
@@ -67,6 +70,8 @@ def main():
     ap.add_argument("--out", required=True, help="파트/매니페스트 출력 폴더")
     ap.add_argument("--base-url", required=True, help="파트가 올라갈 릴리즈 에셋 기본 URL")
     ap.add_argument("--target-bytes", type=int, default=DEFAULT_TARGET_BYTES)
+    ap.add_argument("--part-prefix", default=None,
+                    help="파트 파일명 앞부분 (기본: base-url의 태그, 예 gpu-pack-v1)")
     args = ap.parse_args()
 
     src = os.path.expandvars(args.src)
@@ -92,15 +97,28 @@ def main():
 
     os.makedirs(args.out, exist_ok=True)
     base = args.base_url.rstrip("/")
+    # 파트 이름은 태그(base-url 마지막 조각)를 따른다 — 릴리즈에 올라간 자산과
+    # 이름이 어긋나면 나중에 일부만 다시 올릴 때 매니페스트가 404를 가리킨다.
+    prefix = args.part_prefix or base.rsplit("/", 1)[-1]
+
     parts = []
     for i, g in enumerate(groups):
-        part_name = f"gpu_pack.part{i + 1}.zip"
+        part_name = f"{prefix}.part{i}.zip"
         part_path = os.path.join(args.out, part_name)
         print(f"[i] {part_name} 압축 중 ({len(g['files'])}개, {g['size']/2**30:.2f} GB)…")
         with zipfile.ZipFile(part_path, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
             for fn in g["files"]:
                 z.write(os.path.join(src, fn), arcname=fn)
         size = os.path.getsize(part_path)
+
+        # 압축 후 크기를 여기서 막지 않으면, 2.5GB를 다 올린 뒤에야 GitHub가
+        # 거부한다. 목표치는 압축 '전' 기준이라 압축이 잘 안 되면 넘을 수 있다.
+        if size >= GITHUB_ASSET_LIMIT:
+            print(f"[!] {part_name}이 GitHub 에셋 한도(2GB)를 넘었습니다 "
+                  f"({size/2**30:.2f} GB). --target-bytes를 줄여 다시 만드세요.",
+                  file=sys.stderr)
+            return 1
+
         digest = sha256_file(part_path)
         print(f"    -> {size/2**30:.2f} GB  sha256={digest[:16]}…")
         parts.append({
@@ -113,9 +131,15 @@ def main():
     manifest = {
         "schema": 1,
         "parts": parts,
-        "dlls": REQUIRED_DLLS,
+        # 설치 후 존재해야 하는 파일. 필수 7개가 아니라 **넣은 것 전부**를 적는다 —
+        # cuDNN 하위 모듈 같은 의존 DLL이 하나 빠지면 provider 로딩이 Error 126으로
+        # 실패하고 ort가 그걸 삼켜 조용히 CPU로 떨어지기 때문에, 설치 직후 검증에서
+        # 걸려야 한다(gpu_pack.rs의 주석에 적힌 실제로 겪은 함정).
+        "dlls": sorted(dlls),
     }
     man_path = os.path.join(args.out, "manifest.json")
+    # BOM 없이 쓴다 — serde_json이 BOM을 못 읽어 "매니페스트 파싱 실패"만 뜨고
+    # 원인을 찾기 어렵다. (encoding="utf-8"은 BOM을 붙이지 않는다.)
     with open(man_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
 

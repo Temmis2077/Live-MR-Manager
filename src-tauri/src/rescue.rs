@@ -84,6 +84,9 @@ pub async fn run_cache_rescue(app: AppHandle) -> Result<RescueStats, String> {
     if let Ok(entries) = std::fs::read_dir(separated_dir) {
         for entry in entries.flatten() {
             if entry.path().is_dir() {
+                if entry.file_name().to_string_lossy().starts_with('_') {
+                    continue;
+                }
                 scanned += 1;
                 if let Some(folder_name) = entry.file_name().to_str() {
                     // Decode folder name to get original path/URL

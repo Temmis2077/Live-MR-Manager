@@ -53,7 +53,10 @@ DLL이 전부 합쳐 약 3.8GB(압축 ~2.6GB)라 설치본에 넣을 수 없다.
 
 ### 팩 만들기·업로드 (관리자용)
 
-설치된 팩을 릴리즈용 파트로 묶으려면:
+`gpu-pack-v1` 릴리즈는 이미 올라가 있다(2026-08-05, 3파트 · 압축 합계 약 2.4GB).
+아래는 팩 내용을 **바꿔서 다시 만들 때**의 절차다.
+
+설치된 팩을 릴리즈용 파트로 묶는다:
 
 ```
 python scripts/pack_gpu_pack.py \
@@ -62,8 +65,27 @@ python scripts/pack_gpu_pack.py \
   --base-url https://github.com/Temmis2077/OSW/releases/download/gpu-pack-v1
 ```
 
-생성된 `part_*.zip`과 `manifest.json`을 `gpu-pack-v1` 태그에 업로드한다.
-매니페스트 URL은 `gpu_pack.rs`의 `GPU_PACK_MANIFEST_URL`과 일치해야 한다.
+생성된 `gpu-pack-v1.part*.zip`과 `manifest.json`을 그 태그에 올린다:
+
+```
+gh release upload gpu-pack-v1 dist/gpu-pack/* --repo Temmis2077/OSW --clobber
+```
+
+주의할 점:
+
+- **매니페스트 URL은 `gpu_pack.rs`의 `GPU_PACK_MANIFEST_URL`과 일치해야 한다.**
+  팩 내용을 바꾸면 태그를 `gpu-pack-v2`로 올리고 코드의 상수도 함께 고친다.
+- **릴리즈는 공개 상태여야 한다.** 초안(draft)이면 자산 다운로드 URL이 404다.
+- 파트 이름은 `--base-url`의 태그를 따른다. 이름이 달라진 채 일부만 덮어쓰면
+  매니페스트가 없는 파일을 가리키게 된다.
+- 매니페스트에 **BOM이 붙으면 안 된다.** `serde_json`이 파싱에 실패해 앱에는
+  "매니페스트 파싱 실패"만 뜬다(스크립트는 BOM 없이 쓴다).
+
+올린 뒤 앱이 쓰는 경로 그대로 확인한다:
+
+```
+curl -sL <GPU_PACK_MANIFEST_URL> | python -m json.tool
+```
 
 ### 필수 DLL
 

@@ -33,6 +33,9 @@ export function showNotification(msg, type = "info") {
   const toast = document.createElement("div");
   // CSS에 정의된 .toast 및 타입별 클래스(info, success, error, warning) 적용
   toast.className = `toast ${type}`;
+  toast.tabIndex = 0;
+  toast.setAttribute("role", type === "error" ? "alert" : "status");
+  toast.setAttribute("aria-label", `${msg}. 눌러서 닫기`);
   
   // 프리미엄 아이콘 (SVG) 구성
   const icons = {
@@ -48,12 +51,24 @@ export function showNotification(msg, type = "info") {
   `;
   container.appendChild(toast);
 
-  // 3초 후 애니메이션과 함께 제거
-  setTimeout(() => {
+  let removeTimer = null;
+  const dismiss = () => {
+    if (toast.classList.contains("removing")) return;
+    if (removeTimer) clearTimeout(removeTimer);
     toast.classList.add("removing");
-    // CSS .toast.removing 의 트랜지션 시간(0.3s) 이후 엘리먼트 완전 제거
     setTimeout(() => toast.remove(), 300);
-  }, 3000);
+  };
+
+  // 마우스·터치로 알림 아무 곳이나 누르거나, 초점을 둔 뒤 Enter/Space로 닫는다.
+  toast.addEventListener("click", dismiss);
+  toast.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    dismiss();
+  });
+
+  // 누르지 않은 알림은 기존처럼 3초 뒤 사라진다.
+  removeTimer = setTimeout(dismiss, 3000);
 }
 
 const DISMISSED_UPDATE_KEY = "dismissedAppUpdateVersion";
@@ -76,6 +91,9 @@ export function showUpdateAvailable(info) {
 
   const toast = document.createElement("div");
   toast.className = "toast info update-available";
+  toast.tabIndex = 0;
+  toast.setAttribute("role", "status");
+  toast.setAttribute("aria-label", `새 버전 ${latest} 알림. 빈 영역을 눌러 닫기`);
   toast.innerHTML = `
     <div class="toast-icon">
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -93,6 +111,23 @@ export function showUpdateAvailable(info) {
     </div>
   `;
 
+  const dismissUpdate = () => {
+    if (toast.classList.contains("removing")) return;
+    toast.classList.add("removing");
+    setTimeout(() => toast.remove(), 300);
+  };
+
+  // 다운로드/나중에 버튼은 각 동작을 유지하고, 나머지 영역을 누르면 닫는다.
+  toast.addEventListener("click", (event) => {
+    if (event.target.closest("button")) return;
+    dismissUpdate();
+  });
+  toast.addEventListener("keydown", (event) => {
+    if (event.target !== toast || (event.key !== "Enter" && event.key !== " ")) return;
+    event.preventDefault();
+    dismissUpdate();
+  });
+
   toast.querySelector('[data-action="download"]')?.addEventListener("click", async () => {
     try {
       await invoke("open_app_update_page", { url: releaseUrl || "" });
@@ -104,8 +139,7 @@ export function showUpdateAvailable(info) {
 
   toast.querySelector('[data-action="dismiss"]')?.addEventListener("click", () => {
     localStorage.setItem(DISMISSED_UPDATE_KEY, latest);
-    toast.classList.add("removing");
-    setTimeout(() => toast.remove(), 300);
+    dismissUpdate();
   });
 
   container.appendChild(toast);

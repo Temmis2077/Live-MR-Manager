@@ -8,11 +8,10 @@ export default function HomePage() {
       <main>
         <section className="hero">
           <span className="badge">퍼포머를 위한 MR 관리</span>
-          <h1>연습·방송은 앱에서, 노래책은 멜로밍과 함께</h1>
+          <h1>노래 방송과 연습을 한 흐름으로 준비하는 OSW</h1>
           <p>
-            OSW로 MR·가사·재생을 관리하고, 멜로밍 노래책과 곡 정보를
-            맞춰 보세요. 음원은 내 PC에서만 다루고, 시청자에게 보이는 목록만
-            깔끔하게 동기화할 수 있습니다.
+            OSW는 MR 분리, 가사 싱크, 라이브 재생과 OBS 오버레이를 로컬 PC에서
+            이어 주는 Windows 앱입니다. 현재 첫 독립 베타 설치본을 검증하고 있습니다.
           </p>
         </section>
 
@@ -20,25 +19,25 @@ export default function HomePage() {
           <article className="card">
             <h2>앱 받기</h2>
             <p>
-              Windows용 OSW를 설치하고 라이브러리에 곡을 담아 보세요.
+              첫 독립 베타는 아직 공개되지 않았습니다. 현재 상태와 알려진 제한을 확인하세요.
             </p>
             <Link href="/download" className="btn btn-primary">
-              다운로드
+              배포 준비 상태
             </Link>
           </article>
           <article className="card">
-            <h2>멜로밍 노래책 연동</h2>
+            <h2>멜로밍 연동</h2>
             <p>
-              치지직·SOOP(숲)·씨미 채널 주소로 노래책을 가져오고, KEY·숙련도·난이도 등을
-              한곳에서 관리합니다.
+              앱 UI에서는 현재 숨겨진 준비 중 기능입니다. OAuth와 Companion 계약을
+              다시 검증한 뒤 별도로 공개합니다.
             </p>
             <Link href="/faq#channel-id" className="btn btn-secondary">
-              연동 방법 보기
+              현재 상태 보기
             </Link>
           </article>
           <article className="card">
             <h2>도움이 필요하신가요?</h2>
-            <p>설치, 로그인, 동기화 범위 등 자주 묻는 질문을 모았습니다.</p>
+            <p>설치 준비 상태, 로컬 처리 범위와 문제 제보 방법을 모았습니다.</p>
             <Link href="/faq" className="btn btn-secondary">
               FAQ 보기
             </Link>
@@ -47,14 +46,14 @@ export default function HomePage() {
 
         <section style={{ marginTop: "2.5rem" }}>
           <h2 style={{ margin: "0 0 1rem", fontSize: "1.15rem" }}>
-            이렇게 사용해 보세요
+            베타가 공개되면 이렇게 사용합니다
           </h2>
           <ol className="steps">
             <li>
               <strong>1. 앱 설치</strong>
               <span>
-                <Link href="/download">다운로드</Link> 페이지에서 최신 버전을
-                설치합니다.
+                <Link href="/download">다운로드</Link> 페이지에서 검증 완료 여부를
+                확인한 뒤 설치합니다.
               </span>
             </li>
             <li>
@@ -64,24 +63,21 @@ export default function HomePage() {
               </span>
             </li>
             <li>
-              <strong>3. 멜로밍 채널 연결</strong>
+              <strong>3. 가사 싱크 확인</strong>
               <span>
-                앱 설정에 방송 채널 주소(치지직·SOOP·씨미 등)를 입력하고
-                「가져오기」로 기존 목록을 불러옵니다.
+                자동 정렬 결과를 오디오와 함께 듣고 직접 보정합니다.
               </span>
             </li>
             <li>
-              <strong>4. 곡 정보 맞추기</strong>
+              <strong>4. 라이브 화면 준비</strong>
               <span>
-                제목·가수·KEY/BPM·숙련도·난이도·가사를 정리한 뒤, 멜로밍
-                노래책과 동기화합니다.
+                현재·다음 가사, 대기열과 빠른 조작이 잘 보이는지 확인합니다.
               </span>
             </li>
             <li>
               <strong>5. 방송·연습</strong>
               <span>
-                앱에서 재생·피치 조절·OBS 오버레이를 쓰고, 시청자용 노래책은
-                멜로밍에 반영된 상태를 유지합니다.
+                앱에서 재생과 믹서를 조작하고 OBS 가사·곡 정보 표시를 확인합니다.
               </span>
             </li>
           </ol>
@@ -100,10 +96,9 @@ export default function HomePage() {
         >
           <strong style={{ color: "var(--text)" }}>멜로밍에서 이 페이지를 여셨나요?</strong>
           <p style={{ margin: "0.5rem 0 0" }}>
-            멜로밍 안에서 보이는 이 화면은 OSW 연동 안내입니다. 앱
-            설치·노래책 맞추기 방법은 위 단계와{" "}
-            <Link href="/faq">FAQ</Link>를 참고해 주세요. 멜로밍 로그인 직후에는
-            잠시 연결 화면이 뜬 뒤 앱으로 돌아갑니다.
+            이 화면은 향후 OSW 연동 안내를 위해 준비 중입니다. 현재 배포 버전에서는
+            멜로밍 UI를 사용할 수 없습니다. <Link href="/faq">FAQ</Link>에서
+            공개 상태를 확인해 주세요.
           </p>
         </section>
       </main>

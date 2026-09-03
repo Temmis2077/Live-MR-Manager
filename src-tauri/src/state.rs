@@ -7,14 +7,19 @@ use std::path::PathBuf;
 use std::fs;
 
 use crate::vocal_remover::WaveformRemover;
-// AI Model Library Reference: https://huggingface.co/seanghay/uvr_models/tree/main
+// Commercially usable built-in model. The file is downloaded on first use so
+// the installer does not grow by ~953 MB.
 
 use crate::audio_player::sys_log;
 use crate::types::SongMetadata;
 
+pub const DEFAULT_MODEL_ID: &str = "melband_roformer_vocals_mit";
 pub const MODELS: &[(&str, &str, &str)] = &[
-    ("kim", "Kim_Vocal_2.onnx", "https://huggingface.co/seanghay/uvr_models/resolve/main/Kim_Vocal_2.onnx"),
-    ("inst_hq_3", "UVR-MDX-NET-Inst_HQ_3.onnx", "https://huggingface.co/seanghay/uvr_models/resolve/main/UVR-MDX-NET-Inst_HQ_3.onnx"),
+    (
+        DEFAULT_MODEL_ID,
+        "melband_roformer_vocals.onnx",
+        "https://huggingface.co/smank/mel-band-roformer-vocals-onnx/resolve/60cb6b4b97e41b42f7ff16c2e386f47a8cc7e50a/melband_roformer_vocals.onnx",
+    ),
 ];
 
 // --- App Paths Management ---
@@ -198,8 +203,10 @@ fn init_db(conn: &mut Connection, app_dir: &PathBuf) {
             key TEXT PRIMARY KEY,
             value TEXT
          );
-         INSERT OR IGNORE INTO Settings (key, value) VALUES ('active_model_id', 'kim');
-         UPDATE Settings SET value = 'inst_hq_3' WHERE key = 'active_model_id' AND value = 'roformer';
+         INSERT OR IGNORE INTO Settings (key, value) VALUES ('active_model_id', 'melband_roformer_vocals_mit');
+         UPDATE Settings SET value = 'melband_roformer_vocals_mit'
+           WHERE key = 'active_model_id'
+             AND value IN ('kim', 'inst_hq_3', 'roformer', 'melband-roformer-deux');
          COMMIT;"
     ).expect("Failed to create tables");
 

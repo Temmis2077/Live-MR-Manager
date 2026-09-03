@@ -20,7 +20,7 @@ export default function TermsPage() {
           <span className="badge">법적 고지</span>
           <h1>이용약관</h1>
           <p>
-            OSW 데스크톱 앱과 Companion 웹(lmrm.vercel.app) 이용
+            OSW 데스크톱 앱과 Companion 웹(companion-six-kappa.vercel.app) 이용
             조건을 안내합니다. 시행일: {TERMS_EFFECTIVE_DATE}
           </p>
         </section>

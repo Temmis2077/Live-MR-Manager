@@ -1,14 +1,19 @@
 /**
  * src/js/lyric-drawer.js - Sliding Drawer UI Logic
  */
-import { listen, invoke } from './tauri-bridge.js';
+import { invoke } from './tauri-bridge.js';
+import { playbackService } from '../ipc/services/playback.js';
 import { state } from './state.js';
 import { registerAppHandler, callAppHandler } from './app-context.js';
-import { getDisplayLines } from './lrc-parser.js';
+import { getDisplayLineModel } from './lrc-parser.js';
 import { findUpcomingIndex, resolveLineWindow } from './live-performance.js';
+import { highlightLiveLyric } from './live-lyrics.js';
+import { filterWordTimingsForProgress } from './alignment-metadata.js';
+import { brandIcon } from './brand-icons.js';
 
 let lastOverlayCurrent = null;
 let lastOverlayNext = null;
+let lastOverlaySignature = null;
 
 function updateDrawerTrackTitle() {
     const titleEl = document.getElementById('lyric-drawer-track-title');
@@ -101,6 +106,14 @@ export function getPlaybackClockMs() {
     return playbackClock ? playbackClock.now() : null;
 }
 
+/** 가사 줄·카운트다운 판정에 쓰는 표시 시각(ms).
+ * 진행 막대의 실제 오디오 시각과 달리 사용자의 가사 보정을 포함한다. */
+export function getLyricDisplayClockMs(fallbackMs = null) {
+    const actual = getPlaybackClockMs();
+    const base = actual ?? (Number.isFinite(fallbackMs) ? fallbackMs : null);
+    return base == null ? null : Math.max(0, base + getLyricOffsetMs());
+}
+
 function applyProgress(positionMs, durationMs) {
     lastDurationMs = durationMs;
     // 오버레이로 나가는 패킷과 **같은 값**으로 시계를 맞춘다.
@@ -119,9 +132,7 @@ function applyProgress(positionMs, durationMs) {
 export function bindLyricProgressListener() {
     if (progressListenerBound) return;
     progressListenerBound = true;
-    listen('playback-progress', (event) => {
-        const positionMs = event.payload.positionMs ?? event.payload.position_ms ?? 0;
-        const durationMs = event.payload.durationMs ?? event.payload.duration_ms ?? 0;
+    playbackService.onProgress(({ positionMs, durationMs }) => {
         applyProgress(positionMs, durationMs);
     });
 }
@@ -321,6 +332,7 @@ export function setDisplayLyrics(segments, markers) {
     // 바뀌었다"로 보고 오버레이 푸시를 건너뛴다.
     lastOverlayCurrent = null;
     lastOverlayNext = null;
+    lastOverlaySignature = null;
 
     updateLyrics(state.currentLyrics);
 }
@@ -354,7 +366,7 @@ export function updateLyrics(segments) {
         lastOverlayNext = null;
         container.innerHTML = `
             <div class="drawer-empty-msg" style="padding: 40px 20px; text-align: center;">
-                <div style="font-size: 2.5rem; margin-bottom: 20px; opacity: 0.5;">🎵</div>
+                <div class="drawer-empty-icon">${brandIcon('lyrics', 'brand')}</div>
                 <p style="font-weight: 700; font-size: 1.1rem; margin-bottom: 8px;">정렬된 가사가 없습니다.</p>
                 <p style="font-size: 0.85rem; opacity: 0.6; line-height: 1.6; margin-bottom: 24px;">
                     이 곡에 등록된 가사 싱크가 없습니다.<br>Lyric Sync 모드에서 가사를 정렬해 보세요.
@@ -390,12 +402,16 @@ export function updateLyrics(segments) {
  * 설정 가능하다(lrc-parser.js의 getLineVisibility).
  */
 function displayText(seg, scope = 'app') {
-    const lines = getDisplayLines(seg, scope).filter(Boolean);
+    const lines = getDisplayLineModel(seg, scope).filter((line) => line.text);
     if (lines.length === 0) return '';
-    if (lines.length === 1) return lines[0];
-    const [first, ...rest] = lines;
-    const restHtml = rest.map((l) => `<span style="font-size:0.7em;opacity:0.85;">${l}</span>`).join('<br>');
-    return `${first}<br>${restHtml}`;
+    const escapeHtml = (value) => String(value)
+        .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+    return lines.map((line, index) => {
+        const target = line.progressTarget ? ' data-progress-target="true"' : '';
+        const sub = index > 0 ? ' overlay-lyric-sub' : '';
+        return `<span class="overlay-lyric-display-line${sub}" data-lyric-role="${line.role}"${target}><span class="overlay-lyric-line-text">${escapeHtml(line.text)}</span></span>`;
+    }).join('<br>');
 }
 
 /**
@@ -433,7 +449,9 @@ function syncLyricsWithTime(currentTime) {
     let playingIndex = -1;
     for (let i = 0; i < lyrics.length; i++) {
         const s = lyrics[i];
-        if (s.start > 0 && currentTime >= s.start && (s.end === 0 || currentTime < s.end)) {
+        const window = resolveLineWindow(s, lyrics[i + 1] || null);
+        if (window.startSec != null && currentTime >= window.startSec
+            && (window.endSec == null || currentTime < window.endSec)) {
             playingIndex = i;
         }
     }
@@ -455,37 +473,27 @@ function syncLyricsWithTime(currentTime) {
     const current = (playingIndex !== -1) ? displayText(lyrics[playingIndex], 'overlay') : "";
     const next = (inInstrumental || !upcoming) ? "" : displayText(upcoming, 'overlay');
 
-    // IMPORTANT: Don't skip overlay update only because index didn't change.
-    // At song start, index can stay -1 for a while but first line still needs to appear in "next".
-    const overlayPayloadChanged = current !== lastOverlayCurrent || next !== lastOverlayNext;
+    // 줄 타이밍을 함께 보낸다 — 오버레이가 줄 안 진행도를 자기 시계로
+    // 그리려면 이 줄의 구간을 알아야 한다. 보정(offset)은 줄 판정에는 더하고,
+    // 실제 오디오 시계와 비교할 시작·끝에는 되돌려 적용한다.
+    const seg = playingIndex !== -1 ? lyrics[playingIndex] : null;
+    const back = getLyricOffsetMs();
+    const filteredWords = filterWordTimingsForProgress(seg);
+    const words = filteredWords
+        ? filteredWords.map((w) => [String(w.t || ''), Math.max(0, Math.round(w.s - back)), Math.max(0, Math.round(w.e - back))])
+        : [];
+    const win = seg ? resolveLineWindow(seg, lyrics[playingIndex + 1] || null) : null;
+    const toMs = (sec) => Math.max(0, Math.round((sec || 0) * 1000 - back));
+    const lineStartMs = win?.startSec != null ? toMs(win.startSec) : 0;
+    const lineEndMs = win?.endSec != null ? toMs(win.endSec) : 0;
+
+    // 텍스트가 같은 반복 가사도 인덱스와 시간 구간은 다르다. 텍스트만으로
+    // 중복 억제하면 이전 절의 진행 구간이 남아 세 화면의 와이프가 어긋난다.
+    const overlaySignature = JSON.stringify([
+        current, next, playingIndex, lineStartMs, lineEndMs, words,
+    ]);
+    const overlayPayloadChanged = overlaySignature !== lastOverlaySignature;
     if (overlayPayloadChanged) {
-        // 줄 타이밍을 함께 보낸다 — 오버레이가 줄 안 진행도를 자기 시계로
-        // 그리려면 이 줄의 구간을 알아야 한다. 진행도는 60fps로 움직이므로
-        // 매 프레임 보낼 수 없고, 줄이 바뀔 때 한 번만 보낸다.
-        //
-        // 보정(offset)을 되돌려 실제 오디오 시간으로 보낸다. 오버레이의 시계는
-        // 실제 재생 위치를 세고 있어서, 보정된 시간을 그대로 주면 진행도가
-        // 보정한 만큼 어긋난다.
-        const seg = playingIndex !== -1 ? lyrics[playingIndex] : null;
-        const back = getLyricOffsetMs();
-        const words = Array.isArray(seg?.words)
-            ? seg.words
-                .filter((w) => w && Number.isFinite(w.startMs) && Number.isFinite(w.endMs))
-                .map((w) => [String(w.word || ''), Math.max(0, Math.round(w.startMs - back)), Math.max(0, Math.round(w.endMs - back))])
-            : [];
-
-        // 구간은 라이브 본문과 같은 규칙으로 정한다(resolveLineWindow).
-        //
-        // 예전에는 여기서 seg.start/seg.end를 그대로 보냈다. 그런데 라이브
-        // 본문은 끝 시각이 없으면 다음 줄 시작까지로 보고 그 간격에 상한도
-        // 둔다. 그래서 같은 줄인데 두 화면의 채워진 정도가 달랐다 —
-        // 끝 시각이 0인 줄은 오버레이만 아예 안 차기도 했다.
-        const win = seg ? resolveLineWindow(seg, lyrics[playingIndex + 1] || null) : null;
-        const toMs = (sec) => Math.max(0, Math.round((sec || 0) * 1000 - back));
-
-        const lineStartMs = win?.startSec != null ? toMs(win.startSec) : 0;
-        const lineEndMs = win?.endSec != null ? toMs(win.endSec) : 0;
-
         // 라이브 본문도 이 값을 그대로 쓴다.
         //
         // 예전에는 라이브가 buildPerformerLyricModel로 진행도를 따로 냈다.
@@ -493,7 +501,9 @@ function syncLyricsWithTime(currentTime) {
         // 보여주기·끝난 줄 잠깐 붙들기)을 갖고 있어서 줄 사이 구간에서
         // 오버레이와 다른 값을 냈다 — 끝난 줄을 100%로 붙든 채였다.
         // 계산을 두 번 맞추는 대신 보내는 값을 공유해 구조적으로 못 어긋나게 한다.
-        state.overlayLyricWindow = { index: playingIndex, startMs: lineStartMs, endMs: lineEndMs, words };
+        state.overlayLyricWindow = playingIndex >= 0
+            ? { index: playingIndex, startMs: lineStartMs, endMs: lineEndMs, words }
+            : null;
 
         invoke('update_overlay_lyrics', {
             current,
@@ -505,13 +515,15 @@ function syncLyricsWithTime(currentTime) {
         }).catch(err => console.error(err));
         lastOverlayCurrent = current;
         lastOverlayNext = next;
+        lastOverlaySignature = overlaySignature;
     }
 
     if (playingIndex === state.currentLyricIndex) return;
     state.currentLyricIndex = playingIndex;
 
-    // 라이브 화면 가사 패널의 현재 줄 하이라이트
-    import('./live-lyrics.js').then((m) => m.highlightLiveLyric(playingIndex)).catch(() => {});
+    // 현재 줄 판정과 같은 프레임에 강조한다. 동적 import를 거치면 state와
+    // 진행도는 새 줄인데 전체 가사 강조만 한 프레임 이전 줄에 남는다.
+    highlightLiveLyric(playingIndex);
 
     const container = document.querySelector('#lyric-drawer .drawer-content');
     if (!container) return;
@@ -526,4 +538,3 @@ function syncLyricsWithTime(currentTime) {
         }
     });
 }
-

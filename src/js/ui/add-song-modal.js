@@ -16,17 +16,25 @@ import { state } from '../state.js';
 import { showNotification, getThumbnailUrl } from '../utils.js';
 import { getAudioMetadata, saveLibrary } from '../audio.js';
 import { isDuplicateYoutubeTrack, normalizeYoutubeUrl } from '../youtube-utils.js';
+import { partitionSeparationModels } from '../separation-mode-modal.js';
 // 장르/카테고리는 taxonomy.js 단일 소스를 따른다 (곡 정보 편집·필터와 동일 기준).
 import { GENRES, CATEGORIES } from '../taxonomy.js';
 
 let overlay = null;
 // 소스 단계에서 확보한 곡 메타데이터 목록 (유튜브 1개 or 로컬 N개)
 let pendingSongs = [];
+// 사용자가 장르를 직접 고른 뒤에는 자동 매칭이 그 위를 덮지 않는다.
+let genreTouched = false;
+// 모달을 연 횟수. 장르 조회가 끝났을 때 그 사이 모달이 닫히거나 다시 열렸는지
+// 판별한다 — 조회는 네트워크라 늦게 돌아오는데, 그때 사라진 DOM을 만지면 터진다.
+let modalGeneration = 0;
 
 
 function close() {
     if (overlay) { overlay.remove(); overlay = null; }
     pendingSongs = [];
+    genreTouched = false;
+    modalGeneration += 1;
 }
 
 function esc(s) {
@@ -48,9 +56,12 @@ function renderPendingList() {
                 <img class="addsong-thumb" src="${getThumbnailUrl(m.thumbnail) || ''}" onerror="this.style.visibility='hidden'">
                 <div class="addsong-meta">
                     <div class="addsong-song-title">${esc(m.title || m.path)}</div>
-                    <div class="addsong-song-artist">${esc(m.artist || '')}</div>
+                    <div class="addsong-song-artist">${esc(m.artist || '')}${
+                        m.genreMatching ? ' <span class="addsong-genre-tag is-loading">장르 찾는 중…</span>'
+                        : m.autoGenre ? ` <span class="addsong-genre-tag">${esc(m.autoGenre)}</span>` : ''
+                    }</div>
                 </div>
-                <button type="button" class="marker-delete-btn" data-remove="${i}" title="목록에서 제거">×</button>
+                <button type="button" class="marker-delete-btn" data-remove="${i}" title="목록에서 제거" aria-label="${esc(m.title || m.path)} 목록에서 제거">×</button>
             </div>
         `).join('');
         list.querySelectorAll('[data-remove]').forEach((btn) => {
@@ -73,6 +84,7 @@ function renderPendingList() {
         artistInput.placeholder = hint;
     }
     overlay.querySelector('#addsong-confirm').disabled = pendingSongs.length === 0;
+    renderGenreMatchNote();
 }
 
 async function fetchYoutube() {
@@ -101,6 +113,7 @@ async function fetchYoutube() {
         pendingSongs.push(metadata);
         input.value = '';
         renderPendingList();
+        autoMatchGenres();
     } catch (err) {
         console.error('[AddSong] YouTube fetch failed:', err);
         showNotification('유튜브 정보를 가져오지 못했습니다.', 'error');
@@ -242,30 +255,147 @@ async function pickLocalFiles(prefillPaths = null) {
         }
     }
     renderPendingList();
+    // 고른 직후에 장르를 찾아 둔다 — 기다리게 하지 않고 결과가 오면 채운다.
+    autoMatchGenres();
 }
 
-/** 분리 모델 선택 라디오 — 빠른/고품질 + 커스텀 모델(있으면). */
+/**
+ * 고른 곡의 장르를 자동으로 찾아 채운다.
+ *
+ * 곡을 고른 직후에 돈다 — 장르는 곡을 등록하고 나서 따로 손대게 두면 대부분
+ * 비어 있는 채로 남는다. 곡마다 따로 찾아 m.autoGenre에 담아 두고, 찾은
+ * 값이 모두 같을 때만 위 선택 상자에 올린다(장르 칸은 전체 일괄 적용이라,
+ * 서로 다른데 하나로 몰아 버리면 틀린 값을 다 같이 뒤집어쓴다).
+ *
+ * 여기서 쓰는 wantGenre는 Last.fm 태그 조회라 네트워크만 탄다 — 음원 분석이
+ * 들어가는 키·BPM과 달리 곡을 고르는 흐름을 붙잡지 않는다.
+ */
+async function autoMatchGenres() {
+    if (!overlay || pendingSongs.length === 0) return;
+    const targets = pendingSongs.filter((m) => !m.genre && m.autoGenre === undefined
+        && (m.artist || '').trim() && (m.title || '').trim());
+    if (targets.length === 0) { renderGenreMatchNote(); return; }
+
+    const generation = modalGeneration;
+    targets.forEach((m) => { m.genreMatching = true; });
+    renderGenreMatchNote();
+
+    await Promise.all(targets.map(async (m) => {
+        try {
+            const res = await invoke('autofill_song_info', {
+                path: m.path, artist: m.artist || '', title: m.title || '',
+                wantGenre: true, wantKeyBpm: false,
+            });
+            m.autoGenre = res?.genre || null;
+            if (res?.tags?.length) m.autoTags = res.tags;
+        } catch (err) {
+            console.warn('[AddSong] 장르 자동 매칭 실패:', m.title, err);
+            m.autoGenre = null;
+        } finally {
+            m.genreMatching = false;
+        }
+    }));
+
+    // 조회를 기다리는 동안 모달을 닫았거나 다시 열었으면 그리지 않는다.
+    // renderPendingList는 overlay가 있다고 보고 바로 querySelector를 하므로
+    // 여기서 걸러 주지 않으면 닫는 순간 예외가 난다.
+    if (generation !== modalGeneration || !overlay) return;
+    applyMatchedGenreToSelect();
+    renderPendingList();
+}
+
+/** 찾은 장르가 모두 같고 사용자가 아직 안 골랐으면 선택 상자에 올린다. */
+function applyMatchedGenreToSelect() {
+    if (!overlay || genreTouched) return;
+    const sel = overlay.querySelector('#addsong-genre');
+    if (!sel || sel.value) return;
+    const found = [...new Set(pendingSongs.map((m) => m.autoGenre).filter(Boolean))];
+    if (found.length !== 1) return;
+    const genre = found[0];
+    // 목록에 없는 장르면(Last.fm이 새 값을 준 경우) 항목을 만들어 고른다.
+    if (![...sel.options].some((o) => o.value === genre)) {
+        sel.insertBefore(new Option(genre, genre), sel.querySelector('option[value="__custom"]'));
+    }
+    sel.value = genre;
+}
+
+/** 장르 칸 아래 한 줄 안내 — 무엇이 자동으로 들어갔는지 보이고 고칠 수 있게. */
+function renderGenreMatchNote() {
+    const note = overlay?.querySelector('#addsong-genre-note');
+    if (!note) return;
+    if (pendingSongs.some((m) => m.genreMatching)) {
+        note.textContent = '장르 찾는 중…';
+        note.dataset.tone = '';
+        return;
+    }
+    const matched = pendingSongs.filter((m) => m.autoGenre);
+    if (matched.length === 0) {
+        // 가수나 곡명이 비면 조회 자체가 안 된다(Last.fm은 둘 다 필요).
+        // 파일 태그가 없는 음원에서 흔한 경우라 무엇을 채우면 되는지 알려 준다.
+        const skipped = pendingSongs.some((m) => m.autoGenre === undefined
+            && (!(m.artist || '').trim() || !(m.title || '').trim()));
+        const tried = pendingSongs.some((m) => m.autoGenre === null);
+        if (skipped) {
+            note.textContent = '가수와 곡명이 있어야 장르를 찾을 수 있습니다 — 위에 채우면 다시 찾습니다.';
+            note.dataset.tone = 'warn';
+        } else {
+            note.textContent = tried ? '장르를 찾지 못했습니다 — 직접 고르세요.' : '';
+            note.dataset.tone = tried ? 'warn' : '';
+        }
+        return;
+    }
+    const found = [...new Set(matched.map((m) => m.autoGenre))];
+    note.textContent = found.length === 1
+        ? `자동으로 찾은 장르: ${found[0]} — 그대로 두거나 바꾸세요.`
+        : `곡마다 다른 장르를 찾았습니다(${found.join(' · ')}) — 위에서 하나를 고르면 전부 그 값이 됩니다.`;
+    note.dataset.tone = 'ok';
+}
+
+/** 분리 모델 선택 — 1차 보컬/반주 + 선택적인 리드/화음 2차 분리. */
 async function renderModelChoices() {
     const wrap = overlay.querySelector('#addsong-model-choices');
-    let activeId = 'kim';
+    let activeId = 'melband_roformer_vocals_mit';
     try { activeId = await invoke('get_model_settings'); } catch (_) {}
-    let customs = [];
+    let allModels = [];
     try {
-        const all = await invoke('list_all_models');
-        customs = (all || []).filter((m) => m.isCustom);
+        allModels = await invoke('list_all_models') || [];
     } catch (_) {}
+    const { baseModels, harmonyModels } = partitionSeparationModels(allModels);
     const options = [
-        { id: 'kim', label: '⚡ 빠른 분리', desc: 'Kim Vocal 2 — 속도 우선' },
-        { id: 'inst_hq_3', label: '✨ 고품질 분리', desc: 'Inst HQ 3 — 반주 품질 우선' },
-        ...customs.map((m) => ({ id: m.id, label: m.name, desc: '커스텀 모델' })),
+        { id: 'melband_roformer_vocals_mit', label: '기본 고품질 분리', desc: 'Mel-Band RoFormer Vocals — MIT' },
+        ...baseModels.map((m) => ({ id: m.id, label: m.name, desc: '커스텀 모델' })),
     ];
+    const selectedBaseId = options.some((o) => o.id === activeId)
+        ? activeId
+        : 'melband_roformer_vocals_mit';
+    const harmonyOptions = harmonyModels.map((m) =>
+        `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('');
     wrap.innerHTML = options.map((o) => `
-        <label class="addsong-model-option${o.id === activeId ? ' current-default' : ''}">
-            <input type="radio" name="addsong-model" value="${esc(o.id)}" ${o.id === activeId ? 'checked' : ''}>
+        <label class="addsong-model-option${o.id === selectedBaseId ? ' current-default' : ''}">
+            <input type="radio" name="addsong-model" value="${esc(o.id)}" ${o.id === selectedBaseId ? 'checked' : ''}>
             <span class="addsong-model-label">${esc(o.label)}</span>
             <span class="addsong-model-desc">${esc(o.desc)}</span>
         </label>
-    `).join('');
+    `).join('') + `
+        <div class="addsong-model-option addsong-harmony-option">
+            <label class="addsong-check">
+                <input type="checkbox" id="addsong-harmony-check" ${harmonyModels.length ? '' : 'disabled'}>
+                보컬 화음 분리
+            </label>
+            <span class="addsong-model-desc">리드 보컬과 화음/코러스를 별도 채널로 만듭니다.</span>
+            <select id="addsong-harmony-model" class="addsong-input" disabled>
+                ${harmonyOptions || '<option value="">등록된 Karaoke ONNX 모델 없음</option>'}
+            </select>
+            <span class="addsong-model-desc">${harmonyModels.length
+                ? 'MR 분리 뒤 선택한 모델로 보컬을 한 번 더 처리합니다.'
+                : '커스텀 AI 모델에서 Mel-Band RoFormer Karaoke ONNX를 먼저 등록해주세요.'}</span>
+        </div>`;
+
+    const harmonyCheck = wrap.querySelector('#addsong-harmony-check');
+    const harmonySelect = wrap.querySelector('#addsong-harmony-model');
+    if (harmonyCheck && harmonySelect) {
+        harmonyCheck.onchange = () => { harmonySelect.disabled = !harmonyCheck.checked; };
+    }
 }
 
 async function confirmAdd() {
@@ -296,7 +426,11 @@ async function confirmAdd() {
         if (artist) pendingSongs[0].artist = artist;
     }
     pendingSongs.forEach((m) => {
+        // 위에서 고른 값이 있으면 그게 전부에 적용된다(사용자가 명시한 값).
+        // 비워 뒀다면 곡마다 자동으로 찾아 둔 장르를 각자 쓴다 — 여러 곡을
+        // 한 번에 넣을 때 서로 다른 장르가 하나로 뭉개지지 않게.
         if (genre) m.genre = genre;
+        else if (m.autoGenre) m.genre = m.autoGenre;
         if (category) m.categories = [category];
         if (tags.length) m.tags = tags;
         // 가사 링크는 단일 곡일 때만 의미 있음(검색으로 고른 그 곡의 링크)
@@ -309,6 +443,9 @@ async function confirmAdd() {
     // (c)/(d) 옵션
     const doSeparate = overlay.querySelector('#addsong-separate-check').checked;
     const modelId = overlay.querySelector('input[name="addsong-model"]:checked')?.value || null;
+    const harmonyModelId = overlay.querySelector('#addsong-harmony-check')?.checked
+        ? overlay.querySelector('#addsong-harmony-model')?.value || null
+        : null;
     const doAlign = overlay.querySelector('#addsong-lyrics-check').checked;
     const lyricsText = overlay.querySelector('#addsong-lyrics').value.trim();
     const alignLang = overlay.querySelector('#addsong-align-lang').value;
@@ -352,7 +489,15 @@ async function confirmAdd() {
         if (doSeparate && modelId) {
             const { startMrSeparation } = await import('../audio.js');
             for (const m of songs) {
-                try { await startMrSeparation(m.path, modelId); } catch (err) {
+                const alignThisSong = !!(alignAfterAdd && m.path === alignAfterAdd.path);
+                try {
+                    const separation = await startMrSeparation(m.path, modelId, harmonyModelId, {
+                        alignAfterSeparation: alignThisSong,
+                    });
+                    if (alignThisSong) {
+                        alignAfterAdd.deferredBySeparation = separation?.alignmentDeferred === true;
+                    }
+                } catch (err) {
                     console.error('[AddSong] separation start failed:', m.path, err);
                 }
             }
@@ -360,7 +505,7 @@ async function confirmAdd() {
 
         const withAlign = doAlign && lyricsText && songs.length === 1;
         const extras = [
-            doSeparate ? 'MR 분리' : null,
+            doSeparate ? (harmonyModelId ? 'MR · 보컬 화음 분리' : 'MR 분리') : null,
             withAlign ? (doSeparate ? '분리 완료 후 AI 정렬' : 'AI 정렬') : null,
         ].filter(Boolean);
         showNotification(
@@ -375,19 +520,22 @@ async function confirmAdd() {
         // 않도록 별도 try로 감싼다.
         if (alignAfterAdd) {
             try {
-                const { ensureAlignmentModelsReady, enqueueAlignment, deferAlignmentUntilSeparated } =
+                const { ensureAlignmentModelsReady, enqueueAlignment } =
                     await import('../alignment-queue.js');
-                const ready = await ensureAlignmentModelsReady();
-                if (!ready) {
+                if (alignAfterAdd.deferSeparate && alignAfterAdd.deferredBySeparation) {
+                    // 공통 분리 진입점이 백엔드 작업 시작 전에 이미 예약했다.
+                } else if (alignAfterAdd.deferSeparate) {
                     showNotification(
                         '정렬 모델이 없어 AI 정렬은 건너뜁니다. 가사 싱크 탭에서 모델을 받은 뒤 다시 정렬할 수 있어요.',
                         'info'
                     );
-                } else if (alignAfterAdd.deferSeparate) {
-                    // 분리 종료 이벤트(backend.js)가 오면 자동으로 대기열에 등록됨.
-                    deferAlignmentUntilSeparated(alignAfterAdd.path);
                 } else {
-                    enqueueAlignment([alignAfterAdd.path]);
+                    const ready = await ensureAlignmentModelsReady();
+                    if (ready) enqueueAlignment([alignAfterAdd.path]);
+                    else showNotification(
+                        '정렬 모델이 없어 AI 정렬은 건너뜁니다. 가사 싱크 탭에서 모델을 받은 뒤 다시 정렬할 수 있어요.',
+                        'info'
+                    );
                 }
             } catch (alignErr) {
                 console.error('[AddSong] alignment enqueue failed:', alignErr);
@@ -396,6 +544,16 @@ async function confirmAdd() {
         }
     } catch (err) {
         console.error('[AddSong] confirm failed:', err);
+        // 등록은 메모리에 먼저 밀어 넣고 저장하는 순서라, 저장이 실패하면
+        // 화면상의 라이브러리에만 곡이 남는다. 그 상태에서 '추가'를 다시
+        // 누르면 같은 곡이 한 번 더 들어가고, 다음번 아무 저장에 그대로
+        // 딸려 들어간다. 실패하면 넣은 만큼 되돌린다.
+        const added = new Set(songs);
+        state.songLibrary = state.songLibrary.filter((s) => !added.has(s));
+        try {
+            const { renderLibrary } = await import('./library.js');
+            renderLibrary();
+        } catch (_) {}
         showNotification('곡 추가에 실패했습니다: ' + err, 'error');
         btn.disabled = false;
         btn.textContent = '추가';
@@ -415,7 +573,7 @@ export async function openAddSongModal(prefillLocalPaths = null) {
         <div class="modal-content addsong-modal">
             <div class="addsong-header">
                 <h3>노래 추가</h3>
-                <button type="button" class="marker-delete-btn" id="addsong-close" title="닫기">×</button>
+                <button type="button" class="marker-delete-btn" id="addsong-close" title="닫기" aria-label="노래 추가 닫기">×</button>
             </div>
 
             <div class="addsong-section">
@@ -454,6 +612,7 @@ export async function openAddSongModal(prefillLocalPaths = null) {
                     <select id="addsong-category" class="addsong-input" title="카테고리 — 씬/시장(출신). 예: K-POP, J-POP, 애니메이션"></select>
                     <input type="text" id="addsong-genre-custom" class="addsong-input" placeholder="장르 직접 입력" style="display:none;">
                     <input type="text" id="addsong-category-custom" class="addsong-input" placeholder="카테고리 직접 입력" style="display:none;">
+                    <div id="addsong-genre-note" class="addsong-genre-note" style="grid-column: span 2;"></div>
                     <input type="text" id="addsong-tags" class="addsong-input" placeholder="태그 (쉼표로 구분)" style="grid-column: span 2;">
                     <input type="text" id="addsong-lyrics-link" class="addsong-input" placeholder="가사 링크 (검색에서 선택하면 자동 입력)" spellcheck="false" style="grid-column: span 2;">
                 </div>
@@ -557,6 +716,27 @@ export async function openAddSongModal(prefillLocalPaths = null) {
     const genreSel = overlay.querySelector('#addsong-genre');
     buildOptions(genreSel, GENRES, dbGenres, '장르 선택… (사운드)');
     bindCustom(genreSel, overlay.querySelector('#addsong-genre-custom'));
+    // 직접 고른 뒤에는 자동 매칭 결과가 그 위를 덮지 않는다.
+    genreSel.addEventListener('change', () => { genreTouched = true; renderGenreMatchNote(); });
+    overlay.querySelector('#addsong-genre-custom')
+        .addEventListener('input', () => { genreTouched = true; });
+
+    // 가수·곡명을 고치면 그 값으로 장르를 다시 찾는다. 파일 태그가 부실해
+    // 처음엔 못 찾았다가 사용자가 채워 넣는 흐름이 흔하다.
+    let rematchTimer = null;
+    const rematchOnEdit = () => {
+        if (pendingSongs.length !== 1) return;
+        const song = pendingSongs[0];
+        song.title = overlay.querySelector('#addsong-title').value.trim() || song.title;
+        song.artist = overlay.querySelector('#addsong-artist').value.trim();
+        clearTimeout(rematchTimer);
+        rematchTimer = setTimeout(() => {
+            delete song.autoGenre;   // 다시 찾을 대상으로 되돌린다
+            autoMatchGenres();
+        }, 600);
+    };
+    overlay.querySelector('#addsong-title').addEventListener('input', rematchOnEdit);
+    overlay.querySelector('#addsong-artist').addEventListener('input', rematchOnEdit);
 
     const catSel = overlay.querySelector('#addsong-category');
     buildOptions(catSel, CATEGORIES, dbCategories, '카테고리 선택… (씬/시장)');

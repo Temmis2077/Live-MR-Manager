@@ -1,0 +1,123 @@
+/* 단축키 — 앱바의 뒤로/앞으로 버튼과 단축키 도움말 모달 */
+
+/* ── 뒤로 / 앞으로 ───────────────────────────────────────── */
+.appbar-history {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+/* 화면 전환 드롭다운보다 조금 작게 — 주 조작이 아니라 보조 이동이다. */
+.appbar-nav-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+}
+
+/* 갈 곳이 없으면 눌러도 소용없다는 것을 보이게. */
+.appbar-nav-btn:disabled {
+  opacity: 0.32;
+  cursor: default;
+  background: transparent;
+}
+
+.appbar-nav-btn:disabled:hover {
+  background: transparent;
+  color: var(--text-muted);
+}
+
+/* ── 단축키 도움말 ───────────────────────────────────────── */
+.modal-content.shortcut-help {
+  max-width: 720px;
+  width: 92vw;
+}
+
+.shortcut-help .modal-body {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 8px 28px;
+  max-height: min(64vh, 560px);
+  overflow-y: auto;
+  padding: 4px 4px 8px;
+}
+
+.shortcut-group {
+  break-inside: avoid;
+  margin-bottom: 14px;
+}
+
+.shortcut-group h4 {
+  margin: 0 0 8px;
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent-secondary);
+}
+
+.shortcut-group dl {
+  margin: 0;
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 0;
+  border-bottom: 1px solid rgb(var(--accent-rgb) / 0.06);
+}
+
+.shortcut-row:last-child {
+  border-bottom: none;
+}
+
+/* 키 표기는 폭을 고정해 설명이 세로로 정렬되게 한다. */
+.shortcut-row dt {
+  flex: none;
+  min-width: 128px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.shortcut-row dd {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.shortcut-row kbd {
+  display: inline-block;
+  min-width: 22px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-align: center;
+  color: var(--text-main);
+  background: var(--surface-2);
+  border: 1px solid var(--glass-border);
+  border-bottom-width: 2px;
+}
+
+.shortcut-row .kbd-plus {
+  font-size: 0.66rem;
+  color: var(--text-muted);
+  padding: 0 1px;
+}
+
+.shortcut-help-foot {
+  padding: 10px 4px 2px;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  border-top: 1px solid var(--glass-border);
+}
+
+.shortcut-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-muted);
+}

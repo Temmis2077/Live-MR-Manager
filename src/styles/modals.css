@@ -7,15 +7,13 @@
   right: 0;
   bottom: 0;
   background: var(--overlay-bg);
-  backdrop-filter: blur(10px);
+  backdrop-filter: none;
   z-index: 20000; /* Normal state: behind titlebar(30k) and dock(25k) */
   display: none;
   align-items: center;
   justify-content: center;
   overflow: visible;
-  padding: 0 30px; /* Horizontal safe area */
-  padding-top: calc(var(--titlebar-height) + 30px);
-  padding-bottom: calc(var(--dock-height) + 30px);
+  padding: calc(var(--titlebar-height) + var(--space-4)) var(--page-gutter) calc(var(--dock-height) + var(--space-4));
   transition: z-index 0s;
 }
 
@@ -39,23 +37,28 @@
 .modal-content {
   pointer-events: auto;
   background: var(--menu-bg);
-  backdrop-filter: blur(25px) saturate(160%);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 24px;
+  backdrop-filter: none;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-card);
   width: 100%;
-  max-width: 500px;
+  max-width: var(--modal-md);
   max-height: 100%;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 40px 120px rgba(0, 0, 0, 0.7), inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .58);
   overflow: visible;
-  padding: 32px; /* Standard internal padding */
-  animation: modalScale 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  padding: var(--space-4);
+  animation: modalScale .18s ease-out;
 }
 
 #metadata-modal .modal-content {
-  max-width: 720px;
+  max-width: var(--modal-lg);
 }
+
+.modal-content.modal-sm { max-width: var(--modal-sm); }
+.modal-content.modal-md { max-width: var(--modal-md); }
+.modal-content.modal-lg { max-width: var(--modal-lg); }
+.modal-content.modal-xl { max-width: var(--modal-xl); }
 
 @keyframes modalScale {
   from {
@@ -71,8 +74,9 @@
 
 .modal-header {
   padding: 0;
-  padding-bottom: 16px;
-  margin-bottom: 24px;
+  min-height: var(--control-lg);
+  padding-bottom: var(--space-2);
+  margin-bottom: var(--space-3);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -1026,14 +1030,16 @@
 }
 .cm-advanced > summary:hover { color: var(--text-main); }
 
-/* --- 트랙 믹서 (개발용 최소 UI) --- */
+/* --- 트랙 믹서 --- */
 .track-mixer-row {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-height: 36px;
 }
 .track-mixer-label {
-  width: 40px;
+  width: 88px;
+  flex: 0 0 88px;
   font-weight: 700;
   font-size: 0.82rem;
 }

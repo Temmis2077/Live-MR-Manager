@@ -3,6 +3,7 @@
  */
 
 import { state } from './js/state.js';
+import { libraryService } from './ipc/services/library.js';
 import { 
   initDomReferences, renderLibrary,
   refreshFilterDropdowns, updateSortDropdown, updateAiModelStatus, 
@@ -17,10 +18,11 @@ import { registerAppHandler } from './js/app-context.js';
 import { invoke, appWindow, toggleWindowMaximize } from './js/tauri-bridge.js';
 
 const THEME_STORAGE_KEY = 'themeMode';
-const THEME_OPTIONS = new Set(['dark', 'light', 'pink', 'sky']);
 
-function normalizeTheme(value) {
-  return THEME_OPTIONS.has(value) ? value : 'dark';
+function normalizeTheme(_value) {
+  // v1 backups may still contain light/pink/sky. Red Orbit is intentionally
+  // a single instrument theme, so every legacy value migrates to dark.
+  return 'dark';
 }
 
 function applyPlatformClass() {
@@ -40,27 +42,9 @@ export function applyTheme(theme, { persist = true } = {}) {
   return nextTheme;
 }
 
-function syncThemeDropdown(theme) {
-  const hiddenInput = document.getElementById('theme-mode-select');
-  const dropdown = document.getElementById('theme-mode-dropdown');
-  if (!hiddenInput || !dropdown) return;
-
-  hiddenInput.value = theme;
-  const selectedText = dropdown.querySelector('.selected-text');
-  const options = dropdown.querySelectorAll('.option-item');
-  options.forEach((opt) => {
-    const selected = opt.dataset.value === theme;
-    opt.classList.toggle('selected', selected);
-    if (selected && selectedText) {
-      selectedText.textContent = opt.textContent;
-    }
-  });
-}
-
 function initTheme() {
   const stored = localStorage.getItem(THEME_STORAGE_KEY);
-  const appliedTheme = applyTheme(stored || state.themeMode || 'dark', { persist: true });
-  syncThemeDropdown(appliedTheme);
+  applyTheme(stored || state.themeMode || 'dark', { persist: true });
 }
 
 // Register app handlers (replaces window.* globals for cross-module calls)
@@ -89,13 +73,15 @@ async function initApp() {
   setupTitlebar();
 
   // Fix manual input font/layout shift is handled in overlay-settings.css
-  // 0. Initialize Metadata Context (Dictionary)
+  // 0. 번역 사전 로드.
+  //    sync_dictionary_to_db는 여기서 부르지 않는다 — 사전 '관리' UI를 없애면서
+  //    명령 등록에서도 뺐기 때문에(lib.rs 참고), 부르면 매 실행마다 실패 로그만
+  //    남았다. 자동 번역이 읽는 사전은 init_metadata_context가 올린다.
   try {
     await invoke('init_metadata_context');
-    await invoke('sync_dictionary_to_db');
-    console.log("[App] Metadata context initialized and synced to DB.");
+    console.log("[App] Metadata context initialized.");
   } catch (err) {
-    console.error("[App] Initial metadata sync failed:", err);
+    console.error("[App] Metadata context init failed:", err);
   }
   
   // 1. Initialize DOM references
@@ -125,7 +111,7 @@ async function initApp() {
       // 재매핑으로 아무도 안 쓰게 된 장르·카테고리 행을 지운다
       // (옛 영문 슬러그 jpop/rock/ballad, 중복된 록·인디 록·포크 등).
       try {
-        const [g, c] = await invoke('prune_unused_taxonomy');
+        const [g, c] = await libraryService.pruneUnusedTaxonomy();
         if (g || c) console.log(`[App] Pruned unused taxonomy: genres ${g}, categories ${c}`);
       } catch (err) {
         console.warn('[App] taxonomy prune skipped:', err);
@@ -143,6 +129,17 @@ async function initApp() {
     initAllEvents();
   } catch (err) {
     console.error("Failed to initialize events:", err);
+  }
+
+  // 3-1. 앱 전역 단축키와 마우스 뒤로/앞으로 버튼.
+  // 화면 전용 단축키(음원 관리 등)는 initAllEvents 안에서 이미 등록됐다 —
+  // 그 뒤에 불러야 도움말 목록이 비지 않는다.
+  try {
+    const { initGlobalShortcuts, initMouseNavigation } = await import('./js/events/global-shortcuts.js');
+    initGlobalShortcuts();
+    initMouseNavigation();
+  } catch (err) {
+    console.error("Failed to initialize shortcuts:", err);
   }
 
   // 4. Set Initial UI State
@@ -172,14 +169,16 @@ async function initApp() {
     updateGpuStatus(gpuStatus);
   } catch (err) {}
 
-  try {
-    const { initSettingsTabs } = await import('./js/events/settings-tabs.js');
-    initSettingsTabs();
-  } catch (err) {}
-
+  // 릴리즈에서 감출 섹션을 먼저 확정한 뒤 탭을 만든다 — 탭은 "보일 섹션이
+  // 하나도 없는 탭"을 감추려고 그 결과를 읽는다.
   try {
     const { initAppModeControls } = await import('./js/events/app-mode-ui.js');
     initAppModeControls();
+  } catch (err) {}
+
+  try {
+    const { initSettingsTabs } = await import('./js/events/settings-tabs.js');
+    initSettingsTabs();
   } catch (err) {}
 
   try {
@@ -200,10 +199,13 @@ async function initApp() {
     await refreshOutputDevices();
   } catch (err) {}
 
-  // 트랙 믹서(페이더·음소거/솔로·메트로놈·채널 라우팅·지연 보정)는 개발용
-  // 최소 UI였어서 이번 릴리즈에서는 화면에서 뺐다. 백엔드 기능은 그대로 살아
-  // 있고 안전한 기본값으로 동작한다(리미터 켜짐, MR 채널 꺼짐, 메트로놈 꺼짐).
-  // 제대로 된 믹서 UI를 만들 때 src/js/track-mixer.js를 다시 연결하면 된다.
+  try {
+    const { initTrackMixer, refreshMixerState } = await import('./js/track-mixer.js');
+    initTrackMixer();
+    await refreshMixerState();
+  } catch (err) {
+    console.warn('[Mixer] 초기화 실패:', err);
+  }
 
   try {
     const { initDereverbControls, refreshDereverbStatus } = await import('./js/dereverb.js');
@@ -241,6 +243,21 @@ async function initApp() {
   try {
     updateAiTogglesState(null);
   } catch (err) {}
+
+  // 11. 첫 실행 환영 화면.
+  //     라이브러리가 비어 있고 아직 본 적 없을 때만 뜬다 — 이전 버전에서
+  //     데이터를 가져온 사람은 곡이 이미 있으므로 방해하지 않는다.
+  //     초기화가 다 끝난 뒤에 띄운다(모델 확인·장치 조회 중에 모달이 떠서
+  //     그 뒤 토스트가 모달 뒤로 깔리는 일이 없게).
+  try {
+    const { shouldShowWelcome } = await import('./js/onboarding.js');
+    if (shouldShowWelcome({ songCount: state.songLibrary.length })) {
+      const { openGuide } = await import('./js/ui/onboarding-ui.js');
+      await openGuide({ welcome: true });
+    }
+  } catch (err) {
+    console.error("[App] Welcome guide failed:", err);
+  }
 
   console.log("[App] Initialization Complete.");
 }

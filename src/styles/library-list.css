@@ -4,10 +4,11 @@
    변경할 때는 두 규칙을 함께 수정한다. */
 
 :root {
-  /* 곡·가수 / 스템 / 가사 / 길이 / 키·BPM / 추가일 / 상태 / 더보기
+  /* 곡·가수 / MR(스템) / 가사 / 정보 / 길이 / 준비 상태 / 더보기
      3단 레이아웃(좌 보관함 + 우 인스펙터) 안에서도 스템 열이 살아남도록
-     고정 열은 내용이 들어가는 최소치로 잡았다. */
-  --lib-table-cols: minmax(200px, 1fr) 112px 68px 52px 84px 68px 88px 30px;
+     고정 열은 내용이 들어가는 최소치로 잡았다. 순서·개수는 ui/library.js의
+     헤더와 행 마크업이 진짜 기준이므로 함께 고친다. */
+  --lib-table-cols: minmax(190px, 1fr) 96px 72px 72px 54px 88px 30px;
 }
 
 body .song-grid.list-mode {
@@ -35,9 +36,40 @@ body .song-grid.list-mode {
   letter-spacing: 0.06em;
 }
 
-/* 첫 칸(52px)은 행의 썸네일 자리와 맞추기 위한 빈 칸 */
-.library-list-header::before {
-  content: "";
+/* 첫 칸(52px) = 행의 썸네일 자리. 예전에는 빈 ::before로 자리만 채웠는데,
+   이제 '여러 곡 선택' 버튼이 실제로 그 칸을 쓴다(표의 선택 열).
+   ::before를 남겨 두면 격자 칸을 하나 더 먹어 모든 열이 한 칸씩 밀린다. */
+.col-select-toggle {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+
+.col-select-toggle:hover {
+  color: var(--text-main);
+  background: var(--surface-2);
+}
+
+/* 선택 모드에 들어가 있을 때 — 아래 행들에 체크 표시가 뜬 상태와 짝을 이룬다. */
+.col-select-toggle.active,
+.col-select-toggle[aria-pressed="true"] {
+  color: var(--accent-secondary);
+  background: rgb(var(--accent-rgb) / 0.14);
+  border-color: rgb(var(--accent-rgb) / 0.4);
+}
+
+.col-select-toggle:focus-visible {
+  outline: 2px solid var(--accent-secondary);
+  outline-offset: 2px;
 }
 
 .library-list-header [data-sort] {
@@ -55,9 +87,7 @@ body .song-grid.list-mode {
   border-radius: 4px;
 }
 
-.library-list-header .col-duration,
-.library-list-header .col-keybpm,
-.library-list-header .col-added {
+.library-list-header .col-duration {
   text-align: right;
 }
 
@@ -71,8 +101,8 @@ body .song-grid.list-mode .song-card.list-row {
   grid-template-columns: 52px var(--lib-table-cols) !important;
   align-items: center !important;
   width: 100% !important;
-  height: 52px !important;
-  min-height: 52px !important;
+  height: 46px !important;
+  min-height: 46px !important;
   padding: 0 14px !important;
   gap: 12px !important;
   margin: 0 !important;
@@ -87,16 +117,24 @@ body .song-grid.list-mode .song-card.list-row:hover {
   border-color: color-mix(in srgb, var(--glass-border) 60%, transparent) !important;
 }
 
-body .song-grid.list-mode .song-card.list-row.active,
-body .song-grid.list-mode .song-card.list-row.selected {
+body .song-grid.list-mode .song-card.list-row.inspected {
   background: rgb(var(--accent-rgb) / 0.1) !important;
   box-shadow: inset 2px 0 0 0 var(--accent-primary) !important;
 }
 
+body .song-grid.list-mode .song-card.list-row.active {
+  background: color-mix(in srgb, var(--surface-1) 72%, rgb(var(--accent-rgb) / 0.18)) !important;
+}
+
+body .song-grid.list-mode .song-card.list-row:focus-visible {
+  outline: 2px solid var(--accent-secondary);
+  outline-offset: -2px;
+}
+
 /* 썸네일 — 표에서는 작은 정사각형 */
 body .song-grid.list-mode .song-card.list-row .thumbnail {
-  width: 38px !important;
-  height: 38px !important;
+  width: 34px !important;
+  height: 34px !important;
   border-radius: 7px !important;
   position: relative !important;
   overflow: hidden !important;
@@ -176,9 +214,7 @@ body .song-grid.list-mode .song-card.list-row .col-stems {
 }
 
 /* 숫자 열 — 오른쪽 정렬 + 고정폭 숫자로 자리 흔들림 방지 */
-body .song-grid.list-mode .song-card.list-row .col-duration,
-body .song-grid.list-mode .song-card.list-row .col-keybpm,
-body .song-grid.list-mode .song-card.list-row .col-added {
+body .song-grid.list-mode .song-card.list-row .col-duration {
   display: flex !important;
   align-items: center !important;
   justify-content: flex-end !important;
@@ -187,10 +223,6 @@ body .song-grid.list-mode .song-card.list-row .col-added {
   font-variant-numeric: tabular-nums !important;
   white-space: nowrap !important;
   overflow: hidden !important;
-}
-
-body .song-grid.list-mode .song-card.list-row .col-added {
-  color: var(--text-dim) !important;
 }
 
 /* 가사 — 예전엔 썸네일 위에 배지로 얹었다. 표에서는 자기 열에서 보여준다
@@ -213,15 +245,15 @@ body .song-grid.list-mode .song-card.list-row .col-lyrics {
 }
 
 .lyric-cell.synced {
-  background: rgb(var(--accent-rgb) / 0.16);
-  color: var(--accent-secondary);
-  border-color: rgb(var(--accent-rgb) / 0.32);
+  background: rgb(var(--success-rgb) / 0.11);
+  color: var(--success);
+  border-color: rgb(var(--success-rgb) / 0.28);
 }
 
 .lyric-cell.unsynced {
-  background: rgba(245, 158, 11, 0.14);
-  color: #fcd34d;
-  border-color: rgba(245, 158, 11, 0.32);
+  background: rgb(var(--warning-rgb) / 0.11);
+  color: var(--warning);
+  border-color: rgb(var(--warning-rgb) / 0.28);
 }
 
 /* 상태 배지 */
@@ -231,6 +263,54 @@ body .song-grid.list-mode .song-card.list-row .col-status {
   justify-content: center !important;
   min-width: 0 !important;
 }
+
+.info-cell,
+.readiness-status {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 3px 7px;
+  border-radius: 5px;
+  font-size: 0.64rem;
+  font-weight: 800;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border: 1px solid var(--glass-border);
+}
+
+.lyric-cell.synced::before,
+.info-cell.ready::before,
+.readiness-status.ready::before { content: '✓'; margin-right: 4px; font-weight: 900; }
+.info-cell.missing::before,
+.readiness-status.needs-work::before { content: '!'; margin-right: 4px; font-weight: 900; }
+.readiness-status.processing::before { content: '…'; margin-right: 4px; font-weight: 900; }
+.readiness-status.error::before { content: '×'; margin-right: 4px; font-weight: 900; }
+
+.info-cell.ready,
+.readiness-status.ready {
+  color: var(--success);
+  background: rgb(var(--success-rgb) / .11);
+  border-color: rgb(var(--success-rgb) / .28);
+}
+.info-cell.missing,
+.readiness-status.needs-work {
+  color: var(--warning);
+  background: rgb(var(--warning-rgb) / .11);
+  border-color: rgb(var(--warning-rgb) / .28);
+}
+.readiness-status.processing {
+  color: var(--info);
+  background: rgb(var(--info-rgb) / .11);
+  border-color: rgb(var(--info-rgb) / .28);
+}
+.readiness-status.error {
+  color: var(--error);
+  background: rgb(var(--error-rgb) / .11);
+  border-color: rgb(var(--error-rgb) / .28);
+}
+
+.col-info-status { min-width: 0; overflow: hidden; }
 
 body .song-grid.list-mode .song-card.list-row .status-badge {
   position: static !important;
@@ -271,26 +351,14 @@ body .song-grid.list-mode .song-card.list-row .col-more {
    각 임계값은 그 조합의 열 합계 + gap + 패딩으로 계산한 값이다. */
 /* 각 임계값 = (그 조합의 열 합계 + 52px 썸네일 칸 + gap 12px×n + 행 좌우 패딩
    28px + 그리드 좌우 패딩 32px). 그 폭을 못 주면 뒤쪽 열을 하나 접는다. */
-@container libcenter (max-width: 909px) {
-  .song-grid { --lib-table-cols: minmax(190px, 1fr) 112px 68px 52px 84px 88px 30px; }
-  .library-list-header .col-added,
-  body .song-grid.list-mode .song-card.list-row .col-added { display: none !important; }
+@container libcenter (max-width: 760px) {
+  .song-grid { --lib-table-cols: minmax(170px, 1fr) 88px 68px 68px 84px 30px; }
+  .library-list-header .col-duration,
+  body .song-grid.list-mode .song-card.list-row .col-duration { display: none !important; }
 }
 
-@container libcenter (max-width: 809px) {
-  .song-grid { --lib-table-cols: minmax(170px, 1fr) 112px 68px 52px 88px 30px; }
-  .library-list-header .col-keybpm,
-  body .song-grid.list-mode .song-card.list-row .col-keybpm { display: none !important; }
-}
-
-@container libcenter (max-width: 693px) {
-  .song-grid { --lib-table-cols: minmax(160px, 1fr) 68px 52px 88px 30px; }
+@container libcenter (max-width: 610px) {
+  .song-grid { --lib-table-cols: minmax(160px, 1fr) 68px 68px 84px 30px; }
   .library-list-header .col-stems,
   body .song-grid.list-mode .song-card.list-row .col-stems { display: none !important; }
-}
-
-@container libcenter (max-width: 613px) {
-  .song-grid { --lib-table-cols: minmax(160px, 1fr) 52px 88px 30px; }
-  .library-list-header .col-lyrics,
-  body .song-grid.list-mode .song-card.list-row .col-lyrics { display: none !important; }
 }

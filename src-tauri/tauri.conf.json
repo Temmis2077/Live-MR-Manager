@@ -4,9 +4,10 @@
   "version": "1.0.0-beta.1",
   "identifier": "com.osw.desktop",
   "build": {
-    "frontendDist": "../src",
+    "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
-    "beforeDevCommand": "npm run dev"
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run prepare:runtime && npm run build"
   },
   "app": {
     "withGlobalTauri": true,
@@ -43,7 +44,12 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
-    "resources": [],
+    "resources": {
+      "runtime/onnxruntime.dll": "onnxruntime.dll",
+      "runtime/onnxruntime_providers_shared.dll": "onnxruntime_providers_shared.dll",
+      "runtime/onnxruntime_providers_cuda.dll": "onnxruntime_providers_cuda.dll",
+      "runtime/onnxruntime_providers_tensorrt.dll": "onnxruntime_providers_tensorrt.dll"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

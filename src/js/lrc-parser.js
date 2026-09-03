@@ -210,18 +210,34 @@ export function setShowTranslation(show, scope = 'app') {
  * cue's visible set is empty (user turned everything off for this surface),
  * falls back to the pronunciation line (or whatever's available) rather than
  * rendering nothing. */
-export function getDisplayLines(seg, scope = 'app') {
-  if (!isTriplet(seg)) return [seg?.text || ''];
+export function getDisplayLineModel(seg, scope = 'app') {
+  if (!isTriplet(seg)) {
+    return [{ text: seg?.text || '', role: 'text', progressTarget: true }];
+  }
   const vis = getLineVisibility(scope);
   const lines = [];
-  if (vis.original && seg.original) lines.push(seg.original);
-  if (vis.pronunciation && seg.pronunciation) lines.push(seg.pronunciation);
-  if (vis.translation && seg.translation) lines.push(seg.translation);
+  if (vis.original && seg.original) {
+    lines.push({ text: seg.original, role: 'original', progressTarget: false });
+  }
+  if (vis.pronunciation && seg.pronunciation) {
+    lines.push({ text: seg.pronunciation, role: 'pronunciation', progressTarget: true });
+  }
+  if (vis.translation && seg.translation) {
+    lines.push({ text: seg.translation, role: 'translation', progressTarget: false });
+  }
   if (lines.length === 0) {
     const fallback = seg.pronunciation || seg.original || seg.translation || '';
-    if (fallback) lines.push(fallback);
+    if (fallback) {
+      const role = seg.pronunciation ? 'pronunciation' : (seg.original ? 'original' : 'translation');
+      lines.push({ text: fallback, role, progressTarget: role === 'pronunciation' });
+    }
   }
   return lines;
+}
+
+/** Compatibility view for existing editor/drawer callers. */
+export function getDisplayLines(seg, scope = 'app') {
+  return getDisplayLineModel(seg, scope).map((line) => line.text);
 }
 
 /**
@@ -336,9 +352,17 @@ export function mergeAlignmentResult(segments, lines, entries = null) {
     if (!seg || !(seg.start === 0 && seg.end === 0)) return false;
     seg.start = Math.max(0, line.start_ms / 1000);
     seg.end = Math.max(seg.start + 0.05, line.end_ms / 1000);
+    if (typeof line.ctc_end_ms === 'number') seg.ctcEnd = line.ctc_end_ms / 1000;
+    if (typeof line.tail_extension_ms === 'number') seg.tailExtensionMs = line.tail_extension_ms;
     seg.approx = true;
     // 정렬 신뢰도(0~1, 표시 전용). UI가 낮은 줄을 "검토 필요"로 강조한다.
     if (typeof line.confidence === 'number') seg.confidence = line.confidence;
+    if (line.alignment_trust) seg.alignmentTrust = line.alignment_trust;
+    if (line.gate_decision) seg.gateDecision = line.gate_decision;
+    if (Array.isArray(line.quality_flags)) seg.qualityFlags = [...line.quality_flags];
+    if (typeof line.greedy_text_similarity === 'number') seg.greedyTextSimilarity = line.greedy_text_similarity;
+    if (line.line_kind) seg.lineKind = line.line_kind;
+    if (line.repeated_lyric === true) seg.repeatedLyric = true;
     if (lineIndex != null) used[lineIndex] = true;
     return true;
   };
@@ -369,6 +393,28 @@ export function mergeAlignmentResult(segments, lines, entries = null) {
     if (apply(seg, line, idx)) appliedCount++;
   });
   return appliedCount;
+}
+
+/**
+ * Adopt a queue completion without reintroducing raw timings that the queue's
+ * final order/overlap/duration audit already rejected. When audited segments
+ * are supplied they are the sole source of truth; raw lines are only a legacy
+ * fallback for callers that do not provide the final segment snapshot.
+ */
+export function resolveQueueCompletionSegments(currentSegments, lines, auditedSegments = null) {
+  if (Array.isArray(auditedSegments) && auditedSegments.length > 0) {
+    return {
+      segments: auditedSegments.map((segment) => ({ ...segment })),
+      applied: 0,
+      adoptedAudited: true,
+    };
+  }
+  const segments = Array.isArray(currentSegments) ? currentSegments : [];
+  return {
+    segments,
+    applied: mergeAlignmentResult(segments, Array.isArray(lines) ? lines : []),
+    adoptedAudited: false,
+  };
 }
 
 /**

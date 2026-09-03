@@ -16,7 +16,7 @@
 
 /* ── 좌측: 보관함 · 태그 ─────────────────────────────────── */
 .lib-side {
-  width: 180px;
+  width: clamp(176px, 15vw, 200px);
   flex: none;
   display: flex;
   flex-direction: column;
@@ -252,15 +252,69 @@
   margin-top: 5px;
 }
 
+.library-nav-filter,
+#lib-sync-dropdown { display: none !important; }
+
+.library-readiness-chips,
+.library-active-filters {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.readiness-chip,
+.active-filter-chip,
+.active-filter-reset,
+.empty-action {
+  border: 1px solid var(--glass-border);
+  background: var(--surface-1);
+  color: var(--text-muted);
+  border-radius: 8px;
+  padding: 6px 9px;
+  font: 700 .7rem inherit;
+  cursor: pointer;
+}
+
+.readiness-chip.active {
+  color: var(--accent-secondary);
+  border-color: rgb(var(--accent-rgb) / .42);
+  background: rgb(var(--accent-rgb) / .14);
+}
+
+.library-active-filters { padding: 7px 16px 0; }
+.active-filter-label { font-size: .66rem; font-weight: 800; color: var(--text-dim); }
+.active-filter-reset { border-color: transparent; background: transparent; }
+.library-empty-state span { display: block; margin: 8px 0 14px; }
+.library-empty-state .empty-action.primary { color: var(--accent-secondary); border-color: rgb(var(--accent-rgb) / .4); }
+
 /* ── 우측: 인스펙터 ──────────────────────────────────────── */
 .lib-inspector {
-  width: 288px;
+  width: var(--panel-secondary);
   flex: none;
   min-height: 0;
   overflow-y: auto;
   background: var(--sidebar-bg);
   border-left: 1px solid var(--glass-border);
 }
+
+.lib-panel-toggle {
+  display: none;
+  position: fixed;
+  z-index: 43;
+  bottom: calc(var(--dock-height) + var(--space-3));
+  height: var(--control-md);
+  padding-inline: var(--space-3);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-control);
+  background: var(--menu-bg);
+  color: var(--text-main);
+  font: 750 .72rem inherit;
+  cursor: pointer;
+}
+
+.lib-panel-toggle--filters { left: var(--space-4); }
+.lib-panel-toggle--inspector { right: var(--space-4); }
 
 .insp-empty {
   padding: 28px 20px;
@@ -323,6 +377,41 @@
   gap: 7px;
   margin-top: 12px;
 }
+
+.insp-readiness-summary {
+  margin-top: 8px;
+  font-size: .72rem;
+  font-weight: 800;
+  color: var(--text-muted);
+}
+
+.insp-details { padding: 0; }
+.insp-details > summary {
+  list-style: none;
+  padding: 14px 16px;
+  cursor: pointer;
+  font-size: .72rem;
+  font-weight: 800;
+  color: var(--text-muted);
+}
+.insp-details > summary::after { content: '＋'; float: right; color: var(--text-dim); }
+.insp-details[open] > summary::after { content: '−'; }
+.insp-details > :not(summary) { margin-left: 16px; margin-right: 16px; }
+.insp-details > :last-child { margin-bottom: 16px; }
+.insp-details.danger > summary { color: #fca5a5; }
+
+.insp-unsaved-banner {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--sidebar-bg) 82%, #f59e0b 18%);
+  border-bottom: 1px solid rgba(245, 158, 11, .38);
+  font-size: .7rem;
+  font-weight: 700;
+}
+.insp-unsaved-actions { display: flex; gap: 5px; margin-top: 8px; }
+.insp-unsaved-actions button { padding: 5px 7px; border-radius: 6px; border: 1px solid var(--glass-border); background: var(--surface-2); color: var(--text-main); cursor: pointer; }
 
 .insp-btn {
   flex: 1;
@@ -466,11 +555,38 @@
 /* 좁은 창에서는 인스펙터 → 보관함 순으로 접는다
    (기준서 7: 1280px급에서 핵심 기능이 가려지지 않게) */
 @media (max-width: 1240px) {
-  .lib-inspector { display: none; }
+  .lib-inspector {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    z-index: 42;
+    top: calc(var(--titlebar-height) + 52px);
+    right: 0;
+    bottom: var(--dock-height);
+    width: min(var(--panel-detail), 92vw);
+    transform: translateX(102%);
+    transition: transform .18s ease;
+    box-shadow: -18px 0 36px rgba(0, 0, 0, .28);
+  }
+  body.lib-inspector-open .lib-inspector { transform: translateX(0); }
+  .lib-panel-toggle--inspector { display: block; }
 }
 
-@media (max-width: 980px) {
-  .lib-side { display: none; }
+@media (max-width: 1040px) {
+  .lib-side {
+    display: flex;
+    position: fixed;
+    z-index: 42;
+    top: calc(var(--titlebar-height) + 52px);
+    left: 0;
+    bottom: var(--dock-height);
+    width: min(var(--panel-secondary), 88vw);
+    transform: translateX(-102%);
+    transition: transform .18s ease;
+    box-shadow: 18px 0 36px rgba(0, 0, 0, .28);
+  }
+  body.lib-filters-open .lib-side { transform: translateX(0); }
+  .lib-panel-toggle--filters { display: block; }
 }
 
 @media (prefers-reduced-motion: reduce) {

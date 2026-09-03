@@ -30,8 +30,42 @@ jobs:
       - name: install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
+      - name: prepare ONNX Runtime 1.24 GPU binaries
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'onnxruntime-gpu.zip'
+          $runtime = Join-Path $env:RUNNER_TEMP 'onnxruntime-gpu'
+          Invoke-WebRequest -Uri 'https://github.com/microsoft/onnxruntime/releases/download/v1.24.1/onnxruntime-win-x64-gpu-1.24.1.zip' -OutFile $archive
+          Expand-Archive -LiteralPath $archive -DestinationPath $runtime
+          $lib = Join-Path $runtime 'onnxruntime-win-x64-gpu-1.24.1\lib'
+          "ORT_LIB_LOCATION=$lib" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: install frontend dependencies
-        run: npm install
+        run: npm ci
+
+      - name: test frontend
+        run: npm test
+
+      - name: test Rust library
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+
+      - name: verify beta release contract
+        run: npm run check:release
+
+      - name: verify public documentation
+        run: npm run check:docs
+
+      - name: verify generated IPC contract
+        shell: pwsh
+        run: |
+          npm run generate:ipc
+          git diff --exit-code -- src/generated/ipc.ts docs/IPC_CATALOG.md
+          if (git status --porcelain -- src/generated/ipc.ts docs/IPC_CATALOG.md) {
+            throw "Generated IPC files are missing from the commit."
+          }
+
+      - name: verify frontend IPC boundary
+        run: npm run check:ipc
 
       - name: build and upload release
         uses: tauri-apps/tauri-action@v0
@@ -46,11 +80,14 @@ jobs:
           releaseBody: |
             🌊 OSW(Open Stem Wave) ${{ github.ref_name }}
 
-            곡을 스템(보컬·MR)으로 열어 노래하고, 가사를 AI로 싱크하고, OBS로 방송에 얹는
-            개방형 스템 분리 미니 DAW입니다.
+            노래 방송과 연습을 위해 MR 분리, 가사 싱크, 라이브 재생, OBS 오버레이를 한 흐름으로
+            묶는 Windows용 로컬 앱입니다.
 
-            **Windows용 NSIS 설치 파일**을 다운로드하세요. 처음 실행하면 이전 버전
-            (Live MR Manager) 데이터를 가져올지 물어봅니다.
+            **오픈 베타 안내**
+            - Windows 10/11 전용이며, 첫 MR 분리 때 MIT 기본 모델(약 953MB)을 내려받습니다.
+            - 실제 오디오 장치·OBS·GPU 조합은 환경별 확인이 남아 있습니다. 문제가 있으면 로그와
+              재현 단계를 GitHub Issue로 알려 주세요.
+            - OSW는 전용 사용자 데이터 경로를 사용하며 이전 제품 데이터를 가져오거나 이동하지 않습니다.
 
             상세 변경 사항: [RELEASE_NOTES.md](https://github.com/Temmis2077/OSW/blob/main/RELEASE_NOTES.md)
           releaseDraft: true

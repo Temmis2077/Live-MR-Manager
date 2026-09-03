@@ -2,7 +2,7 @@
 :root {
     --lyric-card-width: 200px;
     --lyric-drawer-width: min(calc(var(--lyric-card-width) + 30px), 90vw);
-    --lyric-drawer-top: calc(var(--titlebar-height) + 120px);
+    --lyric-drawer-top: calc(var(--titlebar-height) + 52px);
     --lyric-drawer-bottom-gap: 0px;
     --lyric-handle-width: 24px;
     /* Reserve one lane minus right safe-area already present in grid */
@@ -17,11 +17,10 @@
     transform: translateY(-50%);
     width: var(--lyric-handle-width);
     height: 90px;
-    background: var(--accent-primary);
-    background: linear-gradient(to bottom, var(--accent-primary), var(--accent-secondary));
+    background: var(--signal);
     color: var(--text-inverse);
     border: none;
-    border-radius: 12px 0 0 12px;
+    border-radius: 4px 0 0 10px;
     cursor: pointer;
     z-index: 1000;
     display: flex;
@@ -33,7 +32,7 @@
     font-size: 0.6rem;
     font-weight: 900;
     letter-spacing: 1px;
-    box-shadow: -4px 0 15px rgba(0, 0, 0, 0.3);
+    box-shadow: none;
     transition: right 0.35s cubic-bezier(0.16, 1, 0.3, 1),
                 width 0.2s ease,
                 padding-right 0.2s ease,
@@ -56,10 +55,10 @@
     right: 0;
     bottom: calc(var(--dock-height) + var(--lyric-drawer-bottom-gap));
     width: var(--lyric-drawer-width);
-    background: var(--glass-bg);
+    background: var(--menu-bg);
     border-left: 1px solid var(--glass-border);
-    backdrop-filter: blur(25px);
-    -webkit-backdrop-filter: blur(25px);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
     display: flex;
     flex-direction: column;
     transform: translateX(100%);
@@ -140,7 +139,8 @@ body.drawer-open .song-grid {
 
 /* 5. Drawer Content */
 .drawer-header {
-    padding: 24px;
+    min-height: 52px;
+    padding: var(--space-2) var(--space-4);
     border-bottom: 1px solid var(--glass-border);
     display: flex;
     align-items: center;

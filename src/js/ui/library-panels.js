@@ -11,7 +11,7 @@
 import { state } from '../state.js';
 import { elements } from './elements.js';
 import { invoke } from '../tauri-bridge.js';
-import { getSongCategoryFromMetadata, getLyricSyncStatus } from '../library-filters.js';
+import { getSongCategoryFromMetadata, getLyricSyncStatus, getSongReadiness } from '../library-filters.js';
 import { parentGenre } from '../taxonomy.js';
 import { durationToSeconds } from '../duration.js';
 import { getThumbnailUrl, showNotification } from '../utils.js';
@@ -20,6 +20,30 @@ const $ = (id) => document.getElementById(id);
 
 /** 인스펙터가 보여줄 곡 — 표에서 마지막으로 클릭한 곡. */
 let inspectedPath = null;
+let drawersReady = false;
+
+function setLibraryDrawer(name, open) {
+  const bodyClass = name === 'filters' ? 'lib-filters-open' : 'lib-inspector-open';
+  const otherClass = name === 'filters' ? 'lib-inspector-open' : 'lib-filters-open';
+  document.body.classList.toggle(bodyClass, open);
+  if (open) document.body.classList.remove(otherClass);
+  $('lib-filters-toggle')?.setAttribute('aria-expanded', String(name === 'filters' && open));
+  $('lib-inspector-toggle')?.setAttribute('aria-expanded', String(name === 'inspector' && open));
+}
+
+function initLibraryDrawers() {
+  if (drawersReady) return;
+  const filters = $('lib-filters-toggle');
+  const inspector = $('lib-inspector-toggle');
+  filters?.addEventListener('click', () => setLibraryDrawer('filters', !document.body.classList.contains('lib-filters-open')));
+  inspector?.addEventListener('click', () => setLibraryDrawer('inspector', !document.body.classList.contains('lib-inspector-open')));
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    setLibraryDrawer('filters', false);
+    setLibraryDrawer('inspector', false);
+  });
+  drawersReady = true;
+}
 
 function esc(s) {
   const d = document.createElement('div');
@@ -229,7 +253,10 @@ export function renderCollections() {
 /** 표에서 곡을 클릭할 때 호출 — 인스펙터 대상 지정. */
 export function setInspectedSong(path) {
   inspectedPath = path;
+  state.inspectedSongPath = path;
   renderInspector();
+  document.querySelectorAll('.song-card').forEach((row) => row.classList.toggle('inspected', row.dataset.path === path));
+  return true;
 }
 
 function findSong(path) {
@@ -259,6 +286,7 @@ export function renderInspector() {
   const running = !!(task && task.status !== 'Finished');
   const sync = getLyricSyncStatus(song);
   const syncText = sync === 'synced' ? '싱크 완료' : (sync === 'unsynced' ? '가사만 있음' : '가사 없음');
+  const readiness = getSongReadiness(song, { activeTasks: state.activeTasks, alignmentQueue: state.alignmentQueue });
 
   const stemRow = (name, done) => `
     <div class="insp-stem${done ? ' done' : ''}">
@@ -277,50 +305,30 @@ export function renderInspector() {
           <div class="insp-artist">${esc(song.artist || '가수 정보 없음')}</div>
         </div>
       </div>
+      <div class="insp-readiness ${readiness.status}">
+        <div><strong>준비됨 ${readiness.completed}/${readiness.total}</strong><span>${readiness.statusLabel}</span></div>
+        <div class="insp-readiness-bar"><span style="width:${Math.round(readiness.completed / readiness.total * 100)}%"></span></div>
+        <small>MR ${readiness.mrReady ? '완료' : '필요'} · 가사 ${readiness.lyricsReady ? '완료' : '필요'} · 정보 ${readiness.infoReady ? '완료' : '필요'}</small>
+      </div>
       <div class="insp-actions">
-        <button type="button" class="insp-btn primary" id="insp-play">재생</button>
-        <button type="button" class="insp-btn" id="insp-separate">${sep ? '다시 분리' : 'MR 분리'}</button>
+        <button type="button" class="insp-btn primary" id="insp-next-action" data-action="${readiness.nextAction}">${readiness.nextActionLabel}</button>
+        <button type="button" class="insp-btn" id="insp-play">재생</button>
       </div>
     </div>
 
     <div class="insp-section">
-      <div class="insp-label">정보 수정</div>
-      <div class="insp-fields">
-        <div>
-          <div class="insp-field-label">제목</div>
-          <input class="insp-input" id="insp-title-in" value="${esc(song.title || '')}">
-        </div>
-        <div>
-          <div class="insp-field-label">가수</div>
-          <input class="insp-input" id="insp-artist-in" value="${esc(song.artist || '')}">
-        </div>
-        <div>
-          <div class="insp-field-label">장르</div>
-          <input class="insp-input" id="insp-genre-in" value="${esc(song.genre || '')}">
-        </div>
-        <div class="insp-row-2">
-          <div>
-            <div class="insp-field-label">키</div>
-            <input class="insp-input" id="insp-key-in" value="${esc(song.songKey || song.song_key || '')}">
-          </div>
-          <div>
-            <div class="insp-field-label">BPM</div>
-            <input class="insp-input" id="insp-bpm-in" value="${esc(song.bpm ?? '')}" inputmode="numeric">
-          </div>
-        </div>
-        <div>
-          <div class="insp-field-label">태그 (쉼표로 구분)</div>
-          <input class="insp-input" id="insp-tags-in" value="${esc((song.tags || []).join(', '))}">
-        </div>
-      </div>
+      <div class="insp-label">곡 정보</div>
+      <div class="insp-meta-row"><span>장르</span><span>${esc(song.genre || '미지정')}</span></div>
+      <div class="insp-meta-row"><span>분류</span><span>${esc(getSongCategoryFromMetadata(song) || '미지정')}</span></div>
+      <div class="insp-meta-row"><span>KEY · BPM</span><span>${esc(song.songKey || song.song_key || '-')} · ${esc(song.bpm ?? '-')}</span></div>
+      <div class="insp-meta-row"><span>태그</span><span>${esc((song.tags || []).join(', ') || '없음')}</span></div>
       <div class="insp-actions">
-        <button type="button" class="insp-btn primary" id="insp-save">저장</button>
+        <button type="button" class="insp-btn primary" id="insp-edit">정보 수정</button>
         <button type="button" class="insp-btn" id="insp-autofill"
-                title="빈 칸만 채웁니다 · 장르는 Last.fm, 키·BPM은 음원 분석">
+                title="빈 정보를 찾은 뒤 공용 정보 수정 창에서 확인합니다">
           자동 채우기
         </button>
       </div>
-      <div class="insp-note" id="insp-autofill-note" hidden></div>
     </div>
 
     <div class="insp-section">
@@ -332,7 +340,8 @@ export function renderInspector() {
       <div class="insp-meta-row" style="margin-top:10px">
         <span>가사</span><span>${syncText}</span>
       </div>
-      <div class="insp-actions">
+      <div class="insp-actions secondary-actions">
+        <button type="button" class="insp-btn" id="insp-separate">${sep ? '다시 분리' : 'MR 분리'}</button>
         <button type="button" class="insp-btn" id="insp-fetch-lyrics"
                 title="LRCLIB에서 싱크 가사 · 곡 길이가 맞는 것만">
           싱크 가사 가져오기
@@ -341,17 +350,21 @@ export function renderInspector() {
       <div class="insp-note" id="insp-lyrics-note" hidden></div>
     </div>
 
-    <div class="insp-section" style="border-bottom:none">
-      <div class="insp-label">파일 · 처리 이력</div>
+    <details class="insp-section insp-details">
+      <summary>파일 · 처리 이력</summary>
       <div class="insp-meta-row"><span>길이</span><span>${esc(song.duration || '-')}</span></div>
       <div class="insp-meta-row"><span>추가일</span><span>${fmtDate(song.dateAdded ?? song.date_added)}</span></div>
       <div class="insp-meta-row"><span>재생 횟수</span><span>${song.playCount ?? song.play_count ?? 0}</span></div>
       <div class="insp-meta-row"><span>경로</span><span title="${esc(song.path)}">${esc(song.path)}</span></div>
       <div class="insp-actions">
         <button type="button" class="insp-btn" id="insp-folder">폴더 열기</button>
-        <button type="button" class="insp-btn danger" id="insp-delete">곡 삭제</button>
       </div>
-    </div>
+    </details>
+    <details class="insp-section insp-details insp-danger" style="border-bottom:none">
+      <summary>위험 작업</summary>
+      <p>목록에서 “${esc(song.title || '제목 없음')}” 곡을 제거합니다.</p>
+      <div class="insp-actions"><button type="button" class="insp-btn danger" id="insp-delete">곡 삭제</button></div>
+    </details>
   `;
 
   wireInspector(song);
@@ -428,15 +441,10 @@ function wireAutofill(song, idx) {
   if (!btn) return;
 
   btn.addEventListener('click', async () => {
-    const genreIn = $('insp-genre-in');
-    const keyIn = $('insp-key-in');
-    const bpmIn = $('insp-bpm-in');
-    const tagsIn = $('insp-tags-in');
-
-    const wantGenre = !((genreIn?.value || '').trim());
-    const wantKeyBpm = !((keyIn?.value || '').trim()) || !((bpmIn?.value || '').trim());
+    const wantGenre = !String(song.genre || '').trim();
+    const wantKeyBpm = !String(song.songKey || song.song_key || '').trim() || song.bpm == null;
     if (!wantGenre && !wantKeyBpm) {
-      setNote('insp-autofill-note', '이미 채워져 있습니다. 바꾸려면 지우고 다시 누르세요.', 'warn');
+      showNotification('장르와 KEY/BPM이 이미 채워져 있습니다.', 'info');
       return;
     }
 
@@ -444,8 +452,6 @@ function wireAutofill(song, idx) {
     const original = btn.textContent;
     // 키·BPM은 음원을 실제로 분석해서 몇 초 걸린다 — 뭘 하는 중인지 알린다.
     btn.textContent = wantKeyBpm ? '분석 중…' : '찾는 중…';
-    setNote('insp-autofill-note', '', '');
-
     try {
       const res = await invoke('autofill_song_info', {
         path: song.path,
@@ -455,22 +461,17 @@ function wireAutofill(song, idx) {
         wantKeyBpm,
       });
 
-      const filled = [];
-      if (res.genre && genreIn && !genreIn.value.trim()) { genreIn.value = res.genre; filled.push('장르'); }
-      if (res.songKey && keyIn && !keyIn.value.trim()) { keyIn.value = res.songKey; filled.push('키'); }
-      if (res.bpm && bpmIn && !bpmIn.value.trim()) { bpmIn.value = String(res.bpm); filled.push('BPM'); }
-      if (res.tags?.length && tagsIn && !tagsIn.value.trim()) {
-        tagsIn.value = res.tags.join(', ');
-        filled.push('태그');
-      }
-
-      const parts = [];
-      if (filled.length) parts.push(`${filled.join(' · ')} 채움 — 확인 후 저장`);
-      else parts.push('찾은 값이 없습니다.');
-      if (res.notes?.length) parts.push(res.notes.join(' / '));
-      setNote('insp-autofill-note', parts.join(' '), filled.length ? 'ok' : 'warn');
+      const draft = {
+        genre: song.genre || res.genre || '',
+        songKey: song.songKey || song.song_key || res.songKey || '',
+        bpm: song.bpm ?? res.bpm ?? null,
+        tags: (song.tags || []).length ? song.tags : (res.tags || []),
+      };
+      const { openSongEditor } = await import('./song-editor.js');
+      await openSongEditor(song, idx, { draft });
+      showNotification('자동으로 찾은 값을 확인한 뒤 저장해 주세요.', 'success');
     } catch (err) {
-      setNote('insp-autofill-note', '자동 채우기 실패: ' + err, 'warn');
+      showNotification('자동 채우기 실패: ' + err, 'error');
     } finally {
       btn.disabled = false;
       btn.textContent = original;
@@ -488,43 +489,38 @@ function wireInspector(song) {
   });
 
   $('insp-separate')?.addEventListener('click', async () => {
-    const { startMrSeparation } = await import('../audio.js');
     try {
-      await startMrSeparation(song.path, null);
-    } catch (_) { /* startMrSeparation이 자체 알림을 띄운다 */ }
+      const { openSeparationModeModal } = await import('../separation-mode-modal.js');
+      openSeparationModeModal(song);
+    } catch (err) {
+      showNotification('모델 선택창을 열지 못했습니다: ' + err, 'error');
+    }
   });
 
   wireFetchLyrics(song, idx);
   wireAutofill(song, idx);
 
-  $('insp-save')?.addEventListener('click', async () => {
-    const bpmRaw = ($('insp-bpm-in')?.value || '').trim();
-    const bpm = bpmRaw === '' ? null : Number.parseInt(bpmRaw, 10);
-    if (bpmRaw !== '' && !Number.isFinite(bpm)) {
-      showNotification('BPM은 숫자로 입력해 주세요.', 'warning');
-      return;
+  $('insp-next-action')?.addEventListener('click', async (event) => {
+    const action = event.currentTarget.dataset.action;
+    if (action === 'separate') return $('insp-separate')?.click();
+    if (action === 'fetch-lyrics') return $('insp-fetch-lyrics')?.click();
+    if (action === 'sync-lyrics') {
+      const { openAlignmentForTrack } = await import('../events/navigation.js');
+      return openAlignmentForTrack(song.path, { forceLoad: true });
     }
-    const updated = {
-      ...song,
-      title: ($('insp-title-in')?.value || '').trim() || song.title,
-      artist: ($('insp-artist-in')?.value || '').trim(),
-      genre: ($('insp-genre-in')?.value || '').trim(),
-      songKey: ($('insp-key-in')?.value || '').trim(),
-      bpm,
-      tags: ($('insp-tags-in')?.value || '').split(',').map((t) => t.trim()).filter(Boolean),
-    };
-    try {
-      await invoke('update_song_metadata', { song: updated });
-      // 로컬 상태도 갱신해 표·패널이 바로 반영되게 한다.
-      if (idx >= 0) state.songLibrary[idx] = updated;
-      const { renderLibrary } = await import('./library.js');
-      renderLibrary();
-      renderCollections();
-      renderInspector();
-      showNotification('곡 정보를 저장했습니다.', 'success');
-    } catch (err) {
-      showNotification('저장하지 못했습니다: ' + err, 'error');
+    if (action === 'edit-info') {
+      return $('insp-edit')?.click();
     }
+    if (action === 'review-task' || action === 'review-error') {
+      const { callAppHandler } = await import('../app-context.js');
+      return callAppHandler('switchToTab', 'tasks');
+    }
+    return $('insp-play')?.click();
+  });
+
+  $('insp-edit')?.addEventListener('click', async () => {
+    const { openSongEditor } = await import('./song-editor.js');
+    await openSongEditor(song, idx);
   });
 
   $('insp-folder')?.addEventListener('click', async () => {
@@ -543,6 +539,7 @@ function wireInspector(song) {
       try {
         await performDeleteSong(idx);
         inspectedPath = null;
+        state.inspectedSongPath = null;
         renderLibrary();
         renderCollections();
         renderInspector();
@@ -556,6 +553,7 @@ function wireInspector(song) {
 
 /** 음악 탭 진입 시 3단 패널을 갱신한다. */
 export function refreshLibraryPanels() {
+  initLibraryDrawers();
   renderCollections();
   renderInspector();
 }

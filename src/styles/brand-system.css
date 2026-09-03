@@ -1,0 +1,338 @@
+/*
+ * OSW Red Orbit component layer.
+ * Keep product-specific layout in its owning stylesheet; this file owns the
+ * shared visual language that makes those layouts read as one instrument.
+ */
+
+:is(h1, h2, h3, .ai-title-large, .group-header h3, .live-title,
+  .live-mode-label, .appbar-word, .logo-text, .song-name, .ob-path-title,
+  .ob-basic-title, .separation-mode-card-title) {
+  font-family: 'LINE Seed Sans KR', 'SUITE', sans-serif;
+  font-weight: 700;
+}
+
+:is(.time-display, .time-range, .time-tag, .duration-text, .track-fader-val,
+  .time-info, #time-current, #time-total, .live-pos, .live-dur,
+  .live-bpm-value, .live-key-value, .live-value, .live-vol-val,
+  .live-sep-pct, .ai-mix-val, .val-display, output, code,
+  [data-unit="bpm"], [data-unit="percent"]) {
+  font-family: 'Space Mono', 'SUITE', monospace !important;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Flat, asymmetric instrument surfaces. */
+:is(.song-card, .ai-model-card, .settings-group, .separation-mode-card,
+  .ob-path, .ob-basic, .live-panel, .live-chip, .live-art, .live-lyrics,
+  .alignment-container, .appbar-menu, .modal-content, .drawer-panel) {
+  border-color: var(--panel-border);
+  box-shadow: none;
+}
+
+:is(.song-card, .ai-model-card, .separation-mode-card, .ob-path, .live-panel) {
+  background-color: var(--surface-1);
+  background-image: none;
+}
+
+:is(.song-card, .ai-model-card, .separation-mode-card, .ob-path):hover {
+  background-color: var(--surface-2);
+  border-color: rgb(var(--orbit-rgb) / 0.34);
+  box-shadow: none;
+  filter: none;
+  transform: none;
+}
+
+/* Ordinary controls do not jump toward the pointer. Playback/processing glow
+   remains scoped below to elements whose state actually changed. */
+:is(button, [role="button"], .nav-item, .song-card, .list-row, .settings-card,
+  .filter-btn, .view-toggle-btn, .color-swatch):hover {
+  transform: none;
+}
+
+:is(.settings-card, .settings-group, .song-list-item, .list-row,
+  .live-q-item, .track-item, .lyric-line-item) {
+  border-color: var(--panel-border);
+  box-shadow: none;
+}
+
+:is(.settings-card, .song-list-item, .list-row, .live-q-item, .track-item):hover {
+  border-color: rgb(var(--orbit-rgb) / 0.34);
+  box-shadow: none;
+}
+
+/* The orbit rail remains visible without colour: it changes the silhouette. */
+:is(.song-card.active, .song-card.selected, .song-card.inspected,
+  .ai-model-card.selected, .separation-mode-card.current-default,
+  .lyric-line-item.active, .lyric-line-item.now-playing,
+  .appbar-menu-item.current) {
+  position: relative;
+  border-color: rgb(var(--signal-rgb) / 0.42) !important;
+  box-shadow: inset 3px 0 0 rgb(var(--signal-rgb) / 0.82), inset 0 2px 0 rgb(var(--orbit-rgb) / 0.48) !important;
+}
+
+:is(button, input, select, textarea, .select-trigger, .filter-btn,
+  .appbar-screen-btn, .appbar-icon-btn) {
+  border-radius: var(--radius-control);
+}
+
+:is(button, [role="button"], input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--orbit-highlight) !important;
+  outline-offset: 2px;
+}
+
+:is(.primary-btn, .btn-primary, .ob-btn.primary, .btn-ai-action.primary,
+  .btn-add-song, .add-song-btn, #add-song-btn) {
+  color: var(--text-main);
+  background: var(--surface-2);
+  border-color: rgb(var(--signal-rgb) / 0.58);
+  box-shadow: inset 3px 0 0 rgb(var(--signal-rgb) / 0.82);
+}
+
+.appbar-add-song {
+  color: var(--text-main) !important;
+  background: var(--surface-2) !important;
+  border-color: rgb(var(--signal-rgb) / 0.58) !important;
+  box-shadow: inset 3px 0 0 rgb(var(--signal-rgb) / 0.82) !important;
+}
+
+.appbar-add-song:hover {
+  color: var(--text-main) !important;
+  background: var(--surface-3) !important;
+  border-color: rgb(var(--signal-rgb) / 0.72) !important;
+  transform: none !important;
+}
+
+.btn-ai-action:not(.secondary) {
+  color: var(--text-main);
+  box-shadow: none;
+}
+
+:is(.settings-group[data-scat="ai"] .btn-ai-action,
+  #alignment-page .btn-ai-action, .separation-mode-card .btn-ai-action):not(.secondary) {
+  color: #fff;
+}
+
+.btn-ai-action:hover {
+  transform: none;
+  filter: none;
+}
+
+:is(.primary-btn, .btn-primary, .ob-btn.primary, .btn-ai-action.primary,
+  .btn-add-song, .add-song-btn, #add-song-btn):hover:not(:disabled) {
+  color: var(--text-main);
+  background: var(--surface-3);
+  border-color: rgb(var(--signal-rgb) / 0.72);
+  box-shadow: inset 3px 0 0 var(--signal-hover);
+  transform: none;
+}
+
+:is(.settings-group[data-scat="ai"] .btn-ai-action,
+  #alignment-page .btn-ai-action, .separation-mode-card .btn-ai-action,
+  .ai-badge, .alignment-badge, .review-badge,
+  .live-ov-toggle.on, .appbar-menu-badge.on) {
+  --accent-primary: var(--orbit);
+  --accent-secondary: var(--orbit-highlight);
+  --accent-rgb: var(--orbit-rgb);
+}
+
+:is(.danger, .destructive, [data-tone="danger"], .btn-danger) {
+  color: #fff;
+  background: var(--danger);
+  border-color: var(--signal-active);
+}
+
+.app-bar,
+.titlebar,
+.player-bar,
+.player-dock,
+.live-topbar {
+  background: var(--sidebar-bg);
+  backdrop-filter: none;
+  box-shadow: none;
+}
+
+.appbar-mark,
+.logo-icon {
+  filter: drop-shadow(0 0 8px rgb(var(--signal-rgb) / 0.2));
+}
+
+.appbar-beta,
+.beta-badge {
+  color: var(--orbit-highlight);
+  background: rgb(var(--orbit-rgb) / 0.12);
+  border: 1px solid rgb(var(--orbit-rgb) / 0.26);
+  box-shadow: none;
+}
+
+.appbar-menu-item.current,
+.nav-item.active {
+  color: var(--text-main);
+  background: rgb(var(--signal-rgb) / 0.055);
+}
+
+.brand-theme-lock {
+  font-family: 'Space Mono', monospace;
+  font-size: 0.64rem;
+  letter-spacing: 0.06em;
+  color: var(--orbit-highlight);
+  padding: 6px 9px;
+  border: 1px solid rgb(var(--orbit-rgb) / 0.28);
+  border-radius: 4px 8px 8px 8px;
+  background: rgb(var(--orbit-rgb) / 0.08);
+}
+
+.play-main-btn,
+.thumb-overlay.active,
+.live-play-main,
+[data-playback-state="playing"] .play-main-btn {
+  background: var(--surface-3);
+  border-color: rgb(var(--signal-rgb) / 0.68);
+  box-shadow: inset 3px 0 0 var(--signal), 0 0 0 2px rgb(var(--signal-rgb) / 0.06);
+  color: var(--signal-hover);
+}
+
+.lyric-line-item.active,
+.lyric-line-item.now-playing,
+.live-lyric-line.active {
+  color: var(--text-main);
+  background: linear-gradient(90deg, rgb(var(--signal-rgb) / 0.065), rgb(var(--orbit-rgb) / 0.035));
+}
+
+.icon-loading,
+.loading-spinner,
+.processing,
+[aria-busy="true"] {
+  color: var(--orbit-highlight);
+}
+
+.osw-icon {
+  width: 1.25rem;
+  height: 1.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: currentColor;
+  flex: none;
+}
+
+.osw-icon svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.osw-icon.brand {
+  color: var(--orbit-highlight);
+}
+
+/* Legacy inline icons are visually normalized while their markup is migrated
+   to brandIcon(). Core transport icons keep the larger 24px slot. */
+:is(.app-bar, .control-dock, #live-page, #alignment-page, #settings-page,
+  .modal-content, .drawer-panel) button svg[viewBox="0 0 24 24"] {
+  width: 20px;
+  height: 20px;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+:is(.play-main-btn, .live-tp-play, #play-btn) svg[viewBox="0 0 24 24"] {
+  width: 24px;
+  height: 24px;
+}
+
+/* Flat equipment surfaces: blur and decorative glow are reserved for the
+   logo, active playback and explicit AI processing states. */
+:is(.modal-overlay, .modal-content, .drawer-panel, .player-bar, .player-dock,
+  .control-dock, .alignment-container, .alignment-sidebar, .waveform-section,
+  .appbar-menu, .context-menu, .live-picker-panel) {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+:is(button, [role="button"], .song-card, .list-row, .settings-card,
+  .settings-group, .track-item, .lyric-line-item, .modal-content,
+  .drawer-panel):not(.play-main-btn):not(.live-tp-play):not([aria-busy="true"]) {
+  box-shadow: none;
+}
+
+/* Soft palette: important actions use a narrow signal rail instead of a
+   saturated colour field. This comes after the legacy shadow reset so older
+   component styles cannot turn the whole control red again. */
+:is(.primary-btn, .btn-primary, .ob-btn.primary, .btn-ai-action.primary,
+  .btn-add-song, .add-song-btn, #add-song-btn, .appbar-add-song) {
+  color: var(--text-main) !important;
+  background: var(--surface-2) !important;
+  border-color: rgb(var(--signal-rgb) / 0.52) !important;
+  border-left: 3px solid var(--signal) !important;
+  box-shadow: none !important;
+}
+
+:is(.primary-btn, .btn-primary, .ob-btn.primary, .btn-ai-action.primary,
+  .btn-add-song, .add-song-btn, #add-song-btn, .appbar-add-song):hover:not(:disabled) {
+  background: var(--surface-3) !important;
+  border-color: rgb(var(--signal-rgb) / 0.68) !important;
+}
+
+:is(.settings-group[data-scat="ai"] .btn-ai-action,
+  #alignment-page .btn-ai-action, .separation-mode-card .btn-ai-action):not(.secondary):not(.danger) {
+  border-color: rgb(var(--orbit-rgb) / 0.52) !important;
+  border-left-color: var(--orbit) !important;
+}
+
+.btn-ai-action:not(.secondary):not(.danger) {
+  color: var(--text-main) !important;
+  background: var(--surface-2) !important;
+  border-color: rgb(var(--signal-rgb) / 0.5) !important;
+  border-left: 3px solid var(--signal) !important;
+  box-shadow: none !important;
+}
+
+.btn-ai-action:not(.secondary):not(.danger):hover:not(:disabled) {
+  background: var(--surface-3) !important;
+  border-color: rgb(var(--signal-rgb) / 0.66) !important;
+}
+
+:is(.play-main-btn, .thumb-overlay.active, .live-play-main, .live-tp-play,
+  [data-playback-state="playing"] .play-main-btn) {
+  color: var(--signal-hover) !important;
+  background: var(--surface-3) !important;
+  border-color: rgb(var(--signal-rgb) / 0.64) !important;
+  box-shadow: inset 3px 0 0 rgb(var(--signal-rgb) / 0.86),
+    0 0 0 2px rgb(var(--signal-rgb) / 0.05) !important;
+}
+
+:is(.album-art, .album-art-container, .song-thumbnail, .thumbnail):hover {
+  transform: none;
+  filter: none;
+}
+
+.ob-path-icon,
+.ob-basic-icon,
+.mode-card-emoji,
+.download-icon,
+.ai-recommend-icon {
+  color: var(--orbit-highlight);
+  font-size: 1rem;
+}
+
+.ob-path-icon .osw-icon,
+.mode-card-emoji .osw-icon,
+.download-icon .osw-icon {
+  width: 2rem;
+  height: 2rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

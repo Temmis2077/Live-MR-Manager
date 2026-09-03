@@ -34,11 +34,62 @@ export function getLyricSyncStatus(song) {
   return has ? "unsynced" : "none";
 }
 
+export function getSongReadiness(song, { activeTasks = {}, alignmentQueue = [] } = {}) {
+  const mrReady = !!(song?.isSeparated || song?.is_separated || song?.isMr || song?.is_mr || song?.mr_path);
+  const lyricStatus = getLyricSyncStatus(song);
+  const lyricsReady = lyricStatus === "synced";
+  const missingInfo = [];
+  if (!String(song?.title || "").trim()) missingInfo.push("제목");
+  if (!String(song?.artist || "").trim()) missingInfo.push("가수");
+  const infoReady = missingInfo.length === 0;
+
+  const separationTask = activeTasks?.[song?.path];
+  const alignmentTask = (alignmentQueue || []).find((item) => item.path === song?.path);
+  const taskStatuses = [separationTask?.status, alignmentTask?.status].filter(Boolean).map((s) => String(s).toLowerCase());
+  const error = taskStatuses.some((s) => s === "error" || s === "failed");
+  const processing = !error && taskStatuses.some((s) => !["finished", "complete", "completed", "cancelled"].includes(s));
+  const completed = [mrReady, lyricsReady, infoReady].filter(Boolean).length;
+
+  let status = "needs-work";
+  let statusLabel = "작업 필요";
+  let nextAction = "separate";
+  let nextActionLabel = "MR 분리";
+  if (error) {
+    status = "error";
+    statusLabel = "오류";
+    nextAction = "review-error";
+    nextActionLabel = "오류 확인";
+  } else if (processing) {
+    status = "processing";
+    statusLabel = "처리 중";
+    nextAction = "review-task";
+    nextActionLabel = "진행 상황 보기";
+  } else if (!mrReady) {
+    nextAction = "separate";
+    nextActionLabel = "MR 분리";
+  } else if (!lyricsReady) {
+    nextAction = lyricStatus === "none" ? "fetch-lyrics" : "sync-lyrics";
+    nextActionLabel = lyricStatus === "none" ? "가사 가져오기" : "가사 싱크";
+  } else if (!infoReady) {
+    nextAction = "edit-info";
+    nextActionLabel = "곡 정보 채우기";
+  } else {
+    status = "ready";
+    statusLabel = "준비됨";
+    nextAction = "play";
+    nextActionLabel = "재생";
+  }
+
+  return { mrReady, lyricStatus, lyricsReady, infoReady, missingInfo, completed, total: 3, status, statusLabel, nextAction, nextActionLabel };
+}
+
 export function filterSongLibrary(songs, {
   query = "",
   genreFilter = "all",
   categoryFilter = "all",
   syncFilter = "all",
+  readinessFilter = "all",
+  readinessContext = {},
   sortBy = "dateNew",
   currentTab = "library",
 } = {}) {
@@ -50,6 +101,18 @@ export function filterSongLibrary(songs, {
 
   if (syncFilter !== "all" && syncFilter !== "") {
     filtered = filtered.filter(s => getLyricSyncStatus(s) === syncFilter);
+  }
+
+  if (readinessFilter !== "all" && readinessFilter !== "") {
+    filtered = filtered.filter((song) => {
+      const r = getSongReadiness(song, readinessContext);
+      if (readinessFilter === "needs-work") return r.status === "needs-work" || r.status === "error";
+      if (readinessFilter === "mr-missing") return !r.mrReady;
+      if (readinessFilter === "lyrics-missing") return !r.lyricsReady;
+      if (readinessFilter === "info-missing") return !r.infoReady;
+      if (readinessFilter === "processing") return r.status === "processing";
+      return true;
+    });
   }
 
   const normalizedQuery = String(query || "").toLowerCase().trim();
@@ -90,6 +153,10 @@ export function filterSongLibrary(songs, {
       case "dateNew": return (b.dateAdded || 0) - (a.dateAdded || 0);
       case "dateOld": return (a.dateAdded || 0) - (b.dateAdded || 0);
       case "plays": return (b.playCount || 0) - (a.playCount || 0);
+      case "workNeeded": {
+        const rank = { error: 0, "needs-work": 1, processing: 2, ready: 3 };
+        return rank[getSongReadiness(a, readinessContext).status] - rank[getSongReadiness(b, readinessContext).status];
+      }
       default: return 0;
     }
   });

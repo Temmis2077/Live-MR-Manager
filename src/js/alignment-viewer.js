@@ -4,11 +4,14 @@ import { state } from './state.js';
 import { parseLrc } from './lyrics.js';
 import { parseMarkers, formatMarkerLine, isTriplet, getSyncText, getDisplayLines, getShowTranslation, setShowTranslation, mergeAlignmentResult, resolveQueueCompletionSegments, encodeLrc, suggestVocalStartFromSegments, parseTimeInput, formatTimeInput, groupTripletLines } from './lrc-parser.js';
 import { getLyricSyncStatus } from './library-filters.js';
-import { isTextEntryDescriptor, shouldToggleAlignmentPlayback } from './alignment-input-policy.js';
+import { ALIGNMENT_COMMAND, isTextEntryDescriptor, resolveAlignmentCommand } from './alignment-input-policy.js';
 import { applyAlignmentMetadata, buildAlignmentMetadata, readVocalRegions, snapToVocalEdge } from './alignment-metadata.js';
 import { hasOpenLayer } from './ui/layer-stack.js';
 import { findNextStarted, findPrevStarted, planSegmentEnd, planSegmentStart } from './segment-bounds.js';
 import { openOverlayModal, closeOverlayModal } from './ui/modals.js';
+import { youtubePathsMatch } from './youtube-utils.js';
+import { playbackService } from '../ipc/services/playback.js';
+import { assessAlignmentSegments } from './alignment-assistant.js';
 
 /** Enter로 줄을 찍었을 때 임시로 줄 끝에 주는 길이(초). 다음 줄을 찍으면
  *  그 시각으로 정리된다. 곡 끝까지 늘리지 않기 위한 값. */
@@ -42,13 +45,11 @@ export class ForcedAlignmentViewer {
             // 고정되고, 파형·플레이바로 시간을 옮기면 그 시각의 블럭으로 따라간다.
             // currentSyncIndex(다음에 스탬프 찍을 위치)와는 별개의 개념.
             selectedSegmentIndex: -1,
-            // "지금 손대고 있는 줄"(-1 = 없음). Shift+Enter(끝 지정)의 대상이다.
+            // "직전에 손댄 줄"(-1 = 없음). 선택이 없을 때 Shift+Enter 시작 조정의 대상이다.
             //
             // currentSyncIndex로 대신하면 안 된다 — 그 값은 경로마다 의미가 한 칸
-            // 다르다. Enter로 찍으면 '다음에 찍을 줄'로 넘어가고(그래서 방금 찍은
-            // 줄은 -1), 목록에서 클릭하면 '클릭한 줄' 그 자체가 된다. 예전에는
-            // 끝 지정이 늘 currentSyncIndex-1을 봐서, 줄을 클릭한 뒤 Shift+Enter를
-            // 누르면 **그 앞 줄**의 끝이 바뀌고 클릭한 줄이 끌려왔다.
+            // 다르다. Enter로 끝을 확정하면 currentSyncIndex는 다음 줄로 넘어가고,
+            // 목록 클릭은 그 줄 자체를 선택한다.
             lastTappedIndex: -1,
             // 보컬 활동 구간(사이드카). 파형 음영과 경계 스냅에 쓴다.
             // 정렬한 적 없는 곡에는 비어 있고, 그때는 스냅 없이 그대로 동작한다.
@@ -127,8 +128,8 @@ export class ForcedAlignmentViewer {
     initUI() {
         if (!this.container) return;
         this.container.innerHTML = `
-            <div class="alignment-container">
-                <aside class="lyric-input-column">
+            <div class="alignment-container workspace-body">
+                <aside class="lyric-input-column workspace-panel">
                     <div class="alignment-card">
                         <section>
                             <div class="card-header" style="margin-bottom: 12px;">
@@ -155,7 +156,7 @@ export class ForcedAlignmentViewer {
                     </div>
                 </aside>
 
-                <main class="alignment-main">
+                <main class="alignment-main workspace-main">
                     <div class="alignment-card waveform-card">
                         <div class="card-header">
                             <h3>오디오 타임라인</h3>
@@ -198,12 +199,12 @@ export class ForcedAlignmentViewer {
                                     <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
                                 </button>
                                 <button id="sync-tap-btn" class="sync-ctrl-btn tap-btn"
-                                        title="이 줄이 시작되는 순간에 누릅니다 (Enter)">
-                                    <span class="tap-label">가사 시작 (Enter)</span>
+                                        title="현재 줄이 끝나는 순간에 누릅니다 (Enter)">
+                                    <span class="tap-label">가사 끝 확정 (Enter)</span>
                                 </button>
                                 <button id="sync-end-btn" class="sync-ctrl-btn tap-btn end-btn"
-                                        title="방금 시작을 찍은 줄이 끝나는 순간에 누릅니다 (Shift+Enter)">
-                                    <span class="tap-label">가사 끝 (Shift+Enter)</span>
+                                        title="선택한 줄의 시작을 현재 위치로 조정합니다 (Shift+Enter)">
+                                    <span class="tap-label">가사 시작 조정 (Shift+Enter)</span>
                                 </button>
                                 <div class="time-container">
                                     <span id="time-display" style="font-family:monospace; color:#94a3b8; font-size:0.85rem;">00:00 / 00:00</span>
@@ -220,6 +221,7 @@ export class ForcedAlignmentViewer {
                                     <span>타임바 따라가기</span>
                                 </label>
                                 <span id="marker-suggestion-bar" style="display:none; align-items:center; gap:6px; font-size:0.75rem; color:var(--align-text-soft);"></span>
+                                <span id="alignment-assistant-bar" class="alignment-assistant-bar" style="display:none;"></span>
                               </div>
                             </details>
                         </div>
@@ -230,7 +232,7 @@ export class ForcedAlignmentViewer {
                     </div>
                 </main>
 
-                <aside class="lyric-sidebar">
+                <aside class="lyric-sidebar workspace-panel">
                     <div class="alignment-card">
                         <div class="card-header" style="margin-bottom:12px;">
                             <h3>가사 싱크 결과</h3>
@@ -298,8 +300,8 @@ export class ForcedAlignmentViewer {
         }
 
         get('play-btn').onclick = () => this.togglePlayback();
-        get('sync-tap-btn').onclick = () => this.handleTap();
-        get('sync-end-btn').onclick = () => this.markLineEnd();
+        get('sync-tap-btn').onclick = () => this.confirmCurrentLineEnd();
+        get('sync-end-btn').onclick = () => this.adjustCurrentLineStart();
         get('undo-sync-btn').onclick = () => this.undoSyncEdit();
         get('redo-sync-btn').onclick = () => this.redoSyncEdit();
         get('sync-save-status').onclick = () => {
@@ -327,6 +329,11 @@ export class ForcedAlignmentViewer {
         // 담당. 대신 대기열 상태가 바뀔 때마다 "AI 자동 정렬" 버튼을 변환 중
         // 표시로 전환한다(alignment-queue.js가 큐 변경 시 이벤트를 쏨).
         window.addEventListener('alignment-queue-changed', () => this.updateAiAlignButtonState());
+        window.addEventListener('separation-stems-changed', (event) => {
+            if (event?.detail?.status !== 'finished'
+                || !youtubePathsMatch(event?.detail?.path, this.state.currentPath)) return;
+            this.refreshCurrentStemAnalysis();
+        });
 
         // 정렬 언어 토글 — localStorage에 저장(에디터·배치 공용).
         import('./alignment-model.js').then(({ getAlignmentLanguage, setAlignmentLanguage }) => {
@@ -543,83 +550,44 @@ export class ForcedAlignmentViewer {
             }
         });
 
-        window.addEventListener('keydown', (e) => {
-            // 모달·메뉴가 떠 있으면 편집기 단축키는 물러난다. 이 리스너는
-            // 캡처 단계라 그냥 두면 모달 위에서 Space가 재생을 토글해 버린다.
-            if (hasOpenLayer()) return;
-
-            const textEditing = this.isTextEditingTarget(e.target);
-
-            // 가사 싱크 화면의 Space는 실제 텍스트 편집 중일 때만 문자 입력이다.
-            // 캡처 단계에서 선점해 버튼 클릭/페이지 스크롤 등 브라우저 기본 동작이
-            // 포커스 위치에 따라 새어 나오지 않게 한다.
-            if (state.activeView === 'alignment' && e.code === 'Space' && !textEditing) {
+        this._alignmentKeyHandler = (e) => {
+            const resolved = resolveAlignmentCommand({
+                activeView: state.activeView,
+                textEditing: this.isTextEditingTarget(e.target),
+                layerOpen: hasOpenLayer(),
+                hasBoundarySelection: !!this.state.selectedTarget,
+            }, e);
+            if (resolved.command !== ALIGNMENT_COMMAND.IGNORE) {
                 e.preventDefault();
                 e.stopPropagation();
-                if (shouldToggleAlignmentPlayback({
-                    activeView: state.activeView,
-                    code: e.code,
-                    repeat: e.repeat,
-                    textEditing,
-                })) this.togglePlayback();
+                switch (resolved.command) {
+                    case ALIGNMENT_COMMAND.PLAYBACK_TOGGLE: this.togglePlayback(); break;
+                    case ALIGNMENT_COMMAND.CONFIRM_LINE_END: this.confirmCurrentLineEnd(); break;
+                    case ALIGNMENT_COMMAND.ADJUST_LINE_START: this.adjustCurrentLineStart(); break;
+                    case ALIGNMENT_COMMAND.UNDO: this.undoSyncEdit(); break;
+                    case ALIGNMENT_COMMAND.REDO: this.redoSyncEdit(); break;
+                    case ALIGNMENT_COMMAND.NUDGE_BOUNDARY: this.nudgeSelectedBoundary(resolved.deltaSec); break;
+                    case ALIGNMENT_COMMAND.CANCEL_SELECTION:
+                        this.state.selectedTarget = null;
+                        this.drawWaveform();
+                        this.renderLyricList();
+                        break;
+                    default: break;
+                }
                 return;
             }
-
-            if (textEditing) return;
-
-            const commandKey = e.ctrlKey || e.metaKey;
-            if (state.activeView === 'alignment' && commandKey && !e.altKey) {
-                if (e.code === 'KeyZ') {
-                    e.preventDefault();
-                    if (e.shiftKey) this.redoSyncEdit();
-                    else this.undoSyncEdit();
-                    return;
-                }
-                if (e.code === 'KeyY') {
-                    e.preventDefault();
-                    this.redoSyncEdit();
-                    return;
-                }
+            // 기존 마커 키는 공통 싱크 명령과 충돌하지 않을 때만 처리한다.
+            if (state.activeView !== 'alignment' || hasOpenLayer()
+                || this.isTextEditingTarget(e.target) || e.isComposing) return;
+            if (e.code === 'KeyV') {
+                e.preventDefault();
+                this.markVocalStart();
+            } else if (e.code === 'KeyM') {
+                e.preventDefault();
+                this.addInterludeAtCurrentTime();
             }
-
-            if (state.activeView === 'alignment') {
-                // 가사 싱크 탭 전용 단축키. Space가 재생/정지와 싱크 맞추기를
-                // 겸해서 헷갈리던 것을 분리: Space=재생/정지, Enter=싱크 맞추기.
-                //
-                // Enter는 경계를 선택한 상태에서도 반드시 여기로 와야 한다.
-                // 예전에는 selectedTarget이 있으면 위쪽 분기가 Enter를 '선택
-                // 해제'로 먼저 먹어서, 목록에서 줄을 클릭해 둔 채 Shift+Enter를
-                // 누르면 끝이 안 찍혔다. 게다가 markLineEnd가 스스로
-                // selectedTarget을 세우므로 성공한 바로 다음 Enter도 삼켜졌다.
-                // 선택 해제는 Escape 하나로 충분하다.
-                if (e.code === 'Enter') {
-                    e.preventDefault();
-                    // Enter = 가사 시작, Shift+Enter = 가사 끝.
-                    // 한 줄의 앞뒤를 같은 키의 짝으로 찍는 게 직관적이다.
-                    if (e.shiftKey) this.markLineEnd();
-                    else this.handleTap();
-                } else if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
-                    // 선택한 경계의 미세조정. 드래그로는 10ms를 집을 수 없다.
-                    // Shift를 누르면 더 크게(100ms) 움직인다.
-                    const dir = e.code === 'ArrowRight' ? 1 : -1;
-                    const step = e.shiftKey ? 0.1 : 0.01;
-                    if (this.nudgeSelectedBoundary(dir * step)) e.preventDefault();
-                } else if (e.key === 'Escape' && this.state.selectedTarget) {
-                    e.preventDefault();
-                    this.state.selectedTarget = null;
-                    this.drawWaveform();
-                    this.renderLyricList();
-                } else if (e.code === 'KeyV') {
-                    // 현재 재생 위치에 보컬 시작 지점 지정
-                    e.preventDefault();
-                    this.markVocalStart();
-                } else if (e.code === 'KeyM') {
-                    // 현재 재생 위치 근처에 간주 마커 추가
-                    e.preventDefault();
-                    this.addInterludeAtCurrentTime();
-                }
-            }
-        }, true);
+        };
+        window.addEventListener('keydown', this._alignmentKeyHandler, true);
 
         // Scrollbar Interaction
         const thumb = get('waveform-scrollbar-thumb');
@@ -690,10 +658,7 @@ export class ForcedAlignmentViewer {
         }
 
         // Now setup fresh, single listeners
-        window._alignmentUnlistenProgress = listen('playback-progress', (event) => {
-            // Rust struct may serialize to CamelCase or snake_case depending on serde config.
-            const positionMs = event.payload.positionMs ?? event.payload.position_ms ?? 0;
-            const durationMs = event.payload.durationMs ?? event.payload.duration_ms ?? 0;
+        window._alignmentUnlistenProgress = playbackService.onProgress(({ positionMs, durationMs }) => {
 
             if (this.state.isSeeking) return; // Only block when user is dragging
 
@@ -823,7 +788,7 @@ export class ForcedAlignmentViewer {
 
             console.log("[Alignment] Loading audio:", path);
             // Get duration immediately from backend
-            const ms = await this.invoke('play_track', { path, durationMs: 0, playNow: false });
+            const ms = await playbackService.play(path, 0, false);
             if (isStale()) return;
             console.log("[Alignment] play_track success, duration:", ms);
             this.state.duration = ms / 1000;
@@ -937,6 +902,22 @@ export class ForcedAlignmentViewer {
                 console.log("[Alignment] Waveform load success:", summary ? summary.points.length : 0);
                 if (summary) {
                     this.state.waveformPoints = summary.points;
+                    const waveformVocalRegions = readVocalRegions({
+                        vocalRegions: summary.vocal_regions ?? summary.vocalRegions,
+                    });
+                    if (Number(summary.vad_version ?? summary.vadVersion) >= 1) {
+                        this.state.vocalRegions = waveformVocalRegions;
+                        const assessments = assessAlignmentSegments(
+                            this.state.segments,
+                            waveformVocalRegions,
+                            Number(summary.duration_sec) * 1000,
+                        );
+                        this.state.segments.forEach((segment, index) => {
+                            segment.syncAssistant = assessments[index];
+                        });
+                        this.renderLyricList();
+                        console.log('[Alignment] Current-stem VAD loaded:', waveformVocalRegions.length);
+                    }
                     if (!this.state.duration) {
                         this.state.duration = summary.duration_sec;
                         this.updateTimeDisplay();
@@ -1007,9 +988,7 @@ export class ForcedAlignmentViewer {
             this.state.isSeeking = true;
             if (this._seekTimeout) clearTimeout(this._seekTimeout);
 
-            await this.invoke('seek_to', {
-                positionMs: Math.floor(this.state.currentTime * 1000)
-            });
+            await playbackService.seek(Math.floor(this.state.currentTime * 1000));
         } catch (err) {
             console.error("[Alignment] seekTo error:", err);
         } finally {
@@ -1181,6 +1160,43 @@ export class ForcedAlignmentViewer {
             this.ctx.globalAlpha = seg.approx ? 0.5 : 1;
             this.ctx.fillRect(Math.max(0, x1), 0, Math.min(width, x2) - Math.max(0, x1), height);
             this.ctx.globalAlpha = 1;
+
+            // VAD 경계 복구가 실제로 사용한 초록 블록만 선명한 테두리로
+            // 표시한다. 전체 VAD 음영과 구분되어 자동 배치 근거를 눈으로
+            // 확인할 수 있고, 표시 자체는 타임코드를 변경하지 않는다.
+            if (seg.alignmentSource === 'vad_boundary_review'
+                && Array.isArray(seg.vadAssignment?.regions)) {
+                this.ctx.save();
+                this.ctx.strokeStyle = 'rgba(34, 197, 94, 0.95)';
+                this.ctx.lineWidth = 2;
+                for (const region of seg.vadAssignment.regions) {
+                    const rs = Number(region.startMs) / 1000;
+                    const re = Number(region.endMs) / 1000;
+                    if (!Number.isFinite(rs) || !Number.isFinite(re) || re <= rs
+                        || re < startTime || rs > endTime) continue;
+                    const rx1 = Math.max(0, this.timeToX(Math.max(rs, startTime)));
+                    const rx2 = Math.min(width, this.timeToX(Math.min(re, endTime)));
+                    if (rx2 > rx1) this.ctx.strokeRect(rx1, 1, rx2 - rx1, height - 2);
+                }
+                this.ctx.restore();
+            }
+
+            const suggestedRange = seg.syncAssistant?.suggestedRange;
+            if (idx === this.state.selectedSegmentIndex && suggestedRange) {
+                const suggestedStart = Number(suggestedRange.startMs) / 1000;
+                const suggestedEnd = Number(suggestedRange.endMs) / 1000;
+                if (Number.isFinite(suggestedStart) && Number.isFinite(suggestedEnd)
+                    && suggestedEnd > suggestedStart) {
+                    const sx1 = this.timeToX(suggestedStart);
+                    const sx2 = this.timeToX(suggestedEnd);
+                    this.ctx.save();
+                    this.ctx.strokeStyle = '#f59e0b';
+                    this.ctx.lineWidth = 2;
+                    this.ctx.setLineDash([6, 4]);
+                    this.ctx.strokeRect(sx1, 2, Math.max(0, sx2 - sx1), height - 4);
+                    this.ctx.restore();
+                }
+            }
 
             // Default subtle boundary lines (dashed for BPM-grid "approximate" placements)
             this.ctx.strokeStyle = palette.segmentBorder;
@@ -1529,7 +1545,7 @@ export class ForcedAlignmentViewer {
         const btn = document.getElementById('play-btn');
         if (btn) btn.disabled = true;
         try {
-            await this.invoke('toggle_playback');
+            await playbackService.toggle();
             return true;
         } catch (err) {
             console.error('[Alignment] toggle_playback failed:', err);
@@ -1555,9 +1571,12 @@ export class ForcedAlignmentViewer {
                 const lyric = idx >= 0 && idx < this.state.segments.length
                     ? getSyncText(this.state.segments[idx]).trim()
                     : '';
+                const segment = idx >= 0 ? this.state.segments[idx] : null;
                 text = lyric
-                    ? `Space 재생/일시정지 · Enter로 “${lyric.slice(0, 24)}${lyric.length > 24 ? '…' : ''}” 싱크 입력`
-                    : 'Space 재생/일시정지 · Ctrl+Z로 마지막 편집 복구';
+                    ? (segment?.start > 0
+                        ? `Enter로 “${lyric.slice(0, 24)}${lyric.length > 24 ? '…' : ''}” 끝 확정`
+                        : `Shift+Enter로 “${lyric.slice(0, 24)}${lyric.length > 24 ? '…' : ''}” 시작 지정`)
+                    : 'Space로 다시 듣기 · Ctrl+Z로 마지막 편집 복구';
             }
         }
         el.textContent = text;
@@ -1713,6 +1732,89 @@ export class ForcedAlignmentViewer {
             interludes: this.state.interludes.map((interlude) => ({ ...interlude })),
             tripletMode: this.state.tripletMode,
         };
+    }
+
+    _currentCommandIndex(preferSelected = true) {
+        if (preferSelected && this.state.selectedSegmentIndex >= 0) return this.state.selectedSegmentIndex;
+        if (this.state.currentSyncIndex >= 0 && this.state.currentSyncIndex < this.state.segments.length) {
+            return this.state.currentSyncIndex;
+        }
+        return this.state.lastTappedIndex;
+    }
+
+    /** Enter — 시작이 확정된 현재 줄의 끝을 잡고 다음 가사로 이동한다. */
+    confirmCurrentLineEnd() {
+        if (this.state.duration <= 0) return false;
+        const idx = this._currentCommandIndex(true);
+        const segment = this.state.segments[idx];
+        if (!segment || !(segment.start > 0)) {
+            this.updateActionHint(false, '먼저 Shift+Enter로 이 줄의 시작을 지정하세요.', true);
+            return false;
+        }
+        const plan = planSegmentEnd({
+            seg: segment,
+            next: findNextStarted(this.state.segments, idx),
+            duration: this.state.duration,
+            requestedEnd: this.state.currentTime,
+        });
+        if (!plan) {
+            this.updateActionHint(false, '이웃 가사의 최소 길이를 보존할 수 없어 끝을 변경하지 않았습니다.', true);
+            return false;
+        }
+        this.recordSyncHistory('가사 끝 확정');
+        this.applySegmentEnd(idx, this.state.currentTime);
+        segment.alignmentTrust = 'manual';
+        segment.alignmentSource = 'manual';
+        segment.syncAssistant = { status: 'confirmed', reasonCodes: ['manual_end_confirmation'] };
+        this.state.lastTappedIndex = idx;
+        let nextIndex = idx + 1;
+        while (nextIndex < this.state.segments.length && !getSyncText(this.state.segments[nextIndex]).trim()) nextIndex++;
+        this.state.currentSyncIndex = nextIndex;
+        this.state.selectedSegmentIndex = nextIndex < this.state.segments.length ? nextIndex : idx;
+        this.state.selectedTarget = { index: idx, type: 'end' };
+        this.renderLyricList();
+        this.drawWaveform();
+        this.markDirtyAndScheduleSave();
+        this.updateActionHint();
+        return true;
+    }
+
+    /** Shift+Enter — 선택한 줄, 없으면 현재/직전 작업 줄의 시작을 조정한다. */
+    adjustCurrentLineStart() {
+        if (this.state.duration <= 0) return false;
+        let idx = this._currentCommandIndex(true);
+        if (!(idx >= 0 && idx < this.state.segments.length)) idx = this.state.lastTappedIndex;
+        const segment = this.state.segments[idx];
+        if (!segment || !getSyncText(segment).trim()) return false;
+        const requestedStart = this.state.currentTime;
+        const provisionalEnd = segment.end > requestedStart + 0.05
+            ? segment.end
+            : Math.min(this.state.duration, requestedStart + TAP_PROVISIONAL_SEC);
+        const probe = { ...segment, end: provisionalEnd };
+        const plan = planSegmentStart({
+            seg: probe,
+            prev: findPrevStarted(this.state.segments, idx),
+            requestedStart,
+        });
+        if (!plan) {
+            this.updateActionHint(false, '이 줄의 최소 길이를 보존할 수 없어 시작을 변경하지 않았습니다.', true);
+            return false;
+        }
+        this.recordSyncHistory('가사 시작 조정');
+        segment.end = provisionalEnd;
+        this.applySegmentStart(idx, requestedStart);
+        segment.alignmentTrust = 'manual';
+        segment.alignmentSource = 'manual';
+        segment.syncAssistant = { status: 'confirmed', reasonCodes: ['manual_start_adjustment'] };
+        this.state.currentSyncIndex = idx;
+        this.state.selectedSegmentIndex = idx;
+        this.state.lastTappedIndex = idx;
+        this.state.selectedTarget = { index: idx, type: 'start' };
+        this.renderLyricList();
+        this.drawWaveform();
+        this.markDirtyAndScheduleSave();
+        this.updateActionHint();
+        return true;
     }
 
     recordSyncHistory(label, coalesce = false) {
@@ -2270,11 +2372,16 @@ export class ForcedAlignmentViewer {
      *  고친 줄은 다음 정렬에서 하드 앵커가 되어 정확도가 누적된다. */
     _needsReview(s) {
         return this._isUnsyncedReview(s)
+            || ['estimated_review', 'invalid_silence', 'source_unavailable'].includes(s?.syncAssistant?.status)
+            || s?.syncAssistant?.reasonCodes?.includes('manual_vad_disagreement')
+            || (Array.isArray(s?.qualityFlags) && s.qualityFlags.includes('review_required'))
             || (!!(s && s.approx) && typeof s.confidence === 'number' && s.confidence < 0.45);
     }
 
     _isEstimatedSync(s) {
-        return s?.alignmentSource === 'anchor_interpolation';
+        return s?.alignmentSource === 'anchor_interpolation'
+            || s?.alignmentSource === 'vad_ordered_review'
+            || s?.alignmentSource === 'vad_boundary_review';
     }
 
     _isNonLexicalVocalRisk(s) {
@@ -2286,6 +2393,67 @@ export class ForcedAlignmentViewer {
         if (!s || !getSyncText(s).trim()) return false;
         return s.alignmentSource === 'unsynced_review'
             || !(Number(s.end) > Number(s.start));
+    }
+
+    renderAlignmentAssistantBar() {
+        const bar = document.getElementById('alignment-assistant-bar');
+        if (!bar) return;
+        const idx = this.state.selectedSegmentIndex;
+        const segment = this.state.segments[idx];
+        const assessment = segment?.syncAssistant;
+        const needsAction = assessment && (
+            assessment.status === 'invalid_silence'
+            || assessment.status === 'source_unavailable'
+            || assessment.status === 'estimated_review'
+            || assessment.reasonCodes?.includes('manual_vad_disagreement')
+        );
+        if (!needsAction) {
+            bar.style.display = 'none';
+            bar.replaceChildren();
+            return;
+        }
+        const reason = assessment.status === 'source_unavailable'
+            ? '보컬 소스를 찾지 못했습니다.'
+            : (assessment.reasonCodes?.includes('manual_vad_disagreement')
+                ? '수동 싱크와 현재 보컬 구간이 일치하지 않습니다.'
+                : (assessment.status === 'invalid_silence'
+                    ? '이 구간에는 보컬과 가사 음향 근거가 없습니다.'
+                    : '자동 보조 위치를 들어보고 확인해 주세요.'));
+        bar.style.display = 'flex';
+        bar.innerHTML = `<span>${reason}</span>${assessment.suggestedRange
+            ? '<button type="button" data-assistant-action="apply">권장 위치로 이동</button>' : ''}
+            <button type="button" data-assistant-action="clear">미싱크로 비우기</button>
+            <button type="button" data-assistant-action="keep">그대로 유지</button>`;
+        bar.querySelector('[data-assistant-action="apply"]')?.addEventListener('click', () => {
+            this.recordSyncHistory('어시스턴트 권장 위치 적용');
+            segment.start = assessment.suggestedRange.startMs / 1000;
+            segment.end = assessment.suggestedRange.endMs / 1000;
+            segment.approx = false;
+            segment.alignmentTrust = 'manual';
+            segment.alignmentSource = 'manual';
+            segment.syncAssistant = { status: 'confirmed', reasonCodes: ['assistant_suggestion_accepted'] };
+            this.markDirtyAndScheduleSave();
+            this.renderLyricList();
+            this.drawWaveform();
+        });
+        bar.querySelector('[data-assistant-action="clear"]')?.addEventListener('click', () => {
+            this.recordSyncHistory('가사 싱크 미확정 처리');
+            segment.start = 0;
+            segment.end = 0;
+            segment.approx = true;
+            segment.alignmentTrust = 'estimated';
+            segment.alignmentSource = 'unsynced_review';
+            segment.syncAssistant = { status: 'unsynced_review', reasonCodes: ['user_cleared_for_review'] };
+            this.markDirtyAndScheduleSave();
+            this.renderLyricList();
+            this.drawWaveform();
+        });
+        bar.querySelector('[data-assistant-action="keep"]')?.addEventListener('click', () => {
+            this.recordSyncHistory('어시스턴트 경고 유지');
+            segment.syncAssistant = { status: 'confirmed', reasonCodes: ['assistant_warning_dismissed'] };
+            this.markDirtyAndScheduleSave();
+            this.renderLyricList();
+        });
     }
 
     /** 지금 재생 위치가 걸쳐 있는 줄의 인덱스. 없으면 -1. */
@@ -2326,13 +2494,25 @@ export class ForcedAlignmentViewer {
     renderLyricList() {
         const container = document.getElementById('lyric-lines-container');
         if (!container) return;
-        const reviewBadge = (segment) => this._isNonLexicalVocalRisk(segment)
+        const reviewBadge = (segment) => segment?.syncAssistant?.reasonCodes?.includes('manual_vad_disagreement')
+            ? '<span class="review-badge assistant-invalid-badge" title="수동 싱크는 보존했지만 현재 보컬 소스에서는 이 구간의 보컬을 찾지 못했습니다.">수동 싱크 · 보컬 확인</span>'
+            : segment?.syncAssistant?.status === 'invalid_silence'
+            ? '<span class="review-badge assistant-invalid-badge" title="이 구간에는 감지된 보컬과 가사 음향 근거가 없습니다. 권장 위치를 확인하거나 미싱크로 비워 주세요.">무음 위치 오류</span>'
+            : (segment?.syncAssistant?.status === 'source_unavailable'
+                ? '<span class="review-badge assistant-invalid-badge" title="사용 가능한 보컬 구간을 찾지 못했습니다. 보컬 분리 결과 또는 원본 음원을 확인해 주세요.">보컬 소스 확인</span>'
+                : (segment?.syncAssistant?.status === 'estimated_review'
+                    ? '<span class="review-badge estimated-badge" title="VAD 또는 순서 근거로 보조 배치한 결과입니다. 들어보고 확정해 주세요.">자동 보조 · 확인</span>'
+                    : this._isNonLexicalVocalRisk(segment)
             ? '<span class="review-badge non-lexical-badge" title="보컬 소리는 있지만 모델이 들은 음절과 이 가사가 충분히 일치하지 않아 배치하지 않았습니다. 추임새 구간이거나 가사 원문·발음 표기가 다른지 확인해 주세요.">추임새 구간 의심</span>'
             : (this._isUnsyncedReview(segment)
                 ? '<span class="review-badge unsynced-badge" title="가사량에 비해 안전하게 배치할 시간이 부족해 자동 타임코드를 저장하지 않았습니다. 이 줄을 수동으로 맞추면 다음 정렬의 강한 앵커가 됩니다.">미싱크</span>'
                 : (this._isEstimatedSync(segment)
-                    ? '<span class="review-badge estimated-badge" title="음향 정렬이 끝까지 확정되지 않아 앞뒤 앵커와 보컬 활동도로 추정한 싱크입니다. 우선 확인해 주세요.">추정 싱크</span>'
-                    : '<span class="review-badge" title="AI 정렬 신뢰도가 낮은 줄입니다. 들어보고 필요하면 시간을 직접 맞춰 주세요 — 고치면 다음 자동 정렬의 기준(앵커)이 됩니다.">확인</span>'));
+                    ? (segment.alignmentSource === 'vad_boundary_review'
+                        ? '<span class="review-badge estimated-badge" title="초록색 보컬 블록의 시작·끝과 원문 순서로 배치했습니다. 들어보고 경계를 확인해 주세요.">VAD 경계 복구 · 확인</span>'
+                        : (segment.alignmentSource === 'vad_ordered_review'
+                            ? '<span class="review-badge estimated-badge" title="문자 인식은 불확실하지만 닫힌 시간 구간의 보컬 활동과 원문 순서로 배치했습니다. 들어보고 확인해 주세요.">순서 복구 · 확인</span>'
+                            : '<span class="review-badge estimated-badge" title="음향 정렬이 끝까지 확정되지 않아 앞뒤 앵커와 보컬 활동도로 추정한 싱크입니다. 우선 확인해 주세요.">추정 싱크</span>'))
+                    : '<span class="review-badge" title="AI 정렬 신뢰도가 낮은 줄입니다. 들어보고 필요하면 시간을 직접 맞춰 주세요 — 고치면 다음 자동 정렬의 기준(앵커)이 됩니다.">확인</span>'))));
         const toggleBtn = document.getElementById('toggle-translation-btn');
         if (toggleBtn) {
             const showing = getShowTranslation();
@@ -2416,7 +2596,7 @@ export class ForcedAlignmentViewer {
                     this.updateTimeDisplay();
                     this.drawWaveform();
                     try {
-                        await this.invoke('seek_to', { positionMs: Math.floor(targetTime * 1000) });
+                        await playbackService.seek(Math.floor(targetTime * 1000));
                     } catch (err) {
                         console.error("Seek failed:", err);
                     }
@@ -2426,20 +2606,21 @@ export class ForcedAlignmentViewer {
                 // 자동으로 다음 줄로 넘기면 사용자가 보고 선택한 대상과 실제 수정
                 // 대상이 달라져 가장 비싼 휴먼 에러가 생긴다.
                 this.state.currentSyncIndex = idx;
-                // Shift+Enter(끝 지정)도 같은 줄을 본다. 이 둘이 어긋나면
-                // 클릭한 줄이 아니라 그 앞 줄이 바뀐다.
+                // Shift+Enter 시작 조정도 같은 줄을 본다.
                 this.state.lastTappedIndex = idx;
 
                 // 클릭한 가사를 타겟으로 고정 — 재생하거나 다른 조작을 해도
                 // 시간이 이 블럭을 벗어나기 전까지는 계속 선택 상태로 남는다.
                 this.state.selectedSegmentIndex = idx;
                 this.drawWaveform();
+                this.renderAlignmentAssistantBar();
 
                 this.syncSidebar(true);
             };
         });
 
         // Force an immediate sync and scroll
+        this.renderAlignmentAssistantBar();
         this.syncSidebar(true);
     }
 
@@ -2470,6 +2651,7 @@ export class ForcedAlignmentViewer {
             this.state.selectedSegmentIndex = idx;
             this.syncSidebar(true);
             this.drawWaveform();
+            this.renderAlignmentAssistantBar();
         }
     }
 
@@ -2674,8 +2856,32 @@ export class ForcedAlignmentViewer {
      * 그 곡이 지금 에디터에 열려 있으면 정렬 결과를 in-memory 세그먼트에 병합해
      * approx(점선) 표시까지 그대로 반영한다. 다른 곡이면 무시(파일은 이미 저장됨).
      */
+    async refreshCurrentStemAnalysis() {
+        const path = this.state.currentPath;
+        if (!path) return;
+        try {
+            const summary = await this.invoke('get_waveform_summary', { audioPath: path });
+            if (!summary || !youtubePathsMatch(path, this.state.currentPath)) return;
+            this.state.waveformPoints = summary.points || [];
+            if (Number(summary.vad_version ?? summary.vadVersion) >= 1) {
+                this.state.vocalRegions = readVocalRegions({
+                    vocalRegions: summary.vocal_regions ?? summary.vocalRegions,
+                });
+            }
+            if (!this.state.duration && summary.duration_sec) {
+                this.state.duration = summary.duration_sec;
+                this.updateTimeDisplay();
+            }
+            this.detectMarkerCandidates();
+            this.drawWaveform();
+            console.log('[Alignment] Stem change refreshed waveform/VAD:', this.state.vocalRegions.length);
+        } catch (err) {
+            console.warn('[Alignment] Stem change VAD refresh failed:', err);
+        }
+    }
+
     onQueueAlignmentDone(path, lines, preparedSegments = null) {
-        if (!path || path !== this.state.currentPath) return;
+        if (!path || !youtubePathsMatch(path, this.state.currentPath)) return;
         if (!Array.isArray(lines) || lines.length === 0) return;
         this.recordSyncHistory('AI 정렬 결과 적용');
         // The queue's post-audit segment snapshot is authoritative. Re-merging
@@ -3021,6 +3227,14 @@ export class ForcedAlignmentViewer {
             showNotification('LRC 저장 실패: ' + err, 'error');
         } finally {
             this.isAutoSaving = false;
+        }
+    }
+
+    /** 테스트·화면 수명 종료 시 전역 키 리스너가 중복으로 남지 않게 한다. */
+    dispose() {
+        if (this._alignmentKeyHandler) {
+            window.removeEventListener('keydown', this._alignmentKeyHandler, true);
+            this._alignmentKeyHandler = null;
         }
     }
 }

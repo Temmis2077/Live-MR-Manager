@@ -1,0 +1,249 @@
+/* 시작 가이드 — 빈 라이브러리 화면 · 가이드 모달 · 첫 실행 환영이 같은 조각을 쓴다. */
+
+/* ── 빈 라이브러리 ───────────────────────────────────────── */
+.ob-start {
+  width: 100%;
+  max-width: 940px;
+  margin: 0 auto;
+  padding: 40px 24px 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 22px;
+}
+
+.ob-start-head {
+  text-align: center;
+}
+
+.ob-start-head strong {
+  display: block;
+  font-size: 1.05rem;
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+
+.ob-start-head span {
+  font-size: 0.84rem;
+  color: var(--text-muted);
+}
+
+/* ── 곡 넣는 세 갈래 ─────────────────────────────────────── */
+.ob-paths {
+  display: grid;
+  /* 좁으면 한 줄씩 쌓인다 — 최소 창 폭(1024)에서도 3열이 들어간다. */
+  grid-template-columns: repeat(auto-fit, minmax(248px, 1fr));
+  gap: 12px;
+  width: 100%;
+}
+
+.ob-path {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 18px 16px 16px;
+  border-radius: 13px;
+  background: var(--surface-1);
+  border: 1px solid var(--glass-border);
+}
+
+.ob-path-icon {
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+.ob-path-title {
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.ob-path-desc {
+  flex: 1;
+  font-size: 0.78rem;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.ob-path-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+/* ── 버튼 ────────────────────────────────────────────────── */
+.ob-btn {
+  height: 32px;
+  padding: 0 13px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-main);
+  background: var(--surface-2);
+  border: 1px solid var(--glass-border);
+  transition: background 0.18s, color 0.18s, border-color 0.18s;
+}
+
+.ob-btn:hover {
+  background: var(--surface-3, var(--surface-2));
+  border-color: rgb(var(--accent-rgb) / 0.4);
+}
+
+.ob-btn.primary {
+  color: var(--accent-secondary);
+  border-color: rgb(var(--accent-rgb) / 0.42);
+  background: rgb(var(--accent-rgb) / 0.14);
+}
+
+.ob-btn.primary:hover {
+  background: rgb(var(--accent-rgb) / 0.22);
+}
+
+.ob-btn:focus-visible {
+  outline: 2px solid var(--accent-secondary);
+  outline-offset: 2px;
+}
+
+/* 빈 화면 아래의 '알아두면 좋은 것' 링크 — 버튼처럼 보이지 않게 눌러 둔다. */
+.ob-more {
+  padding: 6px 10px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.ob-more:hover {
+  color: var(--accent-secondary);
+}
+
+/* ── 가이드 모달 ─────────────────────────────────────────── */
+.modal-content.ob-modal {
+  max-width: 760px;
+  width: 92vw;
+}
+
+.ob-modal .modal-body {
+  max-height: min(66vh, 620px);
+  overflow-y: auto;
+  padding: 4px 4px 8px;
+}
+
+.ob-lead {
+  margin: 0 0 20px;
+  font-size: 0.85rem;
+  line-height: 1.65;
+  color: var(--text-muted);
+}
+
+.ob-lead strong {
+  color: var(--text-main);
+}
+
+.ob-section-title {
+  margin: 22px 0 10px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent-secondary);
+}
+
+.ob-section-title:first-of-type {
+  margin-top: 0;
+}
+
+/* 모달 안에서는 카드가 좁으므로 2열까지만. */
+.ob-modal .ob-paths {
+  grid-template-columns: repeat(auto-fit, minmax(216px, 1fr));
+}
+
+/* ── 알아두면 좋은 것 ────────────────────────────────────── */
+.ob-basics {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ob-basic {
+  display: flex;
+  gap: 11px;
+  padding: 11px 4px;
+  border-bottom: 1px solid rgb(var(--accent-rgb) / 0.06);
+}
+
+.ob-basic:last-child {
+  border-bottom: none;
+}
+
+.ob-basic-icon {
+  flex: none;
+  width: 22px;
+  font-size: 1rem;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.ob-basic-title {
+  font-size: 0.83rem;
+  font-weight: 800;
+  margin-bottom: 3px;
+}
+
+.ob-basic-body {
+  font-size: 0.79rem;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+/* ── 모달 바닥 ───────────────────────────────────────────── */
+.ob-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 4px 2px;
+  border-top: 1px solid var(--glass-border);
+}
+
+.ob-foot-hint {
+  font-size: 0.74rem;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+/* 안내문 안의 링크 — 버튼이지만 문장 속 링크처럼 보이게 한다. */
+.ob-link {
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  color: var(--accent-secondary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.ob-link:hover {
+  text-decoration-thickness: 2px;
+}
+
+.ob-link:focus-visible {
+  outline: 2px solid var(--accent-secondary);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+@media (max-width: 620px) {
+  .ob-foot {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { mergeAlignmentResult } from '../src/js/lrc-parser.js';
+import { mergeAlignmentResult, resolveQueueCompletionSegments } from '../src/js/lrc-parser.js';
+import { applyAlignmentMetadata, buildAlignmentMetadata } from '../src/js/alignment-metadata.js';
 
 // alignment-model.js(언어→모델 매핑)가 localStorage를 읽으므로 스텁 제공.
 // 기본 'ko'라, get_model_list 목은 한국어 폴더명이 포함된 경로를 돌려줘야 매칭됨.
@@ -35,8 +36,117 @@ import {
   buildFinalEstimateGroups,
   estimateUnsyncedTimings,
   applyEstimatedTimings,
+  markRejectedEstimateGroups,
   enforceAiTimelineOrder,
+  assessLyricsSourceMismatch,
+  resetAutomaticTimingsForRealignment,
+  collectGateLexicalEvidence,
+  optimizeVocalBoundaryAssignments,
 } from '../src/js/alignment-queue.js';
+
+function withLexicalEvidence(entries, diagnostics = {}, similarity = 0.8) {
+  return {
+    ...diagnostics,
+    lexical_evidence_by_id: Object.fromEntries((entries || []).map((entry) => [entry.id, {
+      similarity,
+      lineKind: entry.lineKind || 'lyric',
+    }])),
+  };
+}
+
+describe('lyrics source mismatch warning', () => {
+  const healthyAudit = {
+    sourceTextOrderPreserved: true,
+    monotonicOrderPreserved: true,
+    durationSanityPreserved: true,
+  };
+  const entries = Array.from({ length: 10 }, (_, segmentIndex) => ({
+    id: `segment:${segmentIndex}`,
+    segmentIndex,
+  }));
+
+  it('does not mistake confidence-only singing failures for bad source lyrics', () => {
+    const rejected = [2, 3, 4, 5].map((index) => ({
+      line: {
+        segment_id: `segment:${index}`,
+        confidence: 0.001,
+        token_coverage: 1,
+        vocal_activity: 0.9,
+      },
+      reasons: ['confidence'],
+    }));
+    const result = assessLyricsSourceMismatch({
+      entries,
+      primaryGate: { accepted: [], rejected, confidenceFloor: 0.02 },
+      timingAudit: healthyAudit,
+    });
+    expect(result.suspected).toBe(false);
+    expect(result.metrics.evidenceCount).toBe(0);
+  });
+
+  it('warns when broad consecutive lexical mismatches remain despite a healthy timeline', () => {
+    const rejected = [2, 3, 4, 5].map((index) => ({
+      line: {
+        segment_id: `segment:${index}`,
+        confidence: 0.001,
+        token_coverage: 1,
+        vocal_activity: 0.9,
+      },
+      reasons: ['confidence', 'lexical_mismatch'],
+    }));
+    const result = assessLyricsSourceMismatch({
+      entries,
+      primaryGate: { accepted: [], rejected, confidenceFloor: 0.02 },
+      timingAudit: healthyAudit,
+    });
+    expect(result.suspected).toBe(true);
+    expect(result.metrics).toMatchObject({ evidenceCount: 4, longestConsecutiveRun: 4 });
+  });
+
+  it('does not warn for a couple of isolated weak lines', () => {
+    const rejected = [1, 7].map((index) => ({
+      line: {
+        segment_id: `segment:${index}`,
+        confidence: 0.001,
+        token_coverage: 1,
+        vocal_activity: 0.9,
+      },
+      reasons: ['confidence'],
+    }));
+    expect(assessLyricsSourceMismatch({
+      entries,
+      primaryGate: { accepted: [], rejected, confidenceFloor: 0.02 },
+      timingAudit: healthyAudit,
+    }).suspected).toBe(false);
+  });
+
+  it('leaves structural timing failures to the timeline warning instead', () => {
+    const accepted = [2, 3, 4, 5].map((index) => ({
+      segment_id: `segment:${index}`,
+      alignment_trust: 'acoustic_soft',
+      quality_flags: ['low_confidence_corroborated'],
+    }));
+    expect(assessLyricsSourceMismatch({
+      entries,
+      primaryGate: { accepted, rejected: [], confidenceFloor: 0.02 },
+      timingAudit: { ...healthyAudit, monotonicOrderPreserved: false },
+    }).suspected).toBe(false);
+  });
+
+  it('does not make source claims from very short songs', () => {
+    const shortEntries = entries.slice(0, 6);
+    const accepted = shortEntries.slice(0, 4).map((entry) => ({
+      segment_id: entry.id,
+      alignment_trust: 'acoustic_soft',
+      quality_flags: ['doubling_ambiguity'],
+    }));
+    expect(assessLyricsSourceMismatch({
+      entries: shortEntries,
+      primaryGate: { accepted, rejected: [], confidenceFloor: 0.02 },
+      timingAudit: healthyAudit,
+    }).suspected).toBe(false);
+  });
+});
 
 describe('English fallback windows', () => {
   it('bounds a contiguous English block between nearby primary anchors', () => {
@@ -159,6 +269,18 @@ describe('collectAlignmentAnchors', () => {
     expect(allTexts).toEqual(['한국어 줄', 'Oh drowning']);
     expect(entries[1]).toMatchObject({ skipPrimary: false, fallbackCandidate: false });
   });
+
+  it('marks normalized duplicate lyrics without merging their segment IDs', () => {
+    const segments = [
+      { text: 'Same Hook!', start: 0, end: 0 },
+      { text: '다른 줄', start: 0, end: 0 },
+      { text: 'same   hook', start: 0, end: 0 },
+    ];
+    const { entries } = collectAlignmentAnchors(segments, {});
+    expect(entries.map((entry) => entry.id)).toEqual(['segment:0', 'segment:1', 'segment:2']);
+    expect(entries.map((entry) => entry.repeatedLyric)).toEqual([true, false, true]);
+    expect(segments.map((segment) => segment.repeatedLyric)).toEqual([true, false, true]);
+  });
 });
 
 describe('post-merge timeline gate', () => {
@@ -183,6 +305,67 @@ describe('post-merge timeline gate', () => {
     expect(segments[0].start).toBe(10);
     expect(segments[1].start).toBe(0);
   });
+
+  it('drops the weaker automatic line when starts increase but time ranges overlap', () => {
+    const segments = [
+      { text: '앞 자동 가사', start: 10, end: 15, approx: true, confidence: 0.8, alignmentTrust: 'acoustic_strong' },
+      { text: '뒤 자동 가사', start: 13, end: 16, approx: true, confidence: 0.2, alignmentTrust: 'acoustic_soft' },
+    ];
+    const dropped = enforceAiTimelineOrder(segments);
+    expect(dropped).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'segment:1', reason: 'overlap_weaker_auto' }),
+    ]));
+    expect(segments[0].start).toBe(10);
+    expect(segments[1]).toMatchObject({ start: 0, end: 0 });
+  });
+
+  it('detects duplicate time ranges even when unsynced source lines sit between them', () => {
+    const segments = [
+      { text: '모든 건 다 영원할 수가 없다는 걸', start: 209.64, end: 217.16, approx: true, confidence: 0.8, alignmentTrust: 'acoustic_soft' },
+      { text: '이미 미싱크', start: 0, end: 0, approx: true },
+      { text: '모든 건 다 영원할 수가 없다는 걸', start: 209.64, end: 217.16, approx: true, confidence: 0.2, alignmentTrust: 'acoustic_soft' },
+    ];
+    const dropped = enforceAiTimelineOrder(segments);
+    expect(dropped).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'segment:2', reason: 'overlap_weaker_auto' }),
+    ]));
+    expect(segments[0].start).toBe(209.64);
+    expect(segments[2]).toMatchObject({ start: 0, end: 0 });
+  });
+
+  it('rejects automatic timings that are extreme for the singable lyric length', () => {
+    const segments = [
+      { text: '열여섯글자에가까운아주긴문장', start: 1, end: 1.4, approx: true, confidence: 0.9 },
+      { text: '짧은말', start: 3, end: 12, approx: true, confidence: 0.9 },
+      { text: '정상적인 가사', start: 13, end: 15, approx: true, confidence: 0.9 },
+    ];
+    const dropped = enforceAiTimelineOrder(segments);
+    expect(dropped.map((item) => item.reason)).toEqual(expect.arrayContaining([
+      'duration_too_short_for_lyrics',
+      'duration_too_long_for_lyrics',
+    ]));
+    expect(segments[0]).toMatchObject({ start: 0, end: 0 });
+    expect(segments[1]).toMatchObject({ start: 0, end: 0 });
+    expect(segments[2].start).toBe(13);
+  });
+
+  it('never rewrites conflicting manual timings', () => {
+    const segments = [
+      { text: '수동 앞줄', start: 10, end: 15 },
+      { text: '수동 뒷줄', start: 13, end: 16 },
+    ];
+    expect(enforceAiTimelineOrder(segments)).toEqual([]);
+    expect(segments.map((segment) => segment.start)).toEqual([10, 13]);
+  });
+
+  it('keeps an explicitly matched sustained vocable within its separate duration cap', () => {
+    const segments = [{
+      text: '우우우', lineKind: 'vocable', start: 1, end: 7,
+      approx: true, confidence: 0.1, alignmentTrust: 'acoustic_soft',
+    }];
+    expect(enforceAiTimelineOrder(segments)).toEqual([]);
+    expect(segments[0].start).toBe(1);
+  });
 });
 
 describe('second-pass rescue windows', () => {
@@ -192,10 +375,10 @@ describe('second-pass rescue windows', () => {
       segmentIndex,
     }));
     const segments = [
-      { text: '앞 앵커', start: 10, end: 11, approx: true },
+      { text: '앞 앵커', start: 10, end: 11, approx: true, alignmentTrust: 'acoustic_strong' },
       { text: '미싱크 하나', start: 0, end: 0 },
       { text: '미싱크 둘', start: 0, end: 0 },
-      { text: '뒤 앵커', start: 20, end: 21, approx: true },
+      { text: '뒤 앵커', start: 20, end: 21, approx: true, alignmentTrust: 'acoustic_strong' },
     ];
     const windows = buildSecondPassWindows({
       rescueEntries: [entries[1], entries[2]],
@@ -218,6 +401,27 @@ describe('second-pass rescue windows', () => {
     ]);
     expect(windows[0].windowContext.previousAnchor).toMatchObject({ segmentIndex: 0 });
     expect(windows[0].windowContext.nextAnchor).toMatchObject({ segmentIndex: 3 });
+  });
+
+  it('skips soft timings and uses the next strong anchors for the rescue window', () => {
+    const entries = [0, 1, 2, 3, 4].map((segmentIndex) => ({ id: `segment:${segmentIndex}`, segmentIndex }));
+    const segments = [
+      { text: '강한 앞', start: 10, end: 11, approx: true, alignmentTrust: 'acoustic_strong' },
+      { text: '약한 앞', start: 12, end: 13, approx: true, alignmentTrust: 'acoustic_soft' },
+      { text: '미싱크', start: 0, end: 0 },
+      { text: '약한 뒤', start: 14, end: 15, approx: true, alignmentTrust: 'estimated' },
+      { text: '강한 뒤', start: 20, end: 21, approx: false },
+    ];
+    const [window] = buildSecondPassWindows({
+      rescueEntries: [{ ...entries[2], language: 'ko' }],
+      segments,
+      entries,
+      markers: {},
+    });
+
+    expect(window.windowContext.previousAnchor).toMatchObject({ segmentIndex: 0, trust: 'acoustic_strong' });
+    expect(window.windowContext.nextAnchor).toMatchObject({ segmentIndex: 4, trust: 'manual' });
+    expect(window.windowContext.softAnchorSkipped.map((anchor) => anchor.id)).toEqual(['segment:1', 'segment:3']);
   });
 
   it('splits contiguous rescue lines when their language changes', () => {
@@ -243,6 +447,273 @@ describe('second-pass rescue windows', () => {
 });
 
 describe('third-pass estimated sync', () => {
+  it('keeps a 200-400ms breath inside one lyric assignment', () => {
+    const result = optimizeVocalBoundaryAssignments([
+      { startMs: 1_000, endMs: 2_000, activity: 0.8 },
+      { startMs: 2_300, endMs: 3_300, activity: 0.8 },
+    ], [{ text: '긴 한 줄' }], [4], [{}]);
+    expect(result.assignments[0]).toMatchObject({ startMs: 1_000, endMs: 3_300 });
+    expect(result.assignments[0].regions).toHaveLength(2);
+  });
+
+  it('prefers a 400-800ms VAD gap as a lyric boundary', () => {
+    const result = optimizeVocalBoundaryAssignments([
+      { startMs: 1_000, endMs: 2_000, activity: 0.8 },
+      { startMs: 2_300, endMs: 3_300, activity: 0.8 },
+      { startMs: 3_800, endMs: 4_800, activity: 0.8 },
+    ], [{ text: '첫 줄' }, { text: '둘째 줄' }], [3, 3], [{}, {}]);
+    expect(result.assignments.map((item) => [item.startMs, item.endMs])).toEqual([
+      [1_000, 3_300],
+      [3_800, 4_800],
+    ]);
+  });
+
+  it('never lets one lyric cross a VAD gap over 800ms', () => {
+    const result = optimizeVocalBoundaryAssignments([
+      { startMs: 1_000, endMs: 2_000, activity: 0.8 },
+      { startMs: 3_000, endMs: 4_000, activity: 0.8 },
+    ], [{ text: '한 줄' }], [3], [{}]);
+    expect(result.assignments[0].regions).toHaveLength(1);
+  });
+
+  it('drops standalone VAD clicks shorter than 160ms', () => {
+    const result = optimizeVocalBoundaryAssignments([
+      { startMs: 1_000, endMs: 1_120, activity: 1 },
+      { startMs: 2_000, endMs: 3_000, activity: 0.7 },
+    ], [{ text: '가사' }], [2], [{}]);
+    expect(result.assignments[0].regions).toEqual([
+      expect.objectContaining({ startMs: 2_000, endMs: 3_000 }),
+    ]);
+  });
+
+  it('does not reuse lexical evidence from a different repeated-lyric time window', () => {
+    const entries = [
+      { id: 'segment:0', segmentIndex: 0, text: '앞 앵커' },
+      { id: 'segment:1', segmentIndex: 1, text: '반복 후렴', repeatedLyric: true },
+      { id: 'segment:2', segmentIndex: 2, text: '뒤 앵커' },
+    ];
+    const segments = [
+      { text: '앞 앵커', start: 10, end: 11, approx: false },
+      { text: '반복 후렴', start: 0, end: 0 },
+      { text: '뒤 앵커', start: 20, end: 21, approx: false },
+    ];
+    const result = estimateUnsyncedTimings(buildFinalEstimateGroups(segments, entries, {}), {
+      audio_duration_ms: 60_000,
+      vocal_regions: [{ start_ms: 11_000, end_ms: 20_000, activity: 0.8 }],
+      lexical_evidence_by_id: {
+        'segment:1': {
+          similarity: 0.9,
+          lineKind: 'lyric',
+          startMs: 40_000,
+          endMs: 41_000,
+          candidates: [{ similarity: 0.9, lineKind: 'lyric', startMs: 40_000, endMs: 41_000 }],
+        },
+      },
+    });
+
+    expect(result.estimates).toHaveLength(0);
+    expect(result.rejectedGroups[0]).toMatchObject({ rejectedReason: 'no_lexical_evidence' });
+    expect(result.rejectedGroups[0].lexicalEligibility[0]).toMatchObject({
+      similarity: null,
+      evidenceWindowMatched: false,
+      evidenceCandidateCount: 1,
+    });
+  });
+
+  it('selects the best lexical candidate inside the current anchor window', () => {
+    const entries = [
+      { id: 'segment:0', segmentIndex: 0, text: '앞 앵커' },
+      { id: 'segment:1', segmentIndex: 1, text: '반복 후렴' },
+      { id: 'segment:2', segmentIndex: 2, text: '뒤 앵커' },
+    ];
+    const segments = [
+      { text: '앞 앵커', start: 10, end: 11, approx: false },
+      { text: '반복 후렴', start: 0, end: 0 },
+      { text: '뒤 앵커', start: 20, end: 21, approx: false },
+    ];
+    const result = estimateUnsyncedTimings(buildFinalEstimateGroups(segments, entries, {}), {
+      audio_duration_ms: 60_000,
+      vocal_regions: [{ start_ms: 11_000, end_ms: 20_000, activity: 0.8 }],
+      lexical_evidence_by_id: {
+        'segment:1': {
+          similarity: 0.9,
+          lineKind: 'lyric',
+          candidates: [
+            { similarity: 0.9, lineKind: 'lyric', startMs: 40_000, endMs: 41_000 },
+            { similarity: 0.3, lineKind: 'lyric', startMs: 12_000, endMs: 13_000 },
+          ],
+        },
+      },
+    });
+
+    expect(result.rejectedGroups).toHaveLength(0);
+    expect(result.estimates).toHaveLength(1);
+    expect(result.estimates[0].lexicalEligibility).toMatchObject({
+      similarity: 0.3,
+      evidenceWindowMatched: true,
+      evidenceCandidateCount: 2,
+      selectedEvidenceStartMs: 12_000,
+    });
+  });
+
+  it('never treats a trailing manual LRC timestamp with an open end as unsynced', () => {
+    const entries = [{ id: 'segment:0', segmentIndex: 0, text: '마지막 수동 줄' }];
+    const segments = [{ text: '마지막 수동 줄', start: 42.5, end: 0, approx: false }];
+
+    const groups = buildFinalEstimateGroups(segments, entries, {});
+    const applied = applyEstimatedTimings(segments, [{
+      segment_id: 'segment:0',
+      segmentIndex: 0,
+      start_ms: 1_000,
+      end_ms: 2_000,
+    }]);
+
+    expect(groups).toHaveLength(0);
+    expect(applied).toBe(0);
+    expect(segments[0]).toMatchObject({ start: 42.5, end: 0, approx: false });
+  });
+
+  it('recovers an ordinary lyric in a closed VAD window without lexical evidence', () => {
+    const entries = [{ id: 'segment:0', segmentIndex: 0, text: '다음 본문 가사', lineKind: 'lyric' }];
+    const segments = [{ text: entries[0].text, start: 0, end: 0 }];
+    const result = estimateUnsyncedTimings(buildFinalEstimateGroups(segments, entries, {}), {
+      audio_duration_ms: 8_000,
+      vocal_regions: [{ start_ms: 1_000, end_ms: 7_000, activity: 0.9 }],
+    });
+    expect(result.rejectedGroups).toHaveLength(0);
+    expect(result.estimates[0]).toMatchObject({
+      segment_id: 'segment:0',
+      method: 'vad_boundary_review',
+      quality_flags: ['lexical_uncertain', 'vad_boundary_review', 'review_required'],
+    });
+  });
+
+  it('does not reuse an implausible-duration rejection as third-pass lexical evidence', () => {
+    const entries = [{ id: 'segment:0', segmentIndex: 0, text: '본문 가사', lineKind: 'lyric' }];
+    const segments = [{ text: '본문 가사', start: 0, end: 0 }];
+    const evidence = new Map();
+    const regions = [];
+    collectGateLexicalEvidence({
+      accepted: [],
+      rejected: [{
+        line: {
+          segment_id: 'segment:0', greedy_text_similarity: 0.8,
+          start_ms: 1_000, end_ms: 12_000, line_kind: 'lyric',
+        },
+        reasons: ['duration_sanity'],
+      }],
+    }, evidence, regions);
+
+    const result = estimateUnsyncedTimings(buildFinalEstimateGroups(segments, entries, {}), {
+      audio_duration_ms: 15_000,
+      vocal_regions: [{ start_ms: 1_000, end_ms: 14_000, activity: 0.9 }],
+      lexical_evidence_by_id: evidence,
+    });
+    expect(evidence.get('segment:0').candidates[0].thirdPassEligible).toBe(false);
+    expect(result.estimates).toHaveLength(0);
+    expect(result.rejectedGroups[0]).toMatchObject({ rejectedReason: 'no_lexical_evidence' });
+  });
+
+  it('keeps a text-matching confidence-only rejection eligible for third-pass timing', () => {
+    const entries = [{ id: 'segment:0', segmentIndex: 0, text: '본문 가사', lineKind: 'lyric' }];
+    const segments = [{ text: '본문 가사', start: 0, end: 0 }];
+    const evidence = new Map();
+    collectGateLexicalEvidence({
+      accepted: [],
+      rejected: [{
+        line: {
+          segment_id: 'segment:0', greedy_text_similarity: 0.4,
+          start_ms: 2_000, end_ms: 4_000, line_kind: 'lyric',
+        },
+        reasons: ['confidence'],
+      }],
+    }, evidence, []);
+
+    const result = estimateUnsyncedTimings(buildFinalEstimateGroups(segments, entries, {}), {
+      audio_duration_ms: 8_000,
+      vocal_regions: [{ start_ms: 1_000, end_ms: 7_000, activity: 0.8 }],
+      lexical_evidence_by_id: evidence,
+    });
+    expect(evidence.get('segment:0').candidates[0].thirdPassEligible).toBe(true);
+    expect(result.estimates.map((estimate) => estimate.segment_id)).toEqual(['segment:0']);
+  });
+
+  it('constrains a plausible weak lexical candidate to the available VAD boundary', () => {
+    const entries = [{ id: 'segment:0', segmentIndex: 0, text: '노래를 해주렴', lineKind: 'lyric' }];
+    const segments = [{ text: entries[0].text, start: 0, end: 0 }];
+    const result = estimateUnsyncedTimings(buildFinalEstimateGroups(segments, entries, {}), {
+      audio_duration_ms: 80_000,
+      vocal_regions: [{ start_ms: 74_460, end_ms: 77_560, activity: 0.8 }],
+      lexical_evidence_by_id: {
+        'segment:0': {
+          similarity: 0.285,
+          lineKind: 'lyric',
+          startMs: 66_200,
+          endMs: 68_320,
+          thirdPassEligible: true,
+        },
+      },
+    });
+
+    expect(result.estimates).toHaveLength(1);
+    expect(result.estimates[0]).toMatchObject({
+      segment_id: 'segment:0',
+      start_ms: 74_460,
+      end_ms: 77_560,
+      method: 'lexical_candidate',
+    });
+  });
+
+  it('keeps a lexical candidate and VAD-recovers its unevidenced neighbor in source order', () => {
+    const entries = [0, 1].map((segmentIndex) => ({
+      id: `segment:${segmentIndex}`,
+      segmentIndex,
+      text: `가사 ${segmentIndex}`,
+      lineKind: 'lyric',
+    }));
+    const segments = entries.map((entry) => ({ text: entry.text, start: 0, end: 0 }));
+    const result = estimateUnsyncedTimings(buildFinalEstimateGroups(segments, entries, {}), {
+      audio_duration_ms: 8_000,
+      vocal_regions: [{ start_ms: 1_000, end_ms: 7_000, activity: 0.8 }],
+      lexical_evidence_by_id: {
+        'segment:0': { similarity: 0.4, lineKind: 'lyric', startMs: 1_000, endMs: 3_000 },
+      },
+    });
+
+    expect(result.estimates.map((estimate) => estimate.segment_id)).toEqual(['segment:0', 'segment:1']);
+    expect(result.rejectedGroups).toHaveLength(0);
+    expect(result.estimates[1]).toMatchObject({ method: 'vad_ordered_review' });
+    expect(result.estimates[1].quality_flags).toContain('review_required');
+    expect(result.estimates[0].end_ms).toBeLessThanOrEqual(4_000);
+  });
+
+  it('excludes a high-VAD non-lexical region before allocating an evidenced lyric', () => {
+    const entries = [{ id: 'segment:0', segmentIndex: 0, text: '다음 본문 가사', lineKind: 'lyric' }];
+    const segments = [{ text: entries[0].text, start: 0, end: 0 }];
+    const result = estimateUnsyncedTimings(buildFinalEstimateGroups(segments, entries, {}), withLexicalEvidence(entries, {
+      audio_duration_ms: 10_000,
+      vocal_regions: [
+        { start_ms: 1_000, end_ms: 3_000, activity: 0.95 },
+        { start_ms: 6_000, end_ms: 9_000, activity: 0.7 },
+      ],
+      non_lexical_vocal_regions: [{ startMs: 1_000, endMs: 3_000 }],
+    }, 0.3));
+    expect(result.estimates).toHaveLength(1);
+    expect(result.estimates[0].start_ms).toBeGreaterThanOrEqual(6_000);
+  });
+
+  it('never restores a window completely removed as non-lexical vocal', () => {
+    const entries = [{ id: 'segment:0', segmentIndex: 0, text: '다음 본문 가사', lineKind: 'lyric' }];
+    const segments = [{ text: entries[0].text, start: 0, end: 0 }];
+    const result = estimateUnsyncedTimings(buildFinalEstimateGroups(segments, entries, {}), withLexicalEvidence(entries, {
+      audio_duration_ms: 5_000,
+      vocal_regions: [{ start_ms: 0, end_ms: 5_000, activity: 0.9 }],
+      non_lexical_vocal_regions: [{ startMs: 0, endMs: 5_000 }],
+    }, 0.3));
+    expect(result.estimates).toHaveLength(0);
+    expect(result.rejectedGroups[0]).toMatchObject({ rejectedReason: 'insufficient_window_density' });
+  });
+
   it('fills consecutive missing lyrics between anchors using vocal regions', () => {
     const entries = [0, 1, 2, 3].map((segmentIndex) => ({
       id: `segment:${segmentIndex}`,
@@ -253,28 +724,60 @@ describe('third-pass estimated sync', () => {
       { text: '앞 앵커', start: 10, end: 11, approx: false },
       { text: '짧은 줄', start: 0, end: 0 },
       { text: '조금 더 긴 가사 줄', start: 0, end: 0 },
-      { text: '뒤 앵커', start: 20, end: 21, approx: true },
+      { text: '뒤 앵커', start: 20, end: 21, approx: true, alignmentTrust: 'acoustic_strong' },
     ];
     const groups = buildFinalEstimateGroups(segments, entries, {});
-    const estimates = estimateUnsyncedTimings(groups, {
+    const { estimates, rejectedGroups } = estimateUnsyncedTimings(groups, withLexicalEvidence(entries, {
       audio_duration_ms: 30_000,
       vocal_regions: [
         { start_ms: 12_000, end_ms: 15_000, activity: 0.8 },
         { start_ms: 16_000, end_ms: 19_000, activity: 0.7 },
       ],
-    });
+    }));
 
     expect(groups).toHaveLength(1);
+    expect(rejectedGroups).toHaveLength(0);
     expect(estimates.map((line) => line.segment_id)).toEqual(['segment:1', 'segment:2']);
     expect(estimates[0].start_ms).toBeGreaterThan(11_000);
     expect(estimates[1].start_ms).toBeGreaterThan(estimates[0].start_ms);
     expect(estimates[1].end_ms).toBeLessThanOrEqual(20_000);
-    expect(estimates.every((line) => line.method === 'vad_weighted')).toBe(true);
+    expect(estimates.every((line) => line.method === 'vad_boundary_review')).toBe(true);
 
     expect(applyEstimatedTimings(segments, estimates)).toBe(2);
     expect(segments[0]).toMatchObject({ start: 10, end: 11, approx: false });
     expect(segments[3]).toMatchObject({ start: 20, end: 21, approx: true });
-    expect(segments[1]).toMatchObject({ approx: true, confidence: 0, alignmentSource: 'anchor_interpolation' });
+    expect(segments[1]).toMatchObject({ approx: true, confidence: 0, alignmentSource: 'vad_boundary_review' });
+  });
+
+  it('replays the supplied log regression groups without treating ordinary lyrics as vocables', () => {
+    const groups = [
+      { from: 30_680, to: 44_720, base: 3 },
+      { from: 158_320, to: 180_660, base: 18 },
+    ];
+    const entries = groups.flatMap(({ base }) => [0, 1, 2].map((offset) => ({
+      id: `segment:${base + offset}`,
+      segmentIndex: base + offset,
+      text: `일반 가사 ${base + offset}`,
+      lineKind: 'lyric',
+    })));
+    const estimateGroups = groups.map(({ from, to, base }) => ({
+      lowerBoundMs: from,
+      upperBoundMs: to,
+      entries: entries.filter((entry) => entry.segmentIndex >= base && entry.segmentIndex < base + 3),
+      interludes: [],
+      previousAnchor: null,
+      nextAnchor: null,
+    }));
+    const result = estimateUnsyncedTimings(estimateGroups, {
+      audio_duration_ms: 181_000,
+      vocal_regions: groups.map(({ from, to }) => ({ start_ms: from, end_ms: to, activity: 0.65 })),
+      non_lexical_vocal_regions: [],
+    });
+
+    expect(result.rejectedGroups).toHaveLength(0);
+    expect(result.estimates).toHaveLength(6);
+    expect(result.estimates.every((line) => line.method === 'vad_ordered_review')).toBe(true);
+    expect(result.estimates.every((line) => line.quality_flags.includes('review_required'))).toBe(true);
   });
 
   it('uses time weighting with no anchors or VAD and leaves no zero-start lyric', () => {
@@ -284,9 +787,9 @@ describe('third-pass estimated sync', () => {
       text: `가사 ${segmentIndex}`,
     }));
     const segments = entries.map((entry) => ({ text: entry.text, start: 0, end: 0 }));
-    const estimates = estimateUnsyncedTimings(
+    const { estimates } = estimateUnsyncedTimings(
       buildFinalEstimateGroups(segments, entries, {}),
-      { audio_duration_ms: 9_000, vocal_regions: [] },
+      withLexicalEvidence(entries, { audio_duration_ms: 9_000, vocal_regions: [] }),
     );
 
     expect(estimates).toHaveLength(3);
@@ -304,13 +807,13 @@ describe('third-pass estimated sync', () => {
       vocalStartSec: 1,
       interludes: [{ start: 3, end: 7 }],
     });
-    const estimates = estimateUnsyncedTimings(groups, { audio_duration_ms: 10_000 });
+    const { estimates } = estimateUnsyncedTimings(groups, withLexicalEvidence(entries, { audio_duration_ms: 10_000 }));
 
     expect(estimates).toHaveLength(2);
     expect(estimates.every((line) => line.start_ms < 3_000 || line.start_ms >= 7_000)).toBe(true);
   });
 
-  it('keeps starts strictly increasing in a narrow anchor window', () => {
+  it('rejects a narrow anchor window instead of compressing several lyrics into it', () => {
     const entries = [0, 1, 2, 3, 4].map((segmentIndex) => ({ id: `segment:${segmentIndex}`, segmentIndex, text: '가' }));
     const segments = [
       { text: '앞', start: 1, end: 1.01 },
@@ -319,22 +822,83 @@ describe('third-pass estimated sync', () => {
       { text: '다', start: 0, end: 0 },
       { text: '뒤', start: 1.10, end: 1.2 },
     ];
-    const estimates = estimateUnsyncedTimings(buildFinalEstimateGroups(segments, entries, {}), {});
-    const starts = estimates.map((line) => line.start_ms);
-    expect(starts).toHaveLength(3);
-    expect(starts[1]).toBeGreaterThan(starts[0]);
-    expect(starts[2]).toBeGreaterThan(starts[1]);
-    expect(starts[2]).toBeLessThan(1_100);
+    const result = estimateUnsyncedTimings(buildFinalEstimateGroups(segments, entries, {}), withLexicalEvidence(entries));
+    expect(result.estimates).toHaveLength(0);
+    expect(result.rejectedGroups[0]).toMatchObject({
+      rejectedReason: 'insufficient_window_density',
+      segmentIds: ['segment:1', 'segment:2', 'segment:3'],
+    });
+    expect(result.rejectedGroups[0].availableDurationMs).toBeLessThan(result.rejectedGroups[0].requiredDurationMs);
+    expect(markRejectedEstimateGroups(segments, result.rejectedGroups)).toEqual(['segment:1', 'segment:2', 'segment:3']);
+    expect(segments[1]).toMatchObject({ start: 0, end: 0, approx: true, alignmentSource: 'unsynced_review' });
+  });
+
+  it('rejects a VAD allocation when one lyric would collapse below its own duration floor', () => {
+    const entries = [0, 1].map((segmentIndex) => ({
+      id: `segment:${segmentIndex}`,
+      segmentIndex,
+      text: '가나다라',
+      lineKind: 'lyric',
+    }));
+    const segments = entries.map((entry) => ({ text: entry.text, start: 0, end: 0 }));
+    const result = estimateUnsyncedTimings(
+      buildFinalEstimateGroups(segments, entries, {}),
+      withLexicalEvidence(entries, {
+        audio_duration_ms: 5_000,
+        vocal_regions: [
+          { start_ms: 1_000, end_ms: 1_080, activity: 1 },
+          { start_ms: 2_000, end_ms: 5_000, activity: 1 },
+        ],
+      }),
+    );
+
+    expect(result.estimates).toHaveLength(1);
+    expect(result.estimates[0].segment_id).toBe('segment:1');
+    expect(result.rejectedGroups[0]).toMatchObject({
+      rejectedReason: 'insufficient_per_line_duration',
+      segmentIds: ['segment:0'],
+    });
+    expect(result.rejectedGroups[0].perLineDurationChecks[0]).toMatchObject({
+      durationMs: 80,
+      minimumDurationMs: 200,
+      plausible: false,
+    });
+  });
+
+  it('rejects six doubled-hook lines when only 4.58 seconds of vocal activity are available', () => {
+    const entries = Array.from({ length: 8 }, (_, segmentIndex) => ({
+      id: `segment:${segmentIndex}`,
+      segmentIndex,
+      text: segmentIndex === 0 || segmentIndex === 7 ? '강한 앵커' : `반복 후렴 ${segmentIndex}`,
+    }));
+    const segments = entries.map((entry, index) => ({
+      text: entry.text,
+      start: index === 0 ? 230 : (index === 7 ? 241 : 0),
+      end: index === 0 ? 231 : (index === 7 ? 242 : 0),
+      approx: index === 0 || index === 7 ? false : undefined,
+    }));
+    const result = estimateUnsyncedTimings(buildFinalEstimateGroups(segments, entries, {}), withLexicalEvidence(entries, {
+      audio_duration_ms: 260_000,
+      vocal_regions: [{ start_ms: 235_900, end_ms: 240_480, activity: 0.9 }],
+    }));
+
+    expect(result.estimates).toHaveLength(0);
+    expect(result.rejectedGroups[0]).toMatchObject({
+      segmentIds: ['segment:1', 'segment:2', 'segment:3', 'segment:4', 'segment:5', 'segment:6'],
+      availableDurationMs: 4_580,
+      rejectedReason: 'insufficient_window_density',
+    });
+    expect(result.rejectedGroups[0].requiredDurationMs).toBeGreaterThanOrEqual(4_800);
   });
 
   it('uses start-order space when neighboring accepted lyrics overlap', () => {
     const entries = [0, 1, 2].map((segmentIndex) => ({ id: `segment:${segmentIndex}`, segmentIndex, text: '가사' }));
     const segments = [
-      { text: '긴 앞줄', start: 10, end: 15, approx: true },
+      { text: '긴 앞줄', start: 10, end: 15, approx: true, alignmentTrust: 'acoustic_strong' },
       { text: '미싱크', start: 0, end: 0 },
-      { text: '겹친 다음줄', start: 13, end: 16, approx: true },
+      { text: '겹친 다음줄', start: 13, end: 16, approx: true, alignmentTrust: 'acoustic_strong' },
     ];
-    const estimates = estimateUnsyncedTimings(buildFinalEstimateGroups(segments, entries, {}), {});
+    const { estimates } = estimateUnsyncedTimings(buildFinalEstimateGroups(segments, entries, {}), withLexicalEvidence(entries));
     expect(estimates).toHaveLength(1);
     expect(estimates[0].start_ms).toBeGreaterThan(10_000);
     expect(estimates[0].start_ms).toBeLessThan(13_000);
@@ -343,18 +907,18 @@ describe('third-pass estimated sync', () => {
   it('chooses the vocal cluster matching the missing line count across a long instrumental gap', () => {
     const entries = [0, 1, 2].map((segmentIndex) => ({ id: `segment:${segmentIndex}`, segmentIndex, text: '잊었니 날 잊어버렸니' }));
     const segments = [
-      { text: '앞줄', start: 71.52, end: 74.94, approx: true },
+      { text: '앞줄', start: 71.52, end: 74.94, approx: true, alignmentTrust: 'acoustic_strong' },
       { text: '잊었니 날 잊어버렸니', start: 0, end: 0 },
-      { text: '뒷줄', start: 103.08, end: 107.22, approx: true },
+      { text: '뒷줄', start: 103.08, end: 107.22, approx: true, alignmentTrust: 'acoustic_strong' },
     ];
-    const estimates = estimateUnsyncedTimings(buildFinalEstimateGroups(segments, entries, {}), {
+    const { estimates } = estimateUnsyncedTimings(buildFinalEstimateGroups(segments, entries, {}), withLexicalEvidence(entries, {
       audio_duration_ms: 193_660,
       vocal_regions: [
         { start_ms: 75_140, end_ms: 76_880, activity: 0.59 },
         { start_ms: 98_260, end_ms: 99_420, activity: 0.56 },
         { start_ms: 100_000, end_ms: 102_600, activity: 0.57 },
       ],
-    });
+    }));
 
     expect(estimates).toHaveLength(1);
     expect(estimates[0].start_ms).toBeGreaterThanOrEqual(98_260);
@@ -490,6 +1054,32 @@ describe('mergeAlignmentResult', () => {
   });
 });
 
+describe('queue completion adoption', () => {
+  it('does not resurrect a raw timing cleared by the final timeline audit', () => {
+    const current = [{ text: '첫 줄', start: 0, end: 0 }];
+    const rawAccepted = [{ text: '첫 줄', start_ms: 5000, end_ms: 6000 }];
+    const audited = [{
+      text: '첫 줄',
+      start: 0,
+      end: 0,
+      approx: true,
+      alignmentSource: 'unsynced_review',
+      qualityFlags: ['out_of_order_weaker_auto'],
+    }];
+
+    const result = resolveQueueCompletionSegments(current, rawAccepted, audited);
+
+    expect(result.adoptedAudited).toBe(true);
+    expect(result.applied).toBe(0);
+    expect(result.segments[0]).toMatchObject({
+      start: 0,
+      end: 0,
+      alignmentSource: 'unsynced_review',
+    });
+    expect(current[0]).toMatchObject({ start: 0, end: 0 });
+  });
+});
+
 describe('alignment queue sequential processor', () => {
   const flushQueue = async () => {
     // 대기열이 완전히 소진될 때까지 대기 (queued/processing 항목이 없어질 때까지)
@@ -505,6 +1095,59 @@ describe('alignment queue sequential processor', () => {
     state.alignmentQueue.length = 0;
     state.songLibrary.length = 0;
     invoke.mockReset();
+  });
+
+  it('does not promote a restored soft AI timing to a manual anchor', () => {
+    const stored = buildAlignmentMetadata([{
+      text: '약한 AI 결과', start: 12, end: 14, approx: true,
+      alignmentTrust: 'acoustic_soft', alignmentSource: 'ctc',
+    }]);
+    const reloaded = applyAlignmentMetadata([
+      { text: '약한 AI 결과', start: 12, end: 0 },
+    ], stored).segments;
+
+    const prepared = collectAlignmentAnchors(reloaded, []);
+    expect(reloaded[0]).toMatchObject({ approx: true, alignmentTrust: 'acoustic_soft' });
+    expect(prepared.anchors).toEqual([]);
+  });
+
+  it('resets restored automatic timings for an explicit rerun but preserves manual anchors', () => {
+    const segments = [
+      { text: '자동', start: 12, end: 14, approx: true, alignmentTrust: 'acoustic_soft' },
+      { text: '수동', start: 20, end: 22, approx: false, alignmentTrust: 'manual' },
+    ];
+    const reset = resetAutomaticTimingsForRealignment(segments);
+
+    expect(reset.map((entry) => entry.id)).toEqual(['segment:0']);
+    expect(segments[0]).toMatchObject({ start: 0, end: 0, approx: true });
+    expect(segments[0].alignmentTrust).toBeUndefined();
+    expect(segments[1]).toMatchObject({ start: 20, end: 22, approx: false, alignmentTrust: 'manual' });
+    expect(collectAlignmentAnchors(segments, []).anchors).toEqual([[1, 20000]]);
+  });
+
+  it('does not save AI timestamps when provenance metadata persistence fails', async () => {
+    let lrcSaved = false;
+    invoke.mockImplementation(async (cmd) => {
+      if (cmd === 'load_lrc_file') return '[00:00.00]가사 한 줄';
+      if (cmd === 'get_model_list') return ['한국어 모델|/models/wav2vec2-korean-lyrics'];
+      if (cmd === 'run_forced_alignment') {
+        return { lines: [{
+          segment_id: 'segment:0', text: '가사 한 줄', start_ms: 1000, end_ms: 2000,
+          confidence: 0.9, token_coverage: 1, greedy_text_similarity: 0.9,
+        }] };
+      }
+      if (cmd === 'save_alignment_metadata') throw new Error('disk full');
+      if (cmd === 'save_lrc_file') lrcSaved = true;
+      return null;
+    });
+
+    enqueueAlignment(['metadata-write-failure']);
+    await flushQueue();
+
+    const item = state.alignmentQueue.find((entry) => entry.path === 'metadata-write-failure');
+    expect(item.status).toBe('error');
+    expect(item.error).toContain('메타데이터');
+    expect(lrcSaved).toBe(false);
   });
 
   it('processes items strictly one at a time and skips no-lyrics songs', async () => {
@@ -598,6 +1241,9 @@ describe('alignment queue sequential processor', () => {
 
     enqueueAlignment(['english-original']);
     await flushQueue();
+    const item = state.alignmentQueue.find((entry) => entry.path === 'english-original');
+    expect(item.status).toBe('done');
+    expect(item.note).toContain('영어 모델 없음 1줄');
     expect(saved).toContain('Oh drowning');
     expect(saved).not.toContain('[pron]');
     expect(saved).not.toContain('오 드라우닝');
@@ -645,6 +1291,7 @@ describe('alignment queue sequential processor', () => {
     lsStore.alignmentLanguage = 'en-ko';
     let saved = '';
     const alignmentCalls = [];
+    const traces = [];
     invoke.mockImplementation(async (cmd, args) => {
       switch (cmd) {
         case 'load_lrc_file':
@@ -655,6 +1302,7 @@ describe('alignment queue sequential processor', () => {
             'English model|/models/wav2vec2-english-lyrics',
           ];
         case 'run_forced_alignment':
+          if (!String(args.lyrics || '').trim()) throw new Error('유효한 가사 토큰이 없습니다.');
           alignmentCalls.push({ language: args.language, lyrics: args.lyrics });
           return args.language === 'ko'
             ? { lines: [{ text: '오 드라우닝', start_ms: 1000, end_ms: 2000, confidence: 0, token_coverage: 0 }] }
@@ -662,6 +1310,9 @@ describe('alignment queue sequential processor', () => {
         case 'save_lrc_file':
           saved = args.content;
           return 'ok';
+        case 'write_alignment_debug_trace':
+          traces.push(args);
+          return 'trace.jsonl';
         default:
           return null;
       }
@@ -670,11 +1321,17 @@ describe('alignment queue sequential processor', () => {
     enqueueAlignment(['english-fallback']);
     await flushQueue();
     expect(state.alignmentQueue.find((i) => i.path === 'english-fallback').status).toBe('done');
-    expect(alignmentCalls.map((call) => call.language)).toEqual(['ko', 'ko', 'en']);
-    expect(alignmentCalls[0].lyrics).toBe('');
-    expect(alignmentCalls[1].lyrics).toContain('오 드라우닝');
+    expect(alignmentCalls.map((call) => call.language)).toEqual(['ko', 'en']);
+    expect(alignmentCalls[0].lyrics).toContain('오 드라우닝');
     expect(saved).toContain('Oh drowning');
     expect(saved).not.toContain('[pron]');
+    expect(traces.find((trace) => trace.stage === 'input_prepared')?.payload).toMatchObject({
+      alignmentPipelineRevision: 'ordered-lexical-window-v3',
+      policy: {
+        sourceOrder: 'immutable_segment_id',
+        thirdPassLexicalEvidence: 'same_anchor_window_per_line',
+      },
+    });
   });
 
   it('rescues only the remaining unsynced lines in a second local pass', async () => {
@@ -692,13 +1349,13 @@ describe('alignment queue sequential processor', () => {
           if (alignmentCalls.length === 1) {
             return {
               lines: [
-                { segment_id: 'segment:0', text: '첫 번째 줄', start_ms: 1000, end_ms: 2000, confidence: 0.9 },
-                { segment_id: 'segment:1', text: '두 번째 줄', start_ms: 2000, end_ms: 3000, confidence: 0 },
+                { segment_id: 'segment:0', text: '첫 번째 줄', start_ms: 1000, end_ms: 2000, confidence: 0.9, greedy_text_similarity: 0.8 },
+                { segment_id: 'segment:1', text: '두 번째 줄', start_ms: 2000, end_ms: 3000, confidence: 0, greedy_text_similarity: 0.3 },
               ],
             };
           }
           return {
-            lines: [{ segment_id: 'segment:1', text: '두 번째 줄', start_ms: 2400, end_ms: 3400, confidence: 0.9 }],
+            lines: [{ segment_id: 'segment:1', text: '두 번째 줄', start_ms: 2400, end_ms: 3400, confidence: 0.9, greedy_text_similarity: 0.8 }],
           };
         case 'save_lrc_file':
           saved = args.content;
@@ -721,7 +1378,7 @@ describe('alignment queue sequential processor', () => {
     expect(saved).toContain('[00:02.40]두 번째 줄');
   });
 
-  it('fills lines rejected by both acoustic passes with final estimated sync', async () => {
+  it('leaves an acoustically unsupported line unsynced instead of forcing a VAD-only estimate', async () => {
     let saved = '';
     let alignmentCallCount = 0;
     invoke.mockImplementation(async (cmd, args) => {
@@ -731,8 +1388,8 @@ describe('alignment queue sequential processor', () => {
         alignmentCallCount++;
         return {
           lines: [
-            { segment_id: 'segment:0', text: '첫 번째 약한 줄', start_ms: 1000, end_ms: 2000, confidence: 0, token_coverage: 1 },
-            { segment_id: 'segment:1', text: '두 번째 약한 줄', start_ms: 2200, end_ms: 3200, confidence: 0, token_coverage: 1 },
+            { segment_id: 'segment:0', text: '첫 번째 약한 줄', start_ms: 1000, end_ms: 2000, confidence: 0, token_coverage: 1, greedy_text_similarity: 0.3 },
+            { segment_id: 'segment:1', text: '두 번째 약한 줄', start_ms: 2200, end_ms: 3200, confidence: 0, token_coverage: 1, greedy_text_similarity: 0.3 },
           ],
           diagnostics: {
             audio_duration_ms: 12_000,
@@ -749,9 +1406,41 @@ describe('alignment queue sequential processor', () => {
 
     expect(state.alignmentQueue.find((item) => item.path === 'third-pass-estimate').status).toBe('done');
     expect(alignmentCallCount).toBe(2);
-    expect(saved).not.toContain('[00:00.00]');
+    expect(saved).toContain('[00:00.00]첫 번째 약한 줄');
     expect(saved).toContain('첫 번째 약한 줄');
     expect(saved).toContain('두 번째 약한 줄');
+  });
+
+  it('saves a partial result and marks the song unsynced when estimate density is unsafe', async () => {
+    let saved = '';
+    state.songLibrary.push({ path: 'unsafe-density' });
+    invoke.mockImplementation(async (cmd, args) => {
+      if (cmd === 'load_lrc_file') return '[00:00.00]첫 번째 긴 후렴 가사\n[00:00.00]두 번째 긴 후렴 가사';
+      if (cmd === 'get_model_list') return ['한국어 모델|/models/wav2vec2-korean-lyrics'];
+      if (cmd === 'run_forced_alignment') {
+        return {
+          lines: [
+            { segment_id: 'segment:0', text: '첫 번째 긴 후렴 가사', start_ms: 1_000, end_ms: 1_300, confidence: 0, token_coverage: 1, greedy_text_similarity: 0.3 },
+            { segment_id: 'segment:1', text: '두 번째 긴 후렴 가사', start_ms: 1_320, end_ms: 1_600, confidence: 0, token_coverage: 1, greedy_text_similarity: 0.3 },
+          ],
+          diagnostics: {
+            audio_duration_ms: 2_000,
+            vocal_regions: [{ start_ms: 1_000, end_ms: 1_600, activity: 0.9 }],
+          },
+        };
+      }
+      if (cmd === 'save_lrc_file') { saved = args.content; return 'ok'; }
+      return null;
+    });
+
+    enqueueAlignment(['unsafe-density']);
+    await flushQueue();
+
+    const item = state.alignmentQueue.find((entry) => entry.path === 'unsafe-density');
+    expect(item.status).toBe('done');
+    expect(item.note).toContain('2줄 미싱크');
+    expect(saved.match(/\[00:00\.00\]/g)).toHaveLength(2);
+    expect(state.songLibrary[0].lyricSyncStatus).toBe('unsynced');
   });
 
   it('dedupes paths already queued', () => {

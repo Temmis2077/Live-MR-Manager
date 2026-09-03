@@ -16,13 +16,19 @@
 import { state } from './state.js';
 import { invoke } from './tauri-bridge.js';
 import { formatTime, getThumbnailUrl, showNotification } from './utils.js';
-import { lineHtml, paintLiveLyricProgress } from './live-lyrics.js';
+import { karaokeLineHtml, lineHtml, paintLiveLyricProgress, paintLyricElementProgress } from './live-lyrics.js';
 import { lineProgress } from './alignment-metadata.js';
-import { getPlaybackClockMs } from './lyric-drawer.js';
-import { appendLiveHistory, buildPerformerLyricModel, isMrReady, moveQueueItem, resolveNextLiveQueuePath, takePreviousLivePath } from './live-performance.js';
+import { getLyricDisplayClockMs, getPlaybackClockMs } from './lyric-drawer.js';
+import { buildPerformerLyricModel, getLiveKeyBpm, isMrReady, moveQueueItem, resolveLineWindow, resolveNextLiveQueuePath } from './live-performance.js';
 import { pushLayer, popLayer } from './ui/layer-stack.js';
 import { getSyncText } from './lrc-parser.js';
 import { getLyricSyncStatus } from './library-filters.js';
+import { createLiveControlChannel } from './live-control-state.js';
+import { persistCurrentTrackAudioSettings } from './events/controls/shared.js';
+import { brandIcon } from './brand-icons.js';
+import { audioDeviceService } from '../ipc/services/audio.js';
+import { mixerService } from '../ipc/services/mixer.js';
+import { createWaveformRepository, isCurrentWaveformRequest } from './live-waveform.js';
 
 const WAVE_BARS = 84;
 /** 반주 ↔ 가이드 보컬 믹스(0 = 반주만, 100 = 보컬 100). 라이브가 값을 들고
@@ -38,26 +44,28 @@ let waveHeights = [];
 let waveDurationSec = 0;
 let renderedMarkerKey = '';
 let rawWavePoints = [];
+let waveStatus = 'idle';
 let lastHealthFetch = 0;
 let healthBusy = false;
 let renderedKaraokeKey = '';
 let detailedWaveWindow = { startSec: 0, endSec: 0 };
+let liveControls = null;
+let initialControlSyncDone = false;
+let lastControlTrackPath = null;
+let lastLiveTrackPath = null;
+const waveformRepository = createWaveformRepository((path) =>
+  invoke('get_waveform_summary', { audioPath: path }));
 
 const CONTROLS_OPEN_KEY = 'liveControlsOpen';
 
 const $ = (id) => document.getElementById(id);
 
-function saveQueue() {
-  try { localStorage.setItem('liveQueue', JSON.stringify(state.liveQueue || [])); } catch (_) {}
-}
-
-/** 라이브 '다음 곡'에 담는다. 이미 있으면 중복으로 넣지 않는다. */
+/** 이번 라이브 세션의 '다음 곡'에 담는다. 앱을 닫으면 사라진다. */
 export function addToLiveQueue(path) {
   if (!path) return false;
   if (!Array.isArray(state.liveQueue)) state.liveQueue = [];
   if (state.liveQueue.includes(path)) return false;
   state.liveQueue.push(path);
-  saveQueue();
   renderLiveQueue();
   return true;
 }
@@ -65,7 +73,6 @@ export function addToLiveQueue(path) {
 export function removeFromLiveQueue(path) {
   if (!Array.isArray(state.liveQueue)) return;
   state.liveQueue = state.liveQueue.filter((p) => p !== path);
-  saveQueue();
   renderLiveQueue();
 }
 
@@ -73,7 +80,6 @@ export function reorderLiveQueue(fromIndex, toIndex) {
   const next = moveQueueItem(state.liveQueue, fromIndex, toIndex);
   if (next.join('\u0000') === (state.liveQueue || []).join('\u0000')) return false;
   state.liveQueue = next;
-  saveQueue();
   renderLiveQueue();
   return true;
 }
@@ -204,7 +210,8 @@ function drawDetailedWaveform(positionSec) {
   // 가사 구간을 상단 레인에 표시해 가사 싱크 화면과 같은 맥락을 제공한다.
   (state.currentLyrics || []).forEach((segment, index) => {
     const segStart = Number(segment.start) || 0;
-    const segEnd = Number(segment.end) || segStart;
+    const segWindow = resolveLineWindow(segment, state.currentLyrics[index + 1] || null);
+    const segEnd = segWindow.endSec ?? segStart;
     if (segEnd < startSec || segStart > endSec || segEnd <= segStart) return;
     const x1 = Math.max(0, xAt(segStart));
     const x2 = Math.min(cssWidth, xAt(segEnd));
@@ -238,38 +245,63 @@ async function buildWave(path) {
   const sequence = ++waveLoadSequence;
   waveSeedPath = path;
   waveEls = [];
+  // A new track owns a completely empty waveform state until its own result
+  // arrives. Never leave the previous song visible as a loading placeholder.
+  waveHeights = [];
+  waveDurationSec = 0;
+  rawWavePoints = [];
+  detailedWaveWindow = { startSec: 0, endSec: 0 };
+  renderedMarkerKey = '';
+  renderWave([]);
+  drawDetailedWaveform(0);
   const cue = $('live-wave-cue');
   if (!path) {
-    waveHeights = [];
-    waveDurationSec = 0;
-    rawWavePoints = [];
-    renderWave([]);
+    waveStatus = 'idle';
     if (cue) cue.textContent = '곡을 선택하면 실제 파형과 진입 구간을 표시합니다';
     return;
   }
-  if (cue) cue.textContent = '실제 파형을 분석하고 있습니다';
+  waveStatus = 'loading';
+  if (cue) cue.textContent = '보컬 파형 불러오는 중';
   try {
-    const summary = await invoke('get_waveform_summary', { audioPath: path });
-    if (sequence !== waveLoadSequence || path !== state.currentTrack?.path) return;
+    const summary = await waveformRepository.load(path);
+    if (!isCurrentWaveformRequest(sequence, waveLoadSequence, path, state.currentTrack?.path)) return;
     const durationSec = Number(summary?.duration_sec ?? summary?.durationSec) || (state.trackDurationMs / 1000);
     waveHeights = summarizeWave(summary?.points);
     rawWavePoints = Array.isArray(summary?.points) ? summary.points : [];
     waveDurationSec = durationSec;
+    waveStatus = 'ready';
     renderWave(waveHeights, waveDurationSec);
+    prefetchNextLiveWaveform();
   } catch (err) {
-    if (sequence !== waveLoadSequence) return;
+    if (!isCurrentWaveformRequest(sequence, waveLoadSequence, path, state.currentTrack?.path)) return;
     waveHeights = [];
     rawWavePoints = [];
     waveDurationSec = state.trackDurationMs / 1000;
+    waveStatus = 'error';
     renderWave([], state.trackDurationMs / 1000);
     if (cue) cue.textContent = '실제 파형을 불러오지 못했습니다';
     console.warn('[Live] waveform unavailable:', err);
   }
 }
 
+function prefetchNextLiveWaveform() {
+  const queue = Array.isArray(state.liveQueue) ? state.liveQueue : [];
+  const available = new Set((state.songLibrary || []).map((song) => song.path));
+  const next = resolveNextLiveQueuePath(queue, state.currentTrack?.path, available).path;
+  if (next) waveformRepository.prefetch(next);
+}
+
 function updateWaveCue(positionSec) {
   const cue = $('live-wave-cue');
   if (!cue) return;
+  if (waveStatus === 'loading') {
+    cue.textContent = '보컬 파형 불러오는 중';
+    return;
+  }
+  if (waveStatus === 'error') {
+    cue.textContent = '실제 파형을 불러오지 못했습니다';
+    return;
+  }
   const markers = state.currentMarkers || {};
   const hasMarkers = (markers.vocalStartSec != null && Number.isFinite(Number(markers.vocalStartSec)))
     || (markers.interludes || []).length > 0;
@@ -339,22 +371,24 @@ function renderPerformerView(positionSec) {
     else if (!model.hasSyncedLyrics) { debugBranch('싱크없음', positionSec, model); currentEl.textContent = '가사 싱크 없음'; renderedKaraokeKey = ''; }
     else if (model.current) {
       debugBranch('가사', positionSec, model);
-      const html = lineHtml(model.current);
+      const html = karaokeLineHtml(model.current);
       // 리드인과 가창은 같은 줄을 같은 자리에 그린다. 여기서 키를 나눠 두지
       // 않으면 부르기 시작하는 순간 내용이 같아 다시 그리지 않아도 되는데,
       // 상태 표시(.pending)만 어긋난 채 남는다.
-      const key = `${model.pending ? 'pre' : 'sing'}|${html}`;
+      // Pending/singing changes only presentation state. Replacing identical
+      // lyric DOM at that boundary destroys and recreates the wipe masks and
+      // produces a visible flash, so content alone owns the DOM key.
+      const key = html;
       if (renderedKaraokeKey !== key) {
-        // 글자를 하나만 둔다. 예전에는 같은 글자를 겹쳐 놓고 위 것만 드러냈는데,
-        // 바탕 글자가 회색이라 와이프가 닿기 전엔 읽히지 않았다("늦게 나온다").
-        // 이제 CSS가 같은 글자에 그라디언트를 잘라 넣는다.
+        // 기본/강조 글자를 같은 실제 글자 상자에 겹친다. 패널 전체 폭을
+        // 기준으로 칠할 때 생기던 중앙 가사의 체감 지연을 없앤다.
         currentEl.innerHTML = html;
         renderedKaraokeKey = key;
       }
       // 구간 중(전주·간주·보컬 진입)에도 줄은 계속 보여주되, 아직 부를 때가
       // 아니라는 것은 흐리게 해서 알린다 — 라벨로 덮지 않는다.
       currentEl.classList.toggle('pending', model.pending || model.sectionState.kind !== 'singing');
-      // 진행도(--karaoke-progress)는 여기서 쓰지 않는다. 200ms 틱이라 뚝뚝
+      // 진행도(--lyric-wipe)는 여기서 쓰지 않는다. 200ms 틱이라 뚝뚝
       // 끊기고, model.progress는 공연자용 규칙이 섞여 오버레이와 어긋난다.
       // rAF 루프(startLyricProgressLoop)가 오버레이와 같은 값으로 칠한다.
     } else if (!renderedKaraokeKey) {
@@ -395,7 +429,7 @@ async function refreshLiveHealth() {
   if (healthBusy) return;
   healthBusy = true;
   try {
-    const mix = await invoke('get_mix_state');
+    const mix = await mixerService.getState();
     const monLatency = Number(mix?.mon_est_latency_ms ?? mix?.monEstLatencyMs) || 0;
     const mrLatency = Number(mix?.mr_est_latency_ms ?? mix?.mrEstLatencyMs) || 0;
     const limiter = !!(mix?.limiter_enabled ?? mix?.limiterEnabled);
@@ -434,9 +468,171 @@ function stepSlider(id, delta, { min, max, decimals = 0 }) {
   driveSlider(id, decimals > 0 ? next.toFixed(decimals) : Math.round(next));
 }
 
+function clampControl(value, min, max, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(min, Math.min(max, parsed)) : fallback;
+}
+
+function renderPitch(value) {
+  const v = clampControl(value, -12, 12, 0);
+  const dock = $('pitch-slider');
+  if (dock) dock.value = String(v);
+  if ($('pitch-val')) $('pitch-val').textContent = v > 0 ? `+${v}` : String(v);
+  if ($('live-key-val')) $('live-key-val').textContent = v > 0 ? `+${v}` : String(v);
+}
+
+function renderTempo(value) {
+  const v = clampControl(value, .5, 2, 1);
+  const dock = $('tempo-slider');
+  if (dock) dock.value = v.toFixed(2);
+  if ($('tempo-val')) $('tempo-val').textContent = `${v.toFixed(2)}x`;
+  if ($('live-tempo-val')) $('live-tempo-val').textContent = String(Math.round(v * 100));
+}
+
+function renderGuide(value) {
+  const v = Math.round(clampControl(value, 0, 100, 0));
+  if ($('vocal-balance')) $('vocal-balance').value = String(v);
+  if ($('vocal-balance-val')) $('vocal-balance-val').textContent = `${v}%`;
+  if ($('live-mix-val')) $('live-mix-val').textContent = String(v);
+  if ($('live-mix-fill')) $('live-mix-fill').style.width = `${v}%`;
+  $('live-mix-track')?.setAttribute('aria-valuenow', String(v));
+}
+
+function renderMonitor(value) {
+  const v = Math.round(clampControl(value, 0, 120, 100));
+  if ($('master-volume-slider')) $('master-volume-slider').value = String(v);
+  if ($('master-volume-val')) $('master-volume-val').textContent = `${v}%`;
+  if ($('live-mon-val')) $('live-mon-val').textContent = String(v);
+  if ($('live-mon-fill')) $('live-mon-fill').style.width = `${Math.min(100, (v / 120) * 100)}%`;
+  $('live-mon-track')?.setAttribute('aria-valuenow', String(v));
+}
+
+function renderVocalEnabled(enabled) {
+  const on = !!enabled;
+  if ($('toggle-vocal')) $('toggle-vocal').checked = on;
+  const button = $('live-vocal-toggle');
+  button?.classList.toggle('on', on);
+  button?.setAttribute('aria-checked', on ? 'true' : 'false');
+}
+
+function reportControlFailure(label, error) {
+  console.error(`[Live] ${label} control failed:`, error);
+  showNotification(`${label} 조절을 적용하지 못해 이전 값으로 복구했습니다.`, 'error');
+}
+
+function ensureLiveControlChannels() {
+  if (liveControls) return liveControls;
+  const rollback = (label, render) => (value, error) => { render(value); reportControlFailure(label, error); tick(); };
+  liveControls = {
+    pitch: createLiveControlChannel({
+      initialValue: clampControl($('pitch-slider')?.value, -12, 12, 0),
+      apply: value => invoke('set_pitch', { semitones: value }),
+      onOptimistic: renderPitch,
+      onConfirmed: value => { renderPitch(value); persistCurrentTrackAudioSettings({ pitch: value }); },
+      onRollback: rollback('키', renderPitch),
+    }),
+    tempo: createLiveControlChannel({
+      initialValue: clampControl($('tempo-slider')?.value, .5, 2, 1),
+      apply: value => invoke('set_tempo', { ratio: value }),
+      onOptimistic: renderTempo,
+      onConfirmed: value => { renderTempo(value); persistCurrentTrackAudioSettings({ tempo: value }); },
+      onRollback: rollback('속도', renderTempo),
+    }),
+    guide: createLiveControlChannel({
+      initialValue: clampControl(localStorage.getItem(MIX_KEY), 0, 100, 0), delayMs: 60,
+      apply: value => invoke('set_vocal_balance', { balance: value }),
+      onOptimistic: renderGuide,
+      onConfirmed: value => { renderGuide(value); localStorage.setItem(MIX_KEY, String(value)); },
+      onRollback: rollback('가이드 보컬', renderGuide),
+    }),
+    monitor: createLiveControlChannel({
+      initialValue: clampControl($('master-volume-slider')?.value, 0, 120, 100), delayMs: 60,
+      apply: value => invoke('set_master_volume', { volume: value }),
+      onOptimistic: renderMonitor,
+      onConfirmed: value => {
+        renderMonitor(value);
+        state.masterVolume = value;
+        localStorage.setItem('masterVolume', String(value));
+      },
+      onRollback: rollback('모니터', renderMonitor),
+    }),
+    vocal: createLiveControlChannel({
+      initialValue: state.vocalEnabled !== false,
+      apply: enabled => invoke('toggle_ai_feature', { feature: 'vocal', enabled }),
+      onOptimistic: renderVocalEnabled,
+      onConfirmed: enabled => {
+        renderVocalEnabled(enabled);
+        state.vocalEnabled = enabled;
+        localStorage.setItem('vocalEnabled', String(enabled));
+      },
+      onRollback: rollback('보컬 음원', renderVocalEnabled),
+    }),
+  };
+  return liveControls;
+}
+
+function updateGuideAvailability() {
+  const available = isMrReady(state.currentTrack);
+  const toggle = $('live-vocal-toggle');
+  const track = $('live-mix-track');
+  if (toggle) {
+    toggle.disabled = !available;
+    toggle.title = available ? '보컬 음원 켜기/끄기' : 'MR 분리가 필요한 곡입니다';
+  }
+  if (track) {
+    track.classList.toggle('unavailable', !available);
+    track.setAttribute('aria-disabled', available ? 'false' : 'true');
+    track.title = available ? '←→ 5씩' : 'MR 분리가 필요한 곡입니다';
+  }
+  const card = track?.closest('.live-card');
+  card?.classList.toggle('control-unavailable', !available);
+  let note = card?.querySelector('.live-control-unavailable-note');
+  if (!available && card && !note) {
+    note = document.createElement('div');
+    note.className = 'live-control-unavailable-note';
+    note.textContent = 'MR 분리 필요';
+    card.appendChild(note);
+  } else if (available) note?.remove();
+  return available;
+}
+
+async function syncLiveControlState({ applyStoredGuide = false } = {}) {
+  const controls = ensureLiveControlChannels();
+  try {
+    const mix = await mixerService.getState();
+    controls.pitch.sync(clampControl(mix?.pitch, -12, 12, controls.pitch.value));
+    controls.tempo.sync(clampControl(mix?.tempo, .5, 2, controls.tempo.value));
+    controls.monitor.sync(clampControl(mix?.masterVolume ?? mix?.master_volume, 0, 120, controls.monitor.value));
+    controls.vocal.sync((mix?.vocalEnabled ?? mix?.vocal_enabled) !== false);
+    if (applyStoredGuide) {
+      const stored = clampControl(localStorage.getItem(MIX_KEY), 0, 100, 0);
+      await controls.guide.set(stored, { flush: true });
+    } else {
+      controls.guide.sync(clampControl(mix?.vocalBalance ?? mix?.vocal_balance, 0, 100, controls.guide.value));
+    }
+  } catch (error) {
+    console.error('[Live] control state sync failed:', error);
+    showNotification('오디오 조절 상태를 확인하지 못했습니다. 현재 표시값을 유지합니다.', 'warning');
+  }
+  updateGuideAvailability();
+  tick();
+}
+
 /** 현재 곡 정보·재생 상태·조절값을 화면에 반영. 화면이 보일 때만 호출된다. */
 function tick() {
   const track = state.currentTrack;
+  const controlTrackPath = track?.path || '';
+  // 다른 곡을 직접 선택하면 방금 재생하던 곡은 이력이나 대기열에 남기지 않는다.
+  // 라이브 화면 밖의 곡 선택도 이 주기에서 감지하므로 진입 경로에 따라 달라지지 않는다.
+  if (controlTrackPath && lastLiveTrackPath && controlTrackPath !== lastLiveTrackPath) {
+    state.liveQueue = (state.liveQueue || []).filter((path) => path !== lastLiveTrackPath);
+    renderLiveQueue();
+  }
+  if (controlTrackPath) lastLiveTrackPath = controlTrackPath;
+  if (initialControlSyncDone && controlTrackPath !== lastControlTrackPath) {
+    lastControlTrackPath = controlTrackPath;
+    syncLiveControlState().catch(() => {});
+  }
 
   const titleEl = $('live-title');
   const artistEl = $('live-artist');
@@ -447,6 +643,17 @@ function tick() {
       ? [track.artist, track.genre].filter(Boolean).join(' · ') || '가수 미상'
       : '라이브러리에서 곡 선택';
   }
+  const musicMeta = getLiveKeyBpm(track);
+  const keyBpmEl = $('live-key-bpm');
+  const keyStatEl = $('live-key-stat');
+  const bpmStatEl = $('live-bpm-stat');
+  const keyValueEl = $('live-key-value');
+  const bpmValueEl = $('live-bpm-value');
+  if (keyValueEl) keyValueEl.textContent = musicMeta.key || '';
+  if (bpmValueEl) bpmValueEl.textContent = musicMeta.bpm == null ? '' : String(musicMeta.bpm);
+  if (keyStatEl) keyStatEl.hidden = musicMeta.key == null;
+  if (bpmStatEl) bpmStatEl.hidden = musicMeta.bpm == null;
+  if (keyBpmEl) keyBpmEl.hidden = musicMeta.key == null && musicMeta.bpm == null;
   if (artEl) {
     const thumb = track ? getThumbnailUrl(track.thumbnail) : null;
     const next = thumb || './assets/images/app-icon.png';
@@ -487,14 +694,15 @@ function tick() {
       waveEls[i]._on = on;
     }
   }
-  updateWaveCue(pos / 1000);
+  const lyricDisplayPosMs = getLyricDisplayClockMs(pos) ?? pos;
+  updateWaveCue(lyricDisplayPosMs / 1000);
   drawDetailedWaveform(pos / 1000);
   // 중앙 가사 텍스트는 여기서 그린다. rAF로 옮겨 봤더니 카운트다운 같은
   // 매 프레임 바뀌는 문구까지 60fps로 갈아치워져 읽을 수 없었다.
   // 진행도(칠하기)만 rAF가 맡는다 — 그건 프레임마다 움직여야 한다.
   // 시각은 진행도와 같은 시계에서 읽는다 — 텍스트와 칠하기가 다른 시간을
   // 보면 줄이 바뀌는 순간과 진행도가 어긋난다.
-  renderPerformerView((getPlaybackClockMs() ?? pos) / 1000);
+  renderPerformerView(lyricDisplayPosMs / 1000);
 
   const posEl = $('live-pos');
   const durEl = $('live-dur');
@@ -502,17 +710,21 @@ function tick() {
   if (durEl) durEl.textContent = formatTime(dur / 1000);
 
   const playBtn = $('live-play');
-  if (playBtn) playBtn.textContent = state.isPlaying ? '❚❚' : '▶';
+  if (playBtn) {
+    playBtn.innerHTML = brandIcon(state.isPlaying ? 'pause' : 'play');
+    playBtn.setAttribute('aria-label', state.isPlaying ? '일시정지' : '재생');
+    playBtn.setAttribute('aria-pressed', state.isPlaying ? 'true' : 'false');
+  }
 
   // 조절값 — 도크 슬라이더가 항상 진실의 원본
-  const pitch = parseFloat($('pitch-slider')?.value ?? '0') || 0;
+  const pitch = liveControls?.pitch.value ?? clampControl($('pitch-slider')?.value, -12, 12, 0);
   const keyEl = $('live-key-val');
   if (keyEl) {
     keyEl.textContent = pitch > 0 ? `+${pitch}` : `${pitch}`;
     keyEl.classList.toggle('changed', pitch !== 0);
   }
 
-  const ratioTempo = parseFloat($('tempo-slider')?.value ?? '1') || 1;
+  const ratioTempo = liveControls?.tempo.value ?? clampControl($('tempo-slider')?.value, .5, 2, 1);
   const tempoPct = Math.round(ratioTempo * 100);
   const tempoEl = $('live-tempo-val');
   if (tempoEl) {
@@ -521,7 +733,7 @@ function tick() {
   }
 
   // 보컬 음원 on/off — 도크의 '보컬' 토글이 진실의 원본이다.
-  const vocalOn = $('toggle-vocal')?.checked !== false;
+  const vocalOn = liveControls?.vocal.value ?? ($('toggle-vocal')?.checked !== false);
   const vocalBtn = $('live-vocal-toggle');
   if (vocalBtn) {
     vocalBtn.classList.toggle('on', vocalOn);
@@ -531,15 +743,14 @@ function tick() {
   $('live-mix-track')?.classList.toggle('muted', !vocalOn);
 
   // 반주 ↔ 가이드 보컬 믹스 (0 = 반주만, 100 = 보컬 100)
-  const savedMix = Number(localStorage.getItem(MIX_KEY));
-  const mix = Number.isFinite(savedMix) ? Math.max(0, Math.min(100, savedMix)) : 0;
+  const mix = liveControls?.guide.value ?? clampControl(localStorage.getItem(MIX_KEY), 0, 100, 0);
   const mixVal = $('live-mix-val');
   const mixFill = $('live-mix-fill');
   if (mixVal) mixVal.textContent = String(mix);
   if (mixFill) mixFill.style.width = `${mix}%`;
   $('live-mix-track')?.setAttribute('aria-valuenow', String(mix));
 
-  const mon = parseFloat($('master-volume-slider')?.value ?? '100') || 0;
+  const mon = liveControls?.monitor.value ?? clampControl($('master-volume-slider')?.value, 0, 120, 100);
   const monVal = $('live-mon-val');
   const monFill = $('live-mon-fill');
   if (monVal) monVal.textContent = String(Math.round(mon));
@@ -550,10 +761,11 @@ function tick() {
   // 재생 위치도 스크린리더가 읽을 수 있게 퍼센트로 알린다.
   $('live-wave')?.setAttribute('aria-valuenow', String(Math.round(ratio * 100)));
 
+  const guideAvailable = updateGuideAvailability();
   const summary = [
     ['live-summary-key', pitch > 0 ? `+${pitch}` : `${pitch}`, pitch !== 0],
     ['live-summary-tempo', `${tempoPct}`, tempoPct !== 100],
-    ['live-summary-vocal', `${mix}`, !vocalOn || mix !== 0],
+    ['live-summary-vocal', guideAvailable ? `${mix}` : 'MR 필요', !guideAvailable || !vocalOn || mix !== 0],
     ['live-summary-monitor', `${Math.round(mon)}`, mon !== 100],
   ];
   summary.forEach(([id, value, changed]) => {
@@ -583,6 +795,7 @@ export function renderLiveQueue() {
   if (!listEl) return;
 
   const queue = state.liveQueue || [];
+  prefetchNextLiveWaveform();
   const byPath = new Map((state.songLibrary || []).map((s, i) => [s.path, { ...s, originalIndex: i }]));
   // 라이브러리에서 사라진 곡은 큐에서도 조용히 뺀다.
   const curPath = state.currentTrack?.path;
@@ -617,8 +830,8 @@ export function renderLiveQueue() {
     return `
       <div class="live-q-item${isCur ? ' current' : ''}" data-path="${esc(t.path)}"
            data-queue-index="${queueIndex}" tabindex="0">
-        ${isCur ? '' : '<button type="button" class="live-q-drag-handle" data-q-drag aria-label="순서 끌어서 변경" title="끌어서 순서 변경">⠿</button>'}
-        <div class="live-q-num">${isCur ? '▶' : i + 1}</div>
+        ${isCur ? '' : `<button type="button" class="live-q-drag-handle" data-q-drag aria-label="순서 끌어서 변경" title="끌어서 순서 변경">${brandIcon('drag')}</button>`}
+        <div class="live-q-num">${isCur ? brandIcon('play') : i + 1}</div>
         <div class="live-q-body">
           <div class="live-q-title">${esc(t.title)}</div>
           <div class="live-q-sub">${esc(t.artist || '가수 미상')}</div>
@@ -708,13 +921,11 @@ export function renderLiveQueue() {
   });
 }
 
-async function selectLiveTrack(path, { recordHistory = true } = {}) {
+async function selectLiveTrack(path) {
   const index = (state.songLibrary || []).findIndex((song) => song.path === path);
   if (index < 0) return false;
   const currentPath = state.currentTrack?.path;
-  if (recordHistory && currentPath && currentPath !== path) {
-    state.livePlaybackHistory = appendLiveHistory(state.livePlaybackHistory, currentPath, path);
-  }
+  if (currentPath && currentPath !== path) removeFromLiveQueue(currentPath);
   const { selectTrack } = await import('./player.js');
   await selectTrack(index);
   renderLiveQueue();
@@ -737,16 +948,9 @@ export function setAsNextLiveTrack(path) {
   return changed;
 }
 
-export async function playPreviousLiveTrack() {
-  const available = new Set((state.songLibrary || []).map((song) => song.path));
-  const result = takePreviousLivePath(state.livePlaybackHistory, available);
-  state.livePlaybackHistory = result.history;
-  return result.path ? selectLiveTrack(result.path, { recordHistory: false }) : false;
-}
-
 /** 라이브 대기열에서 현재 곡의 바로 다음 곡을 재생한다.
- * 현재 곡이 큐 밖이면 첫 대기곡을 시작한다. 완료한 현재 항목만 큐에서 뺀다. */
-export async function playNextFromLiveQueue({ dropCurrentWithoutNext = false } = {}) {
+ * 자동 호출하지 않으며, 사용자가 다음 곡을 눌렀을 때만 실행한다. */
+export async function playNextFromLiveQueue() {
   const queue = Array.isArray(state.liveQueue) ? state.liveQueue : [];
   const currentPath = state.currentTrack?.path;
   const currentQueueIndex = currentPath ? queue.indexOf(currentPath) : -1;
@@ -754,12 +958,7 @@ export async function playNextFromLiveQueue({ dropCurrentWithoutNext = false } =
   const resolved = resolveNextLiveQueuePath(queue, currentPath, available);
   resolved.stalePaths.forEach((path) => removeFromLiveQueue(path));
   const nextPath = resolved.path;
-  if (!nextPath) {
-    // 자연 종료한 마지막 신청곡은 완료 처리한다. 수동 다음 버튼은 재생 중인
-    // 마지막 곡을 큐에서 지우지 않도록 기본값을 false로 둔다.
-    if (dropCurrentWithoutNext && currentQueueIndex >= 0) removeFromLiveQueue(currentPath);
-    return false;
-  }
+  if (!nextPath) return false;
 
   const libraryIndex = (state.songLibrary || []).findIndex((song) => song.path === nextPath);
   if (libraryIndex < 0) {
@@ -802,7 +1001,12 @@ export function initLiveScreen() {
     handlePlaybackToggle();
   });
   $('live-prev')?.addEventListener('click', async () => {
-    if (!(await playPreviousLiveTrack())) showNotification('라이브 이전 곡 이력이 없습니다.', 'info');
+    if (!state.currentTrack) return showNotification('먼저 곡을 선택해 주세요.', 'info');
+    const { seekTo } = await import('./audio.js');
+    state.currentProgressMs = 0;
+    state.targetProgressMs = 0;
+    await seekTo(0);
+    tick();
   });
   $('live-next')?.addEventListener('click', async () => {
     const advanced = await playNextFromLiveQueue();
@@ -961,6 +1165,8 @@ export function initLiveScreen() {
 
   $('live-controls-close')?.addEventListener('click', closeControls);
 
+  const controls = ensureLiveControlChannels();
+
   const setQueueDrawerOpen = (open) => {
     document.body.classList.toggle('live-queue-drawer-open', open);
     $('live-queue-drawer-toggle')?.setAttribute('aria-expanded', open ? 'true' : 'false');
@@ -970,23 +1176,20 @@ export function initLiveScreen() {
   });
 
   // ── 키 / 빠르기 / 가이드 보컬 (도크 슬라이더를 그대로 움직인다)
-  $('live-key-down')?.addEventListener('click', () => stepSlider('pitch-slider', -1, {}));
-  $('live-key-up')?.addEventListener('click', () => stepSlider('pitch-slider', +1, {}));
-  $('live-key-val')?.addEventListener('click', () => driveSlider('pitch-slider', 0));
+  $('live-key-down')?.addEventListener('click', () => controls.pitch.set(clampControl(controls.pitch.value - 1, -12, 12, 0), { flush: true }));
+  $('live-key-up')?.addEventListener('click', () => controls.pitch.set(clampControl(controls.pitch.value + 1, -12, 12, 0), { flush: true }));
+  $('live-key-val')?.addEventListener('click', () => controls.pitch.set(0, { flush: true }));
 
   // 보컬 음원 on/off — 도크의 '보컬' 체크박스를 그대로 움직인다.
   // 새 상태를 만들지 않아야 두 화면이 어긋나지 않는다.
   $('live-vocal-toggle')?.addEventListener('click', () => {
-    const box = $('toggle-vocal');
-    if (!box) return;
-    box.checked = !box.checked;
-    box.dispatchEvent(new Event('change', { bubbles: true }));
-    tick();
+    if (!updateGuideAvailability()) return;
+    controls.vocal.set(!controls.vocal.value, { flush: true });
   });
 
-  $('live-tempo-down')?.addEventListener('click', () => stepSlider('tempo-slider', -0.05, { decimals: 2 }));
-  $('live-tempo-up')?.addEventListener('click', () => stepSlider('tempo-slider', +0.05, { decimals: 2 }));
-  $('live-tempo-val')?.addEventListener('click', () => driveSlider('tempo-slider', '1.00'));
+  $('live-tempo-down')?.addEventListener('click', () => controls.tempo.set(clampControl(controls.tempo.value - .05, .5, 2, 1), { flush: true }));
+  $('live-tempo-up')?.addEventListener('click', () => controls.tempo.set(clampControl(controls.tempo.value + .05, .5, 2, 1), { flush: true }));
+  $('live-tempo-val')?.addEventListener('click', () => controls.tempo.set(1, { flush: true }));
 
   // ── 반주 ↔ 가이드 보컬 믹스
   //
@@ -996,27 +1199,10 @@ export function initLiveScreen() {
   // 도크의 vocal-balance 입력을 거치지 않고 백엔드를 직접 부른다 — 예전에는
   // 음원 관리의 '보컬' 토글이 꺼져 있으면 그 입력이 잠겨서, 라이브에서
   // 믹스를 못 만졌다. 두 화면의 조작이 서로를 막지 않아야 한다.
-  const readMix = () => {
-    const saved = Number(localStorage.getItem(MIX_KEY));
-    return Number.isFinite(saved) ? Math.max(0, Math.min(100, saved)) : 0;
-  };
-
-  const applyMix = async (pct) => {
-    const v = Math.max(0, Math.min(100, Math.round(pct)));
-    localStorage.setItem(MIX_KEY, String(v));
-    try {
-      await invoke('set_vocal_balance', { balance: v });
-    } catch (err) {
-      console.error('[Live] set_vocal_balance failed:', err);
-    }
-    // 음원 관리 쪽 표시도 같은 값으로 맞춘다(소리는 하나뿐이라 값은 공유한다).
-    const dockInput = $('vocal-balance');
-    if (dockInput) {
-      dockInput.value = String(v);
-      const label = $('vocal-balance-val');
-      if (label) label.textContent = `${v}%`;
-    }
-    tick();
+  const readMix = () => controls.guide.value;
+  const applyMix = (pct, { flush = false } = {}) => {
+    if (!updateGuideAvailability()) return;
+    controls.guide.set(Math.round(clampControl(pct, 0, 100, 0)), { flush });
   };
 
   // ── 막대 조절 — 클릭뿐 아니라 끌어서도 바뀌게 (포인터 드래그)
@@ -1026,13 +1212,14 @@ export function initLiveScreen() {
   };
 
   /** 막대 하나를 드래그 가능한 슬라이더로 만든다. 키보드 조작은 그대로. */
-  const makeDraggable = (trackEl, max, apply) => {
+  const makeDraggable = (trackEl, max, apply, flush) => {
     if (!trackEl) return;
     let dragging = false;
 
     const setFrom = (clientX) => apply(barRatio(trackEl, clientX) * max);
 
     trackEl.addEventListener('pointerdown', (e) => {
+      if (trackEl.getAttribute('aria-disabled') === 'true') return;
       if (e.button !== 0 && e.pointerType === 'mouse') return;
       dragging = true;
       // 포인터를 잡아 두면 막대 밖으로 나가도 계속 따라온다.
@@ -1052,28 +1239,28 @@ export function initLiveScreen() {
       dragging = false;
       trackEl.classList.remove('dragging');
       try { trackEl.releasePointerCapture(e.pointerId); } catch (_) {}
+      flush?.();
     };
     trackEl.addEventListener('pointerup', stop);
     trackEl.addEventListener('pointercancel', stop);
   };
 
-  makeDraggable($('live-mix-track'), 100, applyMix);
+  makeDraggable($('live-mix-track'), 100, applyMix, () => controls.guide.flush());
   $('live-mix-track')?.addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowRight') { e.preventDefault(); applyMix(readMix() + 5); }
-    else if (e.key === 'ArrowLeft') { e.preventDefault(); applyMix(readMix() - 5); }
+    if (e.key === 'ArrowRight') { e.preventDefault(); applyMix(readMix() + 5, { flush: true }); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); applyMix(readMix() - 5, { flush: true }); }
   });
 
   // 마스터 볼륨은 0~120 범위라 막대 100%가 120에 대응한다.
   const applyMon = (v) => {
-    driveSlider('master-volume-slider', Math.max(0, Math.min(120, Math.round(v))));
-    tick();
+    controls.monitor.set(Math.round(clampControl(v, 0, 120, 100)));
   };
-  const curMon = () => parseFloat($('master-volume-slider')?.value ?? '100') || 0;
+  const curMon = () => controls.monitor.value;
 
-  makeDraggable($('live-mon-track'), 120, applyMon);
+  makeDraggable($('live-mon-track'), 120, applyMon, () => controls.monitor.flush());
   $('live-mon-track')?.addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowRight') { e.preventDefault(); applyMon(curMon() + 5); }
-    else if (e.key === 'ArrowLeft') { e.preventDefault(); applyMon(curMon() - 5); }
+    if (e.key === 'ArrowRight') { e.preventDefault(); controls.monitor.set(curMon() + 5, { flush: true }); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); controls.monitor.set(curMon() - 5, { flush: true }); }
   });
 
   // ── 상단 바
@@ -1159,11 +1346,8 @@ export function initLiveScreen() {
   });
   $('live-picker-input')?.addEventListener('input', renderPicker);
 
-  // 앱 시작 시 저장된 믹스를 백엔드에 한 번 반영(재시작 후에도 유지되게).
-  const savedMix = readMix();
-  if (savedMix !== 0) {
-    invoke('set_vocal_balance', { balance: savedMix }).catch(() => {});
-  }
+  // 0도 유효한 저장값이다. 최초 초기화에서 반드시 백엔드에 반영한다.
+  syncLiveControlState({ applyStoredGuide: true }).finally(() => { initialControlSyncDone = true; });
 }
 
 /* ── 다음 곡 담기 패널 ──────────────────────────────────────
@@ -1315,7 +1499,7 @@ async function toggleDeviceMenu() {
 
   let devices = [];
   try {
-    devices = await invoke('list_output_devices');
+    devices = await audioDeviceService.listOutputDevices();
   } catch (err) {
     menu.innerHTML = '<div class="live-device-empty">장치 목록을 가져오지 못했습니다.</div>';
     return;
@@ -1326,7 +1510,7 @@ async function toggleDeviceMenu() {
   const row = (name, label, sub, active) => `
     <button type="button" class="live-device-item${active ? ' active' : ''}" role="menuitem"
             data-device="${esc(name)}">
-      <span class="live-device-check" aria-hidden="true">${active ? '✓' : ''}</span>
+      <span class="live-device-check" aria-hidden="true">${active ? brandIcon('check') : ''}</span>
       <span class="live-device-text">
         <span class="live-device-name">${esc(label)}</span>
         ${sub ? `<span class="live-device-sub">${esc(sub)}</span>` : ''}
@@ -1349,7 +1533,7 @@ async function selectDevice(name) {
   deviceBusy = true;
   try {
     if (state.isPlaying) showNotification('재생 중 출력 장치를 전환합니다. 순간적으로 소리가 끊길 수 있습니다.', 'info');
-    const resolved = await invoke('set_output_device', { name });
+    const resolved = await audioDeviceService.setOutputDevice(name);
     closeDeviceMenu();
     const el = $('live-device-name');
     if (el) el.textContent = resolved || '기본 장치';
@@ -1360,7 +1544,8 @@ async function selectDevice(name) {
   } catch (err) {
     const { showNotification } = await import('./utils.js');
     showNotification('장치를 바꾸지 못했습니다: ' + err, 'error');
-    syncDeviceChip();
+    await syncDeviceChip();
+    await syncLiveControlState();
   } finally {
     deviceBusy = false;
   }
@@ -1371,7 +1556,7 @@ async function syncDeviceChip() {
   const el = $('live-device-name');
   if (!el) return;
   try {
-    const name = await invoke('get_output_device');
+    const name = await audioDeviceService.getOutputDevice();
     el.textContent = name || '기본 장치';
   } catch (_) {
     el.textContent = '기본 장치';
@@ -1388,6 +1573,7 @@ export function showLiveScreen() {
   renderLiveQueue();
   renderSeparation();
   tick();
+  if (initialControlSyncDone) syncLiveControlState().catch(() => {});
   if (tickTimer) clearInterval(tickTimer);
   // 재생 위치·조절값을 주기적으로 따라간다(막대가 굵어 200ms로 충분).
   tickTimer = setInterval(() => {
@@ -1404,6 +1590,7 @@ export function showLiveScreen() {
 }
 
 let lyricRafId = null;
+let lyricRafRenderedIndex = null;
 
 /**
  * 오버레이가 쓰는 것과 같은 진행도 계산.
@@ -1440,6 +1627,22 @@ function startLyricProgressLoop() {
     // 시계가 아직 안 붙었으면(로드 전) 기존 값으로 물러난다.
     const posMs = getPlaybackClockMs() ?? (state.currentProgressMs || 0);
 
+    // 줄 경계는 200ms tick을 기다리지 않고 같은 프레임에 텍스트도 바꾼다.
+    // 카운트다운 등 읽기용 문구를 매 프레임 다시 쓰지는 않고, 인덱스가 실제로
+    // 바뀐 순간에만 전체 수행자 모델을 한 번 렌더한다.
+    const displayMs = getLyricDisplayClockMs(state.currentProgressMs || 0) ?? posMs;
+    const performerModel = buildPerformerLyricModel(
+      state.currentLyrics,
+      state.currentLyricIndex,
+      displayMs / 1000,
+      state.currentMarkers,
+    );
+    const cueKey = `${performerModel.displayIndex}`;
+    if (cueKey !== lyricRafRenderedIndex) {
+      renderPerformerView(displayMs / 1000);
+      lyricRafRenderedIndex = cueKey;
+    }
+
     // 여기서는 **진행도만** 칠한다.
     //
     // 한때 renderPerformerView(텍스트 전체)도 이 루프에서 불렀다. 그런데 그
@@ -1452,7 +1655,7 @@ function startLyricProgressLoop() {
     // 계산을 여기서 또 하면 공연자용 규칙(다음 줄 미리 보기·끝난 줄 붙들기)이
     // 섞여 오버레이와 어긋난다 — 실제로 끝난 줄이 100%로 남아 있었다.
     const win = state.overlayLyricWindow;
-    const shown = state.currentLyricIndex;
+    const shown = performerModel.displayIndex;
 
     // 지금 화면에 띄운 줄이 오버레이가 말하는 줄과 다르면(리드인으로 미리
     // 띄운 다음 줄 등) 아직 부르기 전이므로 0으로 둔다. 남아 있던 값을 그대로
@@ -1462,10 +1665,7 @@ function startLyricProgressLoop() {
       ratio = progressRatio(win.words, win.startMs, win.endMs, posMs);
     }
 
-    const pct = `${(ratio * 100).toFixed(2)}%`;
-    if (curEl.style.getPropertyValue('--karaoke-progress') !== pct) {
-      curEl.style.setProperty('--karaoke-progress', pct);
-    }
+    paintLyricElementProgress(curEl, ratio);
     paintLiveLyricProgress(ratio);
   };
   lyricRafId = requestAnimationFrame(frame);
@@ -1478,6 +1678,8 @@ function stopLyricProgressLoop() {
 }
 
 export function hideLiveScreen() {
+  liveControls?.guide.flush().catch(() => {});
+  liveControls?.monitor.flush().catch(() => {});
   stopLyricProgressLoop();
   if (tickTimer) {
     clearInterval(tickTimer);

@@ -96,9 +96,10 @@ class ConvISTFT(nn.Module):
 class ExportWrapper(nn.Module):
     """MelBandRoformer.forward를 complex 없이 재구현(추론 전용, batch=1)."""
 
-    def __init__(self, model, chunk: int):
+    def __init__(self, model, chunk: int, all_stems: bool = False):
         super().__init__()
         self.model = model
+        self.all_stems = all_stems
         kw = model.stft_kwargs
         n_fft, hop, win = kw["n_fft"], kw["hop_length"], kw["win_length"]
         assert not kw["normalized"]
@@ -147,25 +148,28 @@ class ExportWrapper(nn.Module):
             x = freq_tr(x)
             x = rearrange(x, "(b t) f d -> b t f d", b=B)
 
-        mask = m.mask_estimators[0](x)               # [B, T', Fb*2]
-        mask = rearrange(mask, "b t (f c) -> b f t c", c=2)
-        mr, mi = mask[..., 0], mask[..., 1]
+        estimates = []
+        estimators = m.mask_estimators if self.all_stems else m.mask_estimators[:1]
+        for estimator in estimators:
+            mask = estimator(x)                     # [B, T', Fb*2]
+            mask = rearrange(mask, "b t (f c) -> b f t c", c=2)
+            mr, mi = mask[..., 0], mask[..., 1]
 
-        # 밴드 마스크를 주파수로 평균(상수 행렬) 후 complex 곱 (실수 전개)
-        mr = torch.einsum("gf,bft->bgt", self.band_sum, mr)
-        mi = torch.einsum("gf,bft->bgt", self.band_sum, mi)
-        or_ = re * mr - im * mi
-        oi_ = re * mi + im * mr
+            # 밴드 마스크를 주파수로 평균(상수 행렬) 후 complex 곱 (실수 전개)
+            mr = torch.einsum("gf,bft->bgt", self.band_sum, mr)
+            mi = torch.einsum("gf,bft->bgt", self.band_sum, mi)
+            or_ = (re * mr - im * mi) * self.dc_mask
+            oi_ = (re * mi + im * mr) * self.dc_mask
 
-        or_ = or_ * self.dc_mask
-        oi_ = oi_ * self.dc_mask
+            # (f s) → 채널 분리 후 iSTFT
+            or_ = rearrange(or_, "b (f s) t -> (b s) f t", s=S)
+            oi_ = rearrange(oi_, "b (f s) t -> (b s) f t", s=S)
+            estimates.append(self.istft(or_, oi_).reshape(B, S, T))
 
-        # (f s) → 채널 분리 후 iSTFT
-        or_ = rearrange(or_, "b (f s) t -> (b s) f t", s=S)
-        oi_ = rearrange(oi_, "b (f s) t -> (b s) f t", s=S)
-        dry = self.istft(or_, oi_).reshape(B, S, T)
-
-        return torch.stack([dry, mix - dry], dim=1)  # [1, 2(stems), 2, T]
+        if self.all_stems:
+            return torch.stack(estimates, dim=1)     # [B, stems, channels, T]
+        dry = estimates[0]
+        return torch.stack([dry, mix - dry], dim=1)  # [B, 2(stems), channels, T]
 
 # ----------------------------------------------------------------- Pipeline
 def main():

@@ -10,27 +10,41 @@
  */
 import { state } from '../state.js';
 import { elements } from './elements.js';
+import { brandIcon } from '../brand-icons.js';
 
 /** 도크 하단 전송부 */
 function syncDock() {
   if (elements.togglePlayBtn) {
     elements.togglePlayBtn.classList.toggle('is-playing', state.isPlaying);
+    elements.togglePlayBtn.setAttribute('aria-label', state.isPlaying ? '일시정지' : '재생');
+    elements.togglePlayBtn.setAttribute('aria-pressed', state.isPlaying ? 'true' : 'false');
   }
 }
 
 /** 라이브 화면의 큰 재생 버튼 (숨어 있으면 건너뛴다) */
 function syncLive() {
   const btn = document.getElementById('live-play');
-  if (btn) btn.textContent = state.isPlaying ? '❚❚' : '▶';
+  if (btn) {
+    btn.innerHTML = brandIcon(state.isPlaying ? 'pause' : 'play');
+    btn.setAttribute('aria-label', state.isPlaying ? '일시정지' : '재생');
+    btn.setAttribute('aria-pressed', state.isPlaying ? 'true' : 'false');
+  }
 }
 
 /** 가사 싱크 편집기의 재생 버튼 */
 function syncAlignment() {
   const btn = document.getElementById('play-btn');
-  if (!btn) return;
-  btn.innerHTML = state.isPlaying
-    ? '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>'
-    : '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+  if (btn) {
+    btn.innerHTML = brandIcon(state.isPlaying ? 'pause' : 'play');
+    btn.setAttribute('aria-label', state.isPlaying ? '일시정지' : '재생');
+    btn.setAttribute('aria-pressed', state.isPlaying ? 'true' : 'false');
+    btn.title = state.isPlaying ? '일시정지 (Space)' : '재생 (Space)';
+  }
+  const status = document.getElementById('alignment-playback-status');
+  if (status) {
+    status.textContent = state.isPlaying ? '재생 중 · Space로 일시정지' : '일시정지 · Space로 재생';
+    status.classList.toggle('playing', state.isPlaying);
+  }
 }
 
 /**

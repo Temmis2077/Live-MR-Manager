@@ -1,7 +1,7 @@
 /**
  * OBS overlay customization control listeners
  */
-import { updateOverlayLyrics, updateOverlayStyle, getLanAddresses } from '../../overlay-api.js';
+import { updateOverlayStyle, getLanAddresses } from '../../overlay-api.js';
 import { getLineVisibility, setLineVisibility } from '../../lrc-parser.js';
 import { state } from '../../state.js';
 
@@ -34,6 +34,26 @@ function setDropdownValue(dropdownId, hiddenInputId, value) {
   });
 }
 
+/** 예전 info/lyrics·byTarget 분리 저장을 하나의 공용 디자인으로 합친다. */
+function normalizeOverlayConfig(raw) {
+  let config = raw && typeof raw === 'object' ? { ...raw } : {};
+  if (config.info || config.lyrics) {
+    const legacy = config.info || config.lyrics || {};
+    config = { ...legacy, ...config };
+    delete config.info;
+    delete config.lyrics;
+  }
+  if (config.byTarget) {
+    // 두 값이 다르면 기존 기본 화면이던 곡 정보 설정을 우선한다.
+    const legacy = config.byTarget.info || config.byTarget.lyrics || {};
+    for (const key of ['fontSize', 'effectFloat', 'effectGlow', 'visibility', 'design']) {
+      if (config[key] === undefined && legacy[key] !== undefined) config[key] = legacy[key];
+    }
+    delete config.byTarget;
+  }
+  return config;
+}
+
 export function initOverlayListeners() {
   const overlayScale = document.getElementById('overlay-scale');
   const overlayScaleVal = document.getElementById('overlay-scale-val');
@@ -58,6 +78,15 @@ export function initOverlayListeners() {
   const overlayLanStatus = document.getElementById('overlay-lan-status');
   const overlayEffectFloat = document.getElementById('overlay-effect-float');
   const overlayEffectGlow = document.getElementById('overlay-effect-glow');
+  let lastPreviewMessage = null;
+
+  const sendPreviewStyle = () => {
+    if (!lastPreviewMessage || !overlayIframe?.contentWindow) return;
+    const origin = window.location.origin && window.location.origin !== 'null'
+      ? window.location.origin
+      : '*';
+    overlayIframe.contentWindow.postMessage(lastPreviewMessage, origin);
+  };
 
   const resizeOverlayPreview = () => {
     if (!overlayIframe || !overlayPreviewWrapper) return;
@@ -81,6 +110,11 @@ export function initOverlayListeners() {
     overlayIframe.style.border = 'none';
     overlayIframe.style.background = 'transparent';
   };
+
+  overlayIframe?.addEventListener('load', () => {
+    resizeOverlayPreview();
+    sendPreviewStyle();
+  });
 
   const setupPalette = (paletteId, colorInput, hexInput) => {
     const palette = document.getElementById(paletteId);
@@ -215,29 +249,15 @@ export function initOverlayListeners() {
     if (!skipSave) {
           const saved = localStorage.getItem('overlay-settings');
           let config = {};
-          try { config = JSON.parse(saved) || {}; } catch(e) {}
-
-          // 이전 형식(info/lyrics 분리 저장) 마이그레이션: 분리된 키가 있으면 info 값을 우선 통합
-          if (config.info || config.lyrics) {
-            const migrated = config.info || config.lyrics || {};
-            config = { ...migrated, isForceVisible: config.isForceVisible };
-          }
+          try { config = normalizeOverlayConfig(JSON.parse(saved)); } catch(e) {}
 
           // 색·글씨체는 두 오버레이가 같은 톤을 유지해야 하므로 공용으로 둔다
           // (백엔드도 색은 대상 간에 맞춰 준다).
           Object.assign(config, {
-            scale, font, color, textColor, bgOpacity, rounding, bgColor, animationDirection
+            scale, font, color, textColor, bgOpacity, rounding, bgColor, animationDirection,
+            fontSize, effectFloat, effectGlow, visibility, design
           });
           config.isForceVisible = isForceVisible;
-
-          // 대상별 설정 — 곡 정보와 가사는 화면에서 하는 일이 달라 효과·글자
-          // 크기·표시 항목이 같을 이유가 없다. 예전에는 하나로 묶여 있어서
-          // 가사에 글로우를 주면 곡 정보 카드까지 같이 빛났다.
-          config.byTarget = config.byTarget || {};
-          config.byTarget[currentTarget] = {
-            ...(config.byTarget[currentTarget] || {}),
-            fontSize, effectFloat, effectGlow, visibility, design,
-          };
 
           localStorage.setItem('overlay-settings', JSON.stringify(config));
         }
@@ -286,6 +306,39 @@ export function initOverlayListeners() {
         : `overlay-info.html?preview=true&cb=${OVERLAY_CACHE_BUST}`;
     }
     resizeOverlayPreview();
+
+    // iframe 외부의 맞춤 배율과 콘텐츠 자체 배율을 분리한다. 이 메시지는
+    // 미리보기 전용이며 저장·백엔드 응답을 기다리지 않고 즉시 반영된다.
+    lastPreviewMessage = {
+      type: 'osw-overlay-preview-style',
+      target: currentTarget,
+      style: {
+        scale: parseFloat(scale),
+        font,
+        color,
+        textColor,
+        text_color: textColor,
+        bgColor,
+        bg_color: bgColor,
+        bgOpacity,
+        bg_opacity: bgOpacity,
+        rounding,
+        animationDirection,
+        animation_direction: animationDirection,
+        fontSize,
+        font_size: fontSize,
+        effectFloat,
+        effect_float: effectFloat,
+        effectGlow,
+        effect_glow: effectGlow,
+        visibility,
+        ...design,
+        outline_width: design.outlineWidth,
+        outline_color: design.outlineColor,
+        gradient_color: design.gradientColor,
+      },
+    };
+    sendPreviewStyle();
 
         // 통합 설정 — info/lyrics 양쪽에 동일한 스타일을 보낸다
         try {
@@ -476,23 +529,12 @@ export function initOverlayListeners() {
 
         if (mode === 'lyrics') {
           overlayIframe.src = `overlay-lyrics.html?preview=true&cb=${OVERLAY_CACHE_BUST}`;
-          // 미리보기에는 예시 문구를 채운다. 현재 줄이 비어 있으면 글자 크기·
-          // 색·그림자를 아무것도 확인할 수 없어 설정을 눈으로 맞출 수 없다.
-          // 실제 가사가 아닌 안내 문구를 쓴다.
-          await updateOverlayLyrics({
-            current: "지금 부르는 줄이 이렇게 보입니다",
-            next: "다음 줄은 이렇게 흐리게 따라옵니다",
-            index: 0,
-          }).catch(err => console.error(err));
         } else {
           overlayIframe.src = `overlay-info.html?preview=true&cb=${OVERLAY_CACHE_BUST}`;
-          await updateOverlayLyrics({ current: "", next: "" }).catch(err => console.error(err));
         }
-        // 대상이 바뀌었으니 그 대상의 저장값을 다시 불러온다.
-        // updateOverlaySettings를 바로 부르면 안 된다 — 그건 지금 UI 값을
-        // 새 대상에 '쓰는' 동작이라, 이전 탭의 효과·표시 항목이 그대로
-        // 옮겨 붙는다. 읽기(load)가 먼저고 쓰기는 그다음이다.
-        loadOverlaySettings();
+        // 탭은 렌더 대상만 바꾼다. 디자인 폼과 저장값은 하나이므로 다시
+        // 불러오지 않고 같은 값을 새 미리보기에 그대로 적용한다.
+        updateOverlaySettings(true);
         requestAnimationFrame(resizeOverlayPreview);
       };
     });
@@ -500,14 +542,8 @@ export function initOverlayListeners() {
   const loadOverlaySettings = () => {
       const saved = localStorage.getItem('overlay-settings');
       let config = {};
-      try { config = JSON.parse(saved) || {}; } catch(e) {}
-
-      // 이전 형식(info/lyrics 분리 저장) 마이그레이션: 분리된 키가 있으면 info 값을 우선 통합
-      if (config.info || config.lyrics) {
-        const migrated = config.info || config.lyrics || {};
-        config = { ...migrated, isForceVisible: config.isForceVisible };
-        localStorage.setItem('overlay-settings', JSON.stringify(config));
-      }
+      try { config = normalizeOverlayConfig(JSON.parse(saved)); } catch(e) {}
+      localStorage.setItem('overlay-settings', JSON.stringify(config));
 
       const defaults = {
         scale: 1.0,
@@ -561,21 +597,13 @@ export function initOverlayListeners() {
       setDropdownValue('overlay-animation-direction-dropdown', 'overlay-animation-direction', final.animationDirection);
     }
 
-    // 효과·글자 크기·표시 항목은 대상별로 저장된다. 지금 보고 있는 탭의 값을
-    // 읽되, 없으면 예전 통합 저장값(final)으로 넘어간다.
-    const activeTabNow = document.querySelector('.preview-tab.active');
-    const targetNow = (activeTabNow && activeTabNow.dataset.previewMode === 'lyrics') ? 'lyrics' : 'info';
-    const perTarget = (config.byTarget && config.byTarget[targetNow]) || {};
-    const effFloat = perTarget.effectFloat !== undefined ? perTarget.effectFloat : final.effectFloat;
-    const effGlow = perTarget.effectGlow !== undefined ? perTarget.effectGlow : final.effectGlow;
-
-    if (overlayEffectFloat) overlayEffectFloat.checked = !!effFloat;
-    if (overlayEffectGlow) overlayEffectGlow.checked = !!effGlow;
+    if (overlayEffectFloat) overlayEffectFloat.checked = !!final.effectFloat;
+    if (overlayEffectGlow) overlayEffectGlow.checked = !!final.effectGlow;
 
     const fsInput = document.getElementById('overlay-font-size');
-    if (fsInput && perTarget.fontSize) fsInput.value = perTarget.fontSize;
+    if (fsInput) fsInput.value = final.fontSize || 22;
 
-    const d = perTarget.design || {};
+    const d = final.design || {};
     const setVal = (id, v) => { const el = document.getElementById(id); if (el && v !== undefined) el.value = v; };
     setVal('overlay-outline-width', d.outlineWidth ?? 0);
     setVal('overlay-outline-color', d.outlineColor ?? '000000');
@@ -592,7 +620,7 @@ export function initOverlayListeners() {
 
     // 표시 항목 — 저장값이 없는 항목은 HTML의 기본 checked 상태를 그대로 둔다
     // (예전 사용자는 이 설정 자체가 없으므로 예전과 같은 화면이 되어야 한다).
-    const savedVis = perTarget.visibility || final.visibility || {};
+    const savedVis = final.visibility || {};
     document.querySelectorAll('.ov-vis-toggle').forEach((el) => {
       const key = el.dataset.vis;
       if (key && savedVis[key] !== undefined) el.checked = savedVis[key] === true;
@@ -604,19 +632,14 @@ export function initOverlayListeners() {
   const syncAllOverlayStylesToBackend = async () => {
       const saved = localStorage.getItem('overlay-settings');
       let config = {};
-      try { config = JSON.parse(saved) || {}; } catch (e) {}
-
-      // 이전 형식 마이그레이션
-      if (config.info || config.lyrics) {
-        const migrated = config.info || config.lyrics || {};
-        config = { ...migrated, isForceVisible: config.isForceVisible };
-      }
+      try { config = normalizeOverlayConfig(JSON.parse(saved)); } catch (e) {}
+      localStorage.setItem('overlay-settings', JSON.stringify(config));
 
       const isForceVisible = config.isForceVisible === true;
       const themeMode = document.documentElement.getAttribute('data-theme') || 'dark';
       const targets = ['info', 'lyrics'];
 
-      // 색·글씨체는 공용, 효과·글자 크기·표시 항목은 대상별.
+      // 모든 디자인 값은 공용이며 target은 어느 HTML에 렌더할지만 정한다.
       const defaults = {
         scale: 1.0,
         color: '8b5cf6',
@@ -633,8 +656,6 @@ export function initOverlayListeners() {
       const final = { ...defaults, ...config };
 
       for (const target of targets) {
-        // 대상별 저장값이 있으면 그것을, 없으면 예전 통합값을 쓴다.
-        const perTarget = (config.byTarget && config.byTarget[target]) || {};
         try {
           await updateOverlayStyle({
             target,
@@ -648,11 +669,11 @@ export function initOverlayListeners() {
             isForceVisible,
             animationDirection: final.animationDirection || 'left',
             themeMode,
-            fontSize: perTarget.fontSize || final.fontSize || 22,
-            effectFloat: perTarget.effectFloat !== undefined ? !!perTarget.effectFloat : !!final.effectFloat,
-            effectGlow: perTarget.effectGlow !== undefined ? !!perTarget.effectGlow : !!final.effectGlow,
-            visibility: perTarget.visibility || final.visibility,
-            design: perTarget.design
+            fontSize: final.fontSize || 22,
+            effectFloat: !!final.effectFloat,
+            effectGlow: !!final.effectGlow,
+            visibility: final.visibility,
+            design: final.design
           });
         } catch (err) {
           console.error(`Failed to sync ${target} overlay style:`, err);

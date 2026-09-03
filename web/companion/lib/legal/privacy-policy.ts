@@ -1,9 +1,9 @@
-export const PRIVACY_EFFECTIVE_DATE = "2026년 6월 27일";
+export const PRIVACY_EFFECTIVE_DATE = "2026년 8월 30일";
 
 export const GITHUB_ISSUES_URL =
   "https://github.com/Temmis2077/OSW/issues";
 
-export const QA_URL = "https://lmrm.vercel.app/qa";
+export const QA_URL = "https://companion-six-kappa.vercel.app/qa";
 
 export type LegalTable = {
   headers: string[];
@@ -24,7 +24,7 @@ export const PRIVACY_SECTIONS: LegalSection[] = [
     id: "intro",
     title: "1. 총칙",
     paragraphs: [
-      "OSW(이하 「서비스」)는 Windows 데스크톱 앱과 Companion 웹사이트(lmrm.vercel.app)를 통해 방송·연습용 MR 관리 및 멜로밍 노래책 연동 안내를 제공합니다.",
+      "OSW(이하 「서비스」)는 Windows 데스크톱 앱과 Companion 웹사이트(companion-six-kappa.vercel.app)를 통해 방송·연습용 MR 관리와 도움말을 제공합니다. 멜로밍 연동은 현재 앱에서 비활성 상태입니다.",
       "본 개인정보 처리방침은 서비스 이용 과정에서 처리되는 정보의 범위, 목적, 보유 기간 등을 설명합니다.",
       "개인정보 처리자: 총괄 프로듀싱 Temmis2077",
       `시행일: ${PRIVACY_EFFECTIVE_DATE}`,
@@ -36,7 +36,7 @@ export const PRIVACY_SECTIONS: LegalSection[] = [
     id: "items",
     title: "2. 처리하는 개인정보 항목",
     paragraphs: [
-      "서비스는 별도의 회원가입을 운영하지 않습니다. 멜로밍 계정 연동·기능 사용 여부에 따라 아래 정보가 처리될 수 있습니다.",
+      "서비스는 별도의 회원가입을 운영하지 않습니다. 현재 앱의 멜로밍 연동 UI는 비활성입니다. 아래 멜로밍 항목은 개발용 웹 로그인 또는 향후 연동 기능을 사용한 경우에만 처리될 수 있습니다.",
       "OSW는 MR 분리·재생에 사용하는 음원 파일을 서버에 업로드하지 않습니다. 멜로밍과 주고받는 정보는 곡 제목·아티스트·URL·가사 텍스트·숙련도·난이도 등 노래책(신청곡) 메타데이터에 한합니다.",
     ],
     list: [

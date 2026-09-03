@@ -44,17 +44,15 @@
 
   <!-- 파일 드롭존 오버레이 삭제됨 (전역 기능 제거) -->
 
-  <!-- 사이드바 -->
-  <nav class="sidebar">
+  <!-- 이전 사이드바 마크업은 번들 백업 호환을 위한 비활성 템플릿이다.
+       실제 화면 전환과 도구 실행은 app-bar.js의 APP_ACTIONS만 사용한다. -->
+  <template id="legacy-navigation">
     <div class="logo-container">
       <div class="logo-main">
         <img src="./assets/images/osw-mark.svg" alt="OSW" class="logo-icon">
         <div class="logo-text-group">
           <div class="logo-text logo-greek">Ο.Σ.Ω</div>
         </div>
-      </div>
-      <div class="logo-badge-row">
-        <span class="beta-badge">BETA</span>
       </div>
     </div>
 
@@ -169,7 +167,7 @@
         <span>설정</span>
       </div>
     </div>
-  </nav>
+  </template>
 
   <!-- 메인 컨텐츠 영역 -->
   <main class="viewport">
@@ -296,9 +294,9 @@
       <div class="scroll-area">
         <!-- 음원 관리 3단 레이아웃 (시안) — 좌: 보관함·태그 / 중: 곡 목록 / 우: 인스펙터.
              음악 탭에서만 3단으로 펼치고, 다른 탭에서는 library-layout 자체를 숨긴다. -->
-        <div class="library-layout" id="library-layout">
+        <div class="library-layout workspace workspace--library" id="library-layout">
 
-          <aside class="lib-side" id="lib-side">
+          <aside class="lib-side workspace-panel workspace-panel--secondary" id="lib-side">
             <div class="lib-side-scroll">
               <div class="lib-side-title">보관함 <span class="lib-side-hint">어디 음악인가</span></div>
               <div class="lib-coll-list" id="lib-coll-list"></div>
@@ -310,7 +308,7 @@
             <div class="lib-side-foot" id="lib-side-foot"></div>
           </aside>
 
-          <div class="lib-center" id="lib-center">
+          <div class="lib-center workspace-main" id="lib-center">
             <!-- 선택 모드 일괄 작업 바 (선택 곡이 있을 때만 표시) -->
             <!-- 선택 모드 일괄 작업 바 — 예전의 '곡 정보 관리자' 모달이 하던 일을
                  표 안에서 바로 한다(따로 창을 열지 않는다). -->
@@ -362,11 +360,13 @@
             </div>
           </div>
 
-          <aside class="lib-inspector" id="lib-inspector"></aside>
+          <aside class="lib-inspector workspace-panel workspace-panel--secondary" id="lib-inspector"></aside>
+          <button type="button" class="lib-panel-toggle lib-panel-toggle--filters" id="lib-filters-toggle" aria-controls="lib-side" aria-expanded="false">분류</button>
+          <button type="button" class="lib-panel-toggle lib-panel-toggle--inspector" id="lib-inspector-toggle" aria-controls="lib-inspector" aria-expanded="false">곡 정보</button>
         </div>
 
         <!-- 라이브 (공연 리모컨) — claude.ai/design 시안의 '라이브' 화면 -->
-        <div class="tab-content live-page" id="live-page" style="display: none;">
+        <div class="tab-content live-page workspace workspace--live" id="live-page" style="display: none;">
           <div class="live-topbar">
             <div class="live-topbar-left">
               <span class="live-mode-label">라이브</span>
@@ -403,7 +403,7 @@
           </div>
 
           <div class="live-body">
-            <div class="live-main">
+            <div class="live-main workspace-main">
               <div class="live-now">
                 <div class="live-art">
                   <img id="live-art-img" alt="" src="./assets/images/app-icon.png">
@@ -412,6 +412,16 @@
                   <div class="live-badges" id="live-badges"></div>
                   <div class="live-title" id="live-title">재생 중인 곡 없음</div>
                   <div class="live-artist" id="live-artist">라이브러리에서 곡을 골라 주세요</div>
+                </div>
+                <div class="live-key-bpm" id="live-key-bpm" hidden aria-label="현재 곡의 키와 BPM">
+                  <div class="live-music-stat" id="live-key-stat" hidden>
+                    <span class="live-music-stat-label">KEY</span>
+                    <span class="live-key-value" id="live-key-value"></span>
+                  </div>
+                  <div class="live-music-stat" id="live-bpm-stat" hidden>
+                    <span class="live-music-stat-label">BPM</span>
+                    <span class="live-bpm-value" id="live-bpm-value"></span>
+                  </div>
                 </div>
               </div>
 
@@ -448,9 +458,9 @@
               </div>
 
               <div class="live-transport">
-                <button type="button" class="live-tp-btn" id="live-prev" title="이전 곡">◀◀</button>
-                <button type="button" class="live-tp-play" id="live-play" title="재생 / 일시정지">▶</button>
-                <button type="button" class="live-tp-btn" id="live-next" title="다음 곡">▶▶</button>
+                <button type="button" class="live-tp-btn" id="live-prev" title="현재 곡 처음부터" aria-label="현재 곡 처음부터"><span class="osw-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 5v14M18 6l-8 6 8 6z"/></svg></span></button>
+                <button type="button" class="live-tp-play" id="live-play" title="재생 / 일시정지" aria-label="재생" aria-pressed="false"><span class="osw-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m8.5 5.5 10 6.5-10 6.5z"/></svg></span></button>
+                <button type="button" class="live-tp-btn" id="live-next" title="다음 곡" aria-label="다음 곡"><span class="osw-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M18 5v14M6 6l8 6-8 6z"/></svg></span></button>
               </div>
 
               <div class="live-control-summary" id="live-control-summary">
@@ -524,11 +534,11 @@
               <div class="live-health" id="live-health" aria-live="polite"></div>
             </div>
 
-            <aside class="live-queue">
+            <aside class="live-queue workspace-panel workspace-panel--detail">
               <div class="live-queue-head">
                 <div>
-                  <div class="live-queue-title">실시간 플레이리스트</div>
-                  <div class="live-queue-subtitle">드래그 또는 Alt+↑↓로 순서 변경</div>
+                  <div class="live-queue-title">이번 라이브 대기열</div>
+                  <div class="live-queue-subtitle">자동재생 안 함 · 앱을 닫으면 비워짐</div>
                 </div>
                 <div class="live-queue-count" id="live-queue-count">0곡</div>
               </div>
@@ -592,7 +602,7 @@
 
         <!-- Overlay Preview Tab -->
         <section id="overlay-tab" class="tab-content" style="display: none;">
-          <div class="overlay-tab-container">
+          <div class="overlay-tab-container workspace workspace--overlay">
             <div class="preview-tabs-container">
               <div class="preview-tab active" data-preview-mode="playing">현재 곡 정보</div>
               <div class="preview-tab" data-preview-mode="lyrics">가사 미리보기</div>
@@ -767,7 +777,7 @@
                           <!-- 다른 색 항목과 같은 방식: 버튼 위에 투명한 color input을
                                깔아 네이티브 색상 창이 버튼 자리에서 열리게 한다. -->
                           <span class="color-picker-slot">
-                            <button class="btn-custom-color-picker" onclick="document.getElementById('overlay-outline-color-native').click()" title="외곽선 색 선택기">
+                            <button class="btn-custom-color-picker" onclick="document.getElementById('overlay-outline-color-native').click()" title="외곽선 색 선택기" aria-label="외곽선 색 선택">
                               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19l9 2-2-9-9-9-9 9 2 9 9-2zM9 12l2 2m4-8l2 2"></path></svg>
                             </button>
                             <input type="color" id="overlay-outline-color-native" value="#000000" class="color-picker-native">
@@ -796,7 +806,7 @@
                           <!-- 다른 색 항목과 같은 방식: 버튼 위에 투명한 color input을
                                깔아 네이티브 색상 창이 버튼 자리에서 열리게 한다. -->
                           <span class="color-picker-slot">
-                            <button class="btn-custom-color-picker" onclick="document.getElementById('overlay-gradient-color-native').click()" title="그라디언트 색 선택기">
+                            <button class="btn-custom-color-picker" onclick="document.getElementById('overlay-gradient-color-native').click()" title="그라디언트 색 선택기" aria-label="그라디언트 색 선택">
                               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19l9 2-2-9-9-9-9 9 2 9 9-2zM9 12l2 2m4-8l2 2"></path></svg>
                             </button>
                             <input type="color" id="overlay-gradient-color-native" value="#000000" class="color-picker-native">
@@ -845,7 +855,7 @@
                               <input type="text" id="overlay-color-hex" value="8b5cf6" maxlength="6" class="hex-text-input">
                             </div>
                             <span class="color-picker-slot">
-                              <button class="btn-custom-color-picker" onclick="document.getElementById('overlay-color').click()" title="시스템 색상 선택기">
+                              <button class="btn-custom-color-picker" onclick="document.getElementById('overlay-color').click()" title="시스템 색상 선택기" aria-label="강조 색 선택">
                               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19l9 2-2-9-9-9-9 9 2 9 9-2zM9 12l2 2m4-8l2 2"></path></svg>
                             </button>
                             <input type="color" id="overlay-color" value="#8b5cf6" class="color-picker-native">
@@ -875,7 +885,7 @@
                               <input type="text" id="overlay-text-color-hex" value="ffffff" maxlength="6" class="hex-text-input">
                             </div>
                             <span class="color-picker-slot">
-                              <button class="btn-custom-color-picker" onclick="document.getElementById('overlay-text-color').click()" title="시스템 색상 선택기">
+                              <button class="btn-custom-color-picker" onclick="document.getElementById('overlay-text-color').click()" title="시스템 색상 선택기" aria-label="글자 색 선택">
                               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19l9 2-2-9-9-9-9 9 2 9 9-2zM9 12l2 2m4-8l2 2"></path></svg>
                             </button>
                             <input type="color" id="overlay-text-color" value="#ffffff" class="color-picker-native">
@@ -902,7 +912,7 @@
                               <input type="text" id="overlay-bg-color-hex" value="0f0f14" maxlength="6" class="hex-text-input">
                             </div>
                             <span class="color-picker-slot">
-                              <button class="btn-custom-color-picker" onclick="document.getElementById('overlay-bg-color').click()" title="시스템 색상 선택기">
+                              <button class="btn-custom-color-picker" onclick="document.getElementById('overlay-bg-color').click()" title="시스템 색상 선택기" aria-label="배경 색 선택">
                               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19l9 2-2-9-9-9-9 9 2 9 9-2zM9 12l2 2m4-8l2 2"></path></svg>
                             </button>
                             <input type="color" id="overlay-bg-color" value="#0f0f14" class="color-picker-native">
@@ -1089,7 +1099,7 @@
         </section>
 
         <!-- 설정 페이지 -->
-        <div class="tab-content" id="settings-page" style="display: none; padding: 0 30px 30px 30px;">
+        <div class="tab-content workspace workspace--settings" id="settings-page" style="display: none;">
             <!-- 설정 하위 카테고리 탭 — 한 화면에 다 몰아넣지 않고 분류해서 보여준다. -->
             <nav class="settings-subtabs" id="settings-subtabs" role="tablist">
               <button type="button" class="settings-subtab-btn active" data-scat="general">일반</button>
@@ -1116,8 +1126,8 @@
                 </div>
                 <div class="ai-actions-right" style="justify-content: flex-start;">
                   <div class="app-mode-seg" id="app-mode-seg" role="group" aria-label="앱 모드 선택">
-                    <button type="button" class="app-mode-seg-btn" data-mode="live">📡 라이브</button>
-                    <button type="button" class="app-mode-seg-btn" data-mode="recording">🎛️ 녹음</button>
+                    <button type="button" class="app-mode-seg-btn" data-mode="live">라이브</button>
+                    <button type="button" class="app-mode-seg-btn" data-mode="recording">녹음</button>
                   </div>
                 </div>
               </div>
@@ -1159,27 +1169,14 @@
                   <path d="M4.22 19.78l1.42-1.42"></path>
                   <path d="M18.36 5.64l1.42-1.42"></path>
                 </svg>
-                <h3>테마</h3>
+                <h3>브랜드 화면</h3>
               </div>
               <div class="ai-model-card">
                 <div class="ai-info-left">
-                  <h4 class="ai-title-large">앱 테마</h4>
+                  <h4 class="ai-title-large">붉은 궤도</h4>
+                  <div class="ai-model-desc">재생과 행동은 붉은 신호, AI 분리와 가사 싱크는 보라 궤도로 표시합니다.</div>
                 </div>
-                <div class="ai-actions-right">
-                  <div class="custom-select" id="theme-mode-dropdown" style="width: 100%; min-width: 0;">
-                    <div class="select-trigger">
-                      <span class="selected-text">미드나잇</span>
-                      <span class="select-arrow"></span>
-                    </div>
-                    <div class="select-options">
-                      <div class="option-item selected" data-value="dark">미드나잇</div>
-                      <div class="option-item" data-value="light">아이보리</div>
-                      <div class="option-item" data-value="pink">분홍 테마</div>
-                      <div class="option-item" data-value="sky">하늘 테마</div>
-                    </div>
-                    <input type="hidden" id="theme-mode-select" value="dark">
-                  </div>
-                </div>
+                <div class="ai-actions-right"><span class="brand-theme-lock">OSW IDENTITY · 01</span></div>
               </div>
             </section>
 
@@ -1369,6 +1366,44 @@
                 </div>
               </div>
 
+              <div class="ai-model-card" style="display:block;">
+                <div class="ai-title-large">라이브 트랙 믹서</div>
+                <div class="ai-model-desc" style="margin-bottom:12px;">리드 보컬·화음/코러스·반주를 모니터와 MR 방송 출력에 독립적으로 보냅니다.</div>
+                <div class="track-mixer-row" data-mixer-track="vocal">
+                  <span class="track-mixer-label">리드 보컬</span>
+                  <input class="track-fader" data-track="vocal" type="range" min="0" max="100" value="100">
+                  <span class="track-fader-val" data-track="vocal">100%</span>
+                  <button type="button" class="track-mute" data-track="vocal">M</button>
+                  <button type="button" class="track-solo" data-track="vocal">S</button>
+                </div>
+                <div class="track-mixer-row" data-mixer-track="backing">
+                  <span class="track-mixer-label">화음/코러스</span>
+                  <input class="track-fader" data-track="backing" type="range" min="0" max="100" value="100">
+                  <span class="track-fader-val" data-track="backing">100%</span>
+                  <button type="button" class="track-mute" data-track="backing">M</button>
+                  <button type="button" class="track-solo" data-track="backing">S</button>
+                </div>
+                <div class="track-mixer-row" data-mixer-track="inst">
+                  <span class="track-mixer-label">반주</span>
+                  <input class="track-fader" data-track="inst" type="range" min="0" max="100" value="100">
+                  <span class="track-fader-val" data-track="inst">100%</span>
+                  <button type="button" class="track-mute" data-track="inst">M</button>
+                  <button type="button" class="track-solo" data-track="inst">S</button>
+                </div>
+                <div style="display:grid;grid-template-columns:auto repeat(3,minmax(70px,1fr));gap:8px;align-items:center;margin-top:14px;font-size:.78rem;">
+                  <strong>출력</strong><strong>리드</strong><strong>화음</strong><strong>반주</strong>
+                  <span>모니터</span>
+                  <input class="route-cb" data-channel="monitor" data-source="vocal" type="checkbox" checked>
+                  <input class="route-cb" data-channel="monitor" data-source="backing" type="checkbox" checked>
+                  <input class="route-cb" data-channel="monitor" data-source="inst" type="checkbox" checked>
+                  <span>MR 방송</span>
+                  <input class="route-cb" data-channel="mr" data-source="vocal" type="checkbox">
+                  <input class="route-cb" data-channel="mr" data-source="backing" type="checkbox" checked>
+                  <input class="route-cb" data-channel="mr" data-source="inst" type="checkbox" checked>
+                </div>
+                <div class="ai-model-desc" id="backing-track-status" style="margin-top:10px;">현재 곡에 화음 stem이 없으면 해당 조절은 비활성화됩니다.</div>
+              </div>
+
               <!-- MR 캐시 저장 형식 -->
               <div class="ai-model-card mr-cache-format-card">
                 <div class="ai-info-left">
@@ -1427,7 +1462,7 @@
 
               <!-- CUDA 설치 권장 알림 (기본 숨김) -->
               <div id="cuda-recommend-banner" class="ai-recommend-card" style="display: none;">
-                <div class="ai-recommend-icon">⚠️</div>
+                <div class="ai-recommend-icon" aria-hidden="true"><span class="osw-icon"><svg viewBox="0 0 24 24"><path d="M12 3 2.8 20h18.4z"/><path d="M12 9v5M12 17.5h.01"/></svg></span></div>
                 <div class="ai-recommend-content">
                   <div class="ai-recommend-title">성능 최적화 권장 (NVIDIA GPU 감지됨)</div>
                   <div class="ai-recommend-text">
@@ -1511,17 +1546,16 @@
                     <h4 class="ai-title-large" style="margin: 0;">AI 분리 모델</h4>
                     <div class="custom-select" id="ai-model-select-dropdown" style="min-width: 220px;">
                       <div class="select-trigger">
-                        <span class="selected-text" id="selected-model-text">Kim Vocal 2 (기본/고속)</span>
+                        <span class="selected-text" id="selected-model-text">Mel-Band RoFormer Vocals (기본/MIT)</span>
                         <span class="select-arrow"></span>
                       </div>
                       <div class="select-options">
-                        <div class="option-item selected" data-value="kim">Kim Vocal 2 (기본/고속)</div>
-                        <div class="option-item" data-value="inst_hq_3">Inst HQ 3 (고품질 반주/MR)</div>
+                        <div class="option-item selected" data-value="melband_roformer_vocals_mit">Mel-Band RoFormer Vocals (기본/MIT)</div>
                       </div>
                     </div>
                   </div>
                   <div id="ai-model-desc" class="ai-model-desc">
-                    일반적인 보컬·MR 분리에 적합합니다.
+                    기본 모델 · MIT 상업 이용 허용 · 고품질 보컬/MR 분리
                   </div>
                 </div>
                 <div class="ai-actions-right">
@@ -1529,37 +1563,6 @@
                   <button id="btn-delete-model" class="btn-ai-action danger" style="display: none;">모델 삭제</button>
                   <button id="btn-manage-custom-models" class="btn-ai-action secondary">커스텀 모델</button>
                   <button id="btn-open-cache" class="btn-ai-action secondary">MR 폴더 열기</button>
-                </div>
-              </div>
-            </section>
-
-            <section class="settings-group" data-scat="about">
-              <div class="group-header">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"
-                  stroke-linecap="round" stroke-linejoin="round">
-                  <circle cx="12" cy="12" r="10"></circle>
-                  <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
-                  <line x1="12" y1="17" x2="12.01" y2="17"></line>
-                </svg>
-                <h3>도움말 · 문의</h3>
-              </div>
-              <div class="ai-model-card">
-                <div class="ai-info-left">
-                  <h4 class="ai-title-large">FAQ · Discord · 버그 신고</h4>
-                  <details class="setting-help">
-                    <summary>설명 보기</summary>
-                    <div class="ai-model-desc">
-                    설치·멜로밍 연동·사용법은 FAQ와 Discord에서 안내합니다. 재현 가능한 버그는 GitHub Issues로 등록해 주세요.
-                    버그를 신고할 때 <strong>로그 폴더</strong>의 <code>app.log</code>를 함께 올려 주시면 원인을 훨씬 빨리 찾을 수 있습니다.
-                  </div>
-                  </details>
-                </div>
-                <div class="ai-actions-right support-actions-grid">
-                  <button id="btn-open-faq" class="btn-ai-action secondary" type="button">도움말 (FAQ)</button>
-                  <button id="btn-open-qa" class="btn-ai-action secondary" type="button">문의하기</button>
-                  <button id="btn-open-discord" class="btn-ai-action secondary" type="button">Discord</button>
-                  <button id="btn-open-logs" class="btn-ai-action secondary" type="button">로그 폴더 열기</button>
-                  <button id="btn-open-bug-report" class="btn-ai-action" type="button">버그 신고</button>
                 </div>
               </div>
             </section>
@@ -1593,7 +1596,7 @@
         </div>
 
         <!-- 액티브 태스크 섹션 -->
-        <div class="tab-content" id="tasks-page" style="display: none;">
+        <div class="tab-content workspace workspace--tasks" id="tasks-page" style="display: none;">
           <div class="tasks-container">
             <!-- 카테고리별 접이식 섹션: AI 보컬 분리 / AI 가사 정렬 -->
             <section class="task-section" data-section="separation">
@@ -1631,7 +1634,7 @@
                 </svg>
               </button>
               <div class="section-body">
-                <div id="alignment-queue-actions" style="display:none; justify-content:flex-end; margin-bottom:10px;">
+                <div id="alignment-queue-actions" class="action-row action-row--end alignment-queue-actions" hidden>
                   <button type="button" class="app-btn" id="alignment-clear-all" title="처리 중인 정렬은 취소하고 대기·완료·오류 항목을 모두 지웁니다.">대기열 전체 지우기</button>
                 </div>
                 <div id="alignment-tasks-list" class="tasks-list">
@@ -1643,8 +1646,8 @@
         </div>
 
         <!-- Lyric Sync 모듈 섹션 -->
-        <div class="tab-content" id="alignment-page" style="display: none; height: 100%;">
-          <div id="alignment-viewer-root" style="height: 100%;"></div>
+        <div class="tab-content workspace workspace--alignment" id="alignment-page" style="display: none;">
+          <div id="alignment-viewer-root" class="alignment-viewer-root"></div>
         </div>
       </div> <!-- End of view-main -->
 
@@ -1656,7 +1659,7 @@
             <h2>가사</h2>
             <p id="lyric-drawer-track-title" class="drawer-track-title">선택된 곡 없음</p>
           </div>
-          <button class="drawer-close" id="lyric-drawer-close">&times;</button>
+          <button class="drawer-close" id="lyric-drawer-close" aria-label="가사 창 닫기">&times;</button>
         </div>
         <div class="drawer-content">
           <p>정렬된 가사가<br>여기에 표시됩니다.</p>
@@ -1667,7 +1670,7 @@
       </div>
 
       <!-- 화면 오른쪽에 세로로 붙어 있던 LYRICS 손잡이는 제거했다.
-           가사는 인스펙터(싱크 상태)·가사 싱크 화면·별도 가사 창(⚙ 메뉴)에서
+           가사는 인스펙터(싱크 상태)·가사 싱크 화면·설정 메뉴의 별도 가사 창에서
            본다. 서랍은 그 경로들과 겹치면서 본문을 가리기만 했다. -->
   </main>
 
@@ -1695,12 +1698,12 @@
       <div class="playing-details">
         <div class="playing-top-row">
           <div class="player-controls">
-            <button class="control-btn" id="btn-prev" title="이전 곡">
+            <button class="control-btn" id="btn-prev" title="이전 곡" aria-label="이전 곡">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
                 <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
               </svg>
             </button>
-            <button class="control-btn play-main-btn" id="btn-toggle-play" title="재생/일시정지">
+            <button class="control-btn play-main-btn" id="btn-toggle-play" title="재생/일시정지" aria-label="재생" aria-pressed="false">
               <svg class="play-icon" viewBox="0 0 24 24">
                 <path d="M8 5v14l11-7z" />
               </svg>
@@ -1708,7 +1711,7 @@
                 <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
               </svg>
             </button>
-            <button class="control-btn" id="btn-next" title="다음 곡">
+            <button class="control-btn" id="btn-next" title="다음 곡" aria-label="다음 곡">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
                 <path d="M6 18l8.5-6L6 6zm9-12h2v12h-2z" />
               </svg>
@@ -1771,7 +1774,7 @@
               <input type="range" min="0.5" max="2.0" step="0.05" value="1.0" class="range-slider" id="tempo-slider">
             </div>
 
-            <button class="btn-audio-reset" id="btn-reset-audio" title="피치/템포 초기화">
+            <button class="btn-audio-reset" id="btn-reset-audio" title="피치/템포 초기화" aria-label="피치와 템포 초기화">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"
                 stroke-linecap="round" stroke-linejoin="round">
                 <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
@@ -1792,7 +1795,7 @@
 
       <!-- 현재 곡 빠른 작업 메뉴 (숨김 팝오버) -->
       <div class="dock-more" id="dock-more">
-        <button class="control-btn" id="dock-more-btn" title="현재 곡 메뉴">
+        <button class="control-btn" id="dock-more-btn" title="현재 곡 메뉴" aria-label="현재 곡 메뉴 열기" aria-expanded="false">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
             <circle cx="12" cy="5" r="2" />
             <circle cx="12" cy="12" r="2" />
@@ -1837,7 +1840,7 @@
     <div class="modal-content">
       <header class="modal-header">
         <h3>곡 정보 수정</h3>
-        <button class="close-btn" id="modal-close">&times;</button>
+        <button class="close-btn" id="modal-close" aria-label="창 닫기">&times;</button>
       </header>
       <div class="modal-body modal-body-grid">
         <!-- 좌측 컬럼 -->
@@ -1997,7 +2000,7 @@
     <div class="modal-content confirm-box">
       <header class="modal-header">
         <h3 id="confirm-title">확인</h3>
-        <button class="close-btn" id="confirm-close-icon">&times;</button>
+        <button class="close-btn" id="confirm-close-icon" aria-label="확인 창 닫기">&times;</button>
       </header>
       <div class="modal-body">
         <p id="confirm-message" style="font-size: 1.1rem; text-align: center; margin: 20px 0;"></p>
@@ -2011,10 +2014,10 @@
 
   <!-- 커스텀 AI 분리 모델 관리 -->
   <div id="custom-model-modal" class="modal-overlay">
-    <div class="modal-content" style="max-width: 560px;">
+    <div class="modal-content modal-md">
       <header class="modal-header">
         <h3>커스텀 AI 분리 모델</h3>
-        <button class="close-btn" id="custom-model-close">&times;</button>
+        <button class="close-btn" id="custom-model-close" aria-label="모델 설정 닫기">&times;</button>
       </header>
       <div class="modal-body" style="display: flex; flex-direction: column; gap: 20px;">
         <!-- 가이드 배너 -->
@@ -2024,9 +2027,8 @@
             <div style="flex:1; min-width:0;">
               <div style="font-weight:700; font-size:0.86rem; margin-bottom:4px;">커스텀 모델이 처음이신가요?</div>
               <div style="font-size:0.76rem; color:var(--text-muted); line-height:1.55;">
-                기본 모델(Kim Vocal 2 · Inst HQ 3)로도 대부분 충분합니다. 더 깨끗한 분리가 필요하면
-                아래 <strong>추천 모델</strong>에서 골라 <strong>추가</strong>만 누르세요 — 프리셋이 이미 맞춰져 있어
-                실패하지 않습니다. 직접 받은 ONNX를 넣으려면 아키텍처에 맞는 프리셋을 골라야 합니다.
+                Mel-Band RoFormer Vocals (MIT)가 기본 모델입니다. 다른 모델은 원본 라이선스를
+                확인한 뒤 로컬 ONNX로 등록하세요. CC-BY-NC 모델은 수익 방송·유료 제작에 쓰지 마세요.
               </div>
               <button type="button" id="cm-guide-link" class="cm-guide-link">자세한 가이드 보기 →</button>
             </div>
@@ -2086,23 +2088,35 @@
 
   <!-- MR 분리 방식(속도/품질) 선택 모달 -->
   <div id="separation-mode-modal" class="modal-overlay">
-    <div class="modal-content" style="max-width: 520px;">
+    <div class="modal-content modal-md">
       <header class="modal-header">
         <h3>MR 분리 방식 선택</h3>
-        <button class="close-btn" id="separation-mode-close">&times;</button>
+        <button class="close-btn" id="separation-mode-close" aria-label="분리 방식 선택 닫기">&times;</button>
       </header>
       <div class="modal-body" style="display: flex; flex-direction: column; gap: 14px;">
         <div style="font-size: 0.78rem; color: var(--text-muted); line-height: 1.5;" id="separation-mode-song-title"></div>
 
-        <button type="button" class="separation-mode-card" data-model-id="kim">
-          <div class="separation-mode-card-title">⚡ 빠른 분리 <span class="separation-mode-model">Kim Vocal 2</span></div>
-          <div class="separation-mode-card-desc">속도 우선 — 방송 중에도 부담이 적습니다. 대부분의 곡에 충분한 품질.</div>
+        <button type="button" class="separation-mode-card" data-model-id="melband_roformer_vocals_mit">
+          <div class="separation-mode-card-title">
+            <svg class="core-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none">
+              <path d="M13.5 2.5 5.8 13h5.6l-.9 8.5L18.2 11h-5.6l.9-8.5Z" />
+            </svg>
+            기본 고품질 분리 <span class="separation-mode-model">Mel-Band RoFormer Vocals (MIT)</span>
+          </div>
+          <div class="separation-mode-card-desc">상업 이용 가능한 MIT 기본 모델입니다. 첫 사용 시 약 953MB를 내려받습니다.</div>
         </button>
 
-        <button type="button" class="separation-mode-card" data-model-id="inst_hq_3">
-          <div class="separation-mode-card-title">✨ 고품질 분리 <span class="separation-mode-model">Inst HQ 3</span></div>
-          <div class="separation-mode-card-desc">반주(MR) 품질 우선 — 처리 시간이 더 걸립니다. 노래방용 최종본에 추천.</div>
-        </button>
+        <div class="separation-mode-card" style="cursor: default; text-align: left;">
+          <div class="separation-mode-card-title">리드·화음 고급 분리</div>
+          <div class="separation-mode-card-desc" id="separation-mode-harmony-hint">로컬 Karaoke ONNX 모델이 필요합니다.</div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:10px;">
+            <select id="separation-mode-harmony-base" style="padding:8px; border-radius:8px; background:var(--surface-1); color:var(--text-main); border:1px solid var(--glass-border);">
+              <option value="melband_roformer_vocals_mit">1차: Mel-Band RoFormer Vocals (MIT)</option>
+            </select>
+            <select id="separation-mode-harmony-select" style="padding:8px; border-radius:8px; background:var(--surface-1); color:var(--text-main); border:1px solid var(--glass-border);"></select>
+          </div>
+          <button type="button" id="separation-mode-harmony-start" class="btn-ai-action secondary" style="width:100%; margin-top:8px;" disabled>3채널 분리 시작</button>
+        </div>
 
         <div id="separation-mode-custom-wrap" style="display: none; flex-direction: column; gap: 8px;">
           <label style="font-size: 0.8rem; font-weight: 700; color: var(--text-dim);">커스텀 모델로 분리</label>
@@ -2123,7 +2137,7 @@
   <!-- AI 모델 다운로드 오버레이 -->
   <div id="model-download-overlay" class="modal-overlay">
     <div class="modal-content download-box">
-      <div class="download-icon">🤖</div>
+      <div class="download-icon" aria-hidden="true"><span class="osw-icon brand"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.5"/><ellipse cx="12" cy="12" rx="10" ry="4.2" transform="rotate(-16 12 12)"/><circle cx="20" cy="10" r="1"/></svg></span></div>
       <h3>AI 엔진 초기설정 중...</h3>
       <p>최초 1회 AI 모델 다운로드가 필요합니다. (약 67MB)</p>
       <div class="download-progress-container">
@@ -2139,10 +2153,10 @@
 
   <!-- 온라인 검색 결과 선택 모달 -->
   <div id="metadata-search-results-modal" class="modal-overlay">
-    <div class="modal-content" style="max-width: 500px;">
+    <div class="modal-content modal-md">
       <header class="modal-header">
         <h3>검색 결과 선택</h3>
-        <button class="close-btn" id="search-results-close">&times;</button>
+        <button class="close-btn" id="search-results-close" aria-label="검색 결과 닫기">&times;</button>
       </header>
       <div class="modal-body">
         <div id="search-results-list" class="search-results-list"
@@ -2159,10 +2173,10 @@
 
   <!-- Lyric Sync용 음원 선택 모달 -->
   <div id="alignment-track-modal" class="modal-overlay">
-    <div class="modal-content" style="max-width: 600px;">
+    <div class="modal-content modal-lg">
       <header class="modal-header">
         <h3>음원 선택</h3>
-        <button class="close-btn" id="alignment-track-close">&times;</button>
+        <button class="close-btn" id="alignment-track-close" aria-label="정렬 트랙 선택 닫기">&times;</button>
       </header>
       <div class="modal-body">
         <div class="search-bar" style="margin-bottom: 12px;">

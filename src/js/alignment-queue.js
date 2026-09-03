@@ -17,6 +17,7 @@ import { showNotification } from './utils.js';
 import { buildAlignmentLyrics, isEnglishLine } from './eng-to-kor.js';
 import { attachMissingSegmentIds, classifyAlignmentLine, gateAlignmentLines } from './alignment-quality.js';
 import { applyAlignmentMetadata, buildAlignmentMetadata } from './alignment-metadata.js';
+import { applyAlignmentAssistant } from './alignment-assistant.js';
 
 let isRunning = false;
 let listenerReady = false;
@@ -102,6 +103,13 @@ function traceSegmentMap(originalSegments, workingSegments, entries) {
 const THIRD_PASS_INVALID_EVIDENCE_REASONS = new Set([
     'lexical_mismatch', 'vocable_mismatch',
     'duration', 'duration_sanity', 'outside_window',
+    'out_of_order', 'duplicate_id', 'vocal_silence',
+]);
+
+// 문자 불일치와 낮은 confidence는 모델 인식 불확실성이라 VAD 순서 복구가
+// 가능하지만, 시간·길이·순서가 깨진 후보는 같은 방식으로 되살리면 안 된다.
+const VAD_ORDERED_STRUCTURAL_REJECTION_REASONS = new Set([
+    'vocable_mismatch', 'duration', 'duration_sanity', 'outside_window',
     'out_of_order', 'duplicate_id', 'vocal_silence',
 ]);
 
@@ -192,7 +200,7 @@ function markLexicalGateRejections(segments, entries, gate) {
         segment.qualityFlags = Array.from(new Set([
             ...(segment.qualityFlags || []),
             ...reasons,
-            'non_lexical_vocal_risk',
+            ...(segment.lineKind === 'vocable' ? ['non_lexical_vocal_risk'] : ['lexical_uncertain']),
         ]));
     });
 }
@@ -305,11 +313,12 @@ export function assessLyricsSourceMismatch({ entries = [], primaryGate = null, t
     (primaryGate?.rejected || []).forEach(({ line, reasons }) => {
         const activity = Number(line?.vocal_activity);
         const coverage = Number(line?.token_coverage);
-        const confidence = Number(line?.confidence);
-        const lowTextFit = (reasons || []).includes('confidence')
-            || (reasons || []).includes('lexical_mismatch')
-            || (reasons || []).includes('vocable_mismatch')
-            || (confidenceFloor > 0 && Number.isFinite(confidence) && confidence < confidenceFloor);
+        // Low posterior confidence is common for singing and does not by
+        // itself mean the source lyrics are wrong. Reserve this advisory for
+        // explicit text/audio mismatch evidence; confidence remains available
+        // to the quality gate and unsynced review flow separately.
+        const lowTextFit = (reasons || []).includes('lexical_mismatch')
+            || (reasons || []).includes('vocable_mismatch');
         if (line?.segment_id && lowTextFit
             && Number.isFinite(activity) && activity >= 0.25
             && Number.isFinite(coverage) && coverage >= 0.90) {
@@ -369,6 +378,7 @@ export function assessLyricsSourceMismatch({ entries = [], primaryGate = null, t
 
 const TIMELINE_ORDER_TOLERANCE_SEC = 0.08;
 const TIMELINE_OVERLAP_TOLERANCE_SEC = 0.02;
+const THIRD_PASS_EVIDENCE_TOLERANCE_MS = 80;
 const MIN_LINE_DURATION_MS = 180;
 const MIN_MS_PER_SINGABLE_UNIT = 50;
 const MAX_BASE_LINE_DURATION_MS = 3_000;
@@ -385,12 +395,18 @@ function lyricDurationCheck(segment) {
     const durationMs = Math.round((Number(segment?.end) - Number(segment?.start)) * 1000);
     const lineKind = segment?.lineKind || classifyAlignmentLine(getSyncText(segment));
     const minimumMs = Math.max(MIN_LINE_DURATION_MS, units * MIN_MS_PER_SINGABLE_UNIT);
-    const maximumMs = lineKind === 'vocable'
+    const baseMaximumMs = lineKind === 'vocable'
         ? VOCABLE_MAX_LINE_DURATION_MS
         : Math.min(
             MAX_LINE_DURATION_MS,
             Math.max(MAX_BASE_LINE_DURATION_MS, units * MAX_MS_PER_SINGABLE_UNIT),
         );
+    // 실제 VAD 시작/끝에 잠긴 줄은 모델이 확인한 지속 발성 근거가 있으므로
+    // 글자 수 휴리스틱보다 최대 800ms 긴 꼬리를 허용한다. 무제한 연장은
+    // 화음·추임새를 한 줄에 삼키므로 허용하지 않는다.
+    const maximumMs = segment?.alignmentSource === 'vad_boundary_review'
+        ? Math.min(MAX_LINE_DURATION_MS, baseMaximumMs + 800)
+        : baseMaximumMs;
     const reason = durationMs < minimumMs
         ? 'duration_too_short_for_lyrics'
         : (durationMs > maximumMs ? 'duration_too_long_for_lyrics' : null);
@@ -410,7 +426,31 @@ function clearAutoTiming(segment) {
 export function resetAutomaticTimingsForRealignment(segments) {
     const reset = [];
     (segments || []).forEach((segment, index) => {
-        if (!segment || segment.approx !== true || !hasStoredTiming(segment)) return;
+        if (!segment) return;
+        if (!hasStoredTiming(segment)) {
+            // 실패한 이전 실행의 진단은 새 모델 판단에 섞지 않는다. 특히
+            // start/end=0인데 manual로 복원된 오래된 메타데이터도 바로잡는다.
+            delete segment.confidence;
+            delete segment.greedyTextSimilarity;
+            delete segment.gateDecision;
+            delete segment.ctcEnd;
+            delete segment.tailExtensionMs;
+            delete segment.words;
+            delete segment.vadAssignment;
+            delete segment.alignmentTrust;
+            delete segment.alignmentSource;
+            delete segment.approx;
+            if (Array.isArray(segment.qualityFlags)) {
+                segment.qualityFlags = segment.qualityFlags.filter((flag) => ![
+                    'non_lexical_vocal_risk', 'no_lexical_evidence', 'lexical_uncertain',
+                    'vad_ordered_review', 'vad_boundary_review', 'review_required', 'confidence', 'lexical_mismatch',
+                    'duration_sanity', 'estimate_rejected',
+                ].includes(flag));
+                if (segment.qualityFlags.length === 0) delete segment.qualityFlags;
+            }
+            return;
+        }
+        if (segment.approx !== true) return;
         reset.push({
             id: `segment:${index}`,
             start: segment.start,
@@ -426,6 +466,7 @@ export function resetAutomaticTimingsForRealignment(segments) {
         delete segment.gateDecision;
         delete segment.qualityFlags;
         delete segment.greedyTextSimilarity;
+        delete segment.vadAssignment;
     });
     return reset;
 }
@@ -560,6 +601,11 @@ const pendingAfterSeparation = new Set();
 /** 이 곡의 정렬을 분리 종료 시점까지 미룬다. */
 export function deferAlignmentUntilSeparated(path) {
     if (path) pendingAfterSeparation.add(path);
+}
+
+/** 분리 시작 자체가 실패했을 때 남은 예약을 제거한다. */
+export function cancelDeferredAlignment(path) {
+    if (path) pendingAfterSeparation.delete(path);
 }
 
 /**
@@ -931,6 +977,16 @@ export function buildFinalEstimateGroups(segments, entries, markers = {}) {
         const lastIndex = group.entries.at(-1).segmentIndex;
         const previousAnchor = anchors.filter((anchor) => anchor.segmentIndex < firstIndex).at(-1) || null;
         const nextAnchor = anchors.find((anchor) => anchor.segmentIndex > lastIndex) || null;
+        // 약한 자동 결과를 정렬의 의미적 앵커로 신뢰하지는 않지만, 이미 차지한
+        // 시간대를 새 추정값이 침범하면 최종 순서 감사에서 둘 다 흔들린다.
+        // 인접한 저장 시각은 오직 닫힌 점유 경계로만 사용한다.
+        const previousOccupied = orderedEntries
+            .filter((entry) => entry.segmentIndex < firstIndex && hasStoredTiming(segments?.[entry.segmentIndex]))
+            .map((entry) => segments[entry.segmentIndex])
+            .at(-1) || null;
+        const nextOccupiedEntry = orderedEntries
+            .find((entry) => entry.segmentIndex > lastIndex && hasStoredTiming(segments?.[entry.segmentIndex]));
+        const nextOccupied = nextOccupiedEntry ? segments[nextOccupiedEntry.segmentIndex] : null;
         const skippedSoftAnchors = orderedEntries.map((entry) => {
             const segment = segments?.[entry.segmentIndex];
             const trust = alignmentTrustOf(segment);
@@ -943,8 +999,13 @@ export function buildFinalEstimateGroups(segments, entries, markers = {}) {
             ...group,
             previousAnchor,
             nextAnchor,
-            lowerBoundMs: previousAnchor?.endMs ?? vocalStartMs,
-            upperBoundMs: nextAnchor?.startMs ?? null,
+            lowerBoundMs: Math.max(
+                previousAnchor?.endMs ?? vocalStartMs,
+                previousOccupied ? Math.round(Math.max(previousOccupied.start, previousOccupied.end) * 1000) : 0,
+            ),
+            upperBoundMs: nextOccupied
+                ? Math.round(nextOccupied.start * 1000)
+                : (nextAnchor?.startMs ?? null),
             interludes,
             skippedSoftAnchors,
         };
@@ -1042,6 +1103,112 @@ function intervalEndAt(intervals, pointMs) {
         ?? pointMs;
 }
 
+const VAD_MIN_REGION_MS = 160;
+const VAD_BREATH_GAP_MAX_MS = 400;
+const VAD_CLUSTER_GAP_MS = 800;
+
+function addScore(left, right) {
+    return left.map((value, index) => value + right[index]);
+}
+
+function compareScore(left, right) {
+    if (!right) return -1;
+    for (let index = 0; index < left.length; index++) {
+        if (Math.abs(left[index] - right[index]) > 0.001) return left[index] - right[index];
+    }
+    return 0;
+}
+
+/**
+ * 초록색 VAD 블록의 시작/끝을 경계 후보로 삼아 한 그룹 전체를 원문 순서로
+ * 배치한다. 각 줄은 하나 이상의 연속 블록을 쓰며 800ms가 넘는 공백은 절대
+ * 가로지르지 않는다. 점수는 CTC 거리 → 줄 경계 품질 → 발화 길이 → 버린
+ * 보컬량 순서의 사전식 비교다.
+ */
+export function optimizeVocalBoundaryAssignments(intervals, entries, weights, lexicalEligibility) {
+    const regions = (intervals || [])
+        .filter((region) => region.endMs - region.startMs >= VAD_MIN_REGION_MS)
+        .sort((left, right) => left.startMs - right.startMs);
+    const lineCount = entries?.length || 0;
+    if (!lineCount || regions.length < lineCount) return null;
+
+    const masses = regions.map((region) =>
+        (region.endMs - region.startMs) * Math.max(0.01, Number(region.activity) || 0.01));
+    const totalActiveMs = regions.reduce((sum, region) => sum + region.endMs - region.startMs, 0);
+    const totalWeight = Math.max(1, (weights || []).reduce((sum, weight) => sum + weight, 0));
+    const memo = new Map();
+
+    const solve = (lineIndex, cursor) => {
+        const key = `${lineIndex}:${cursor}`;
+        if (memo.has(key)) return memo.get(key);
+        if (lineIndex >= lineCount) {
+            const skipped = regions.slice(cursor).reduce((sum, region) => sum + region.endMs - region.startMs, 0);
+            const done = { score: [0, 0, 0, skipped, 0], assignments: [] };
+            memo.set(key, done);
+            return done;
+        }
+
+        const remainingLines = lineCount - lineIndex - 1;
+        let best = null;
+        for (let start = cursor; start < regions.length - remainingLines; start++) {
+            const skippedBefore = regions.slice(cursor, start)
+                .reduce((sum, region) => sum + region.endMs - region.startMs, 0);
+            let activeMs = 0;
+            let activityMass = 0;
+            for (let end = start; end < regions.length - remainingLines; end++) {
+                if (end > start && regions[end].startMs - regions[end - 1].endMs > VAD_CLUSTER_GAP_MS) break;
+                activeMs += regions[end].endMs - regions[end].startMs;
+                activityMass += masses[end];
+                const minimumMs = Math.max(200, Number(weights?.[lineIndex] || 1) * 50);
+                if (activeMs < minimumMs) continue;
+                const tail = solve(lineIndex + 1, end + 1);
+                if (!tail) continue;
+
+                const startMs = regions[start].startMs;
+                const endMs = regions[end].endMs;
+                const lexical = lexicalEligibility?.[lineIndex] || {};
+                const hasEvidenceTimes = lexical.selectedEvidenceStartMs != null
+                    && lexical.selectedEvidenceEndMs != null;
+                const evidenceStart = Number(lexical.selectedEvidenceStartMs);
+                const evidenceEnd = Number(lexical.selectedEvidenceEndMs);
+                const hasEvidence = lexical.boundaryEvidenceEligible === true
+                    && hasEvidenceTimes
+                    && Number.isFinite(evidenceStart) && Number.isFinite(evidenceEnd);
+                const lexicalDistance = hasEvidence
+                    ? Math.abs(startMs - evidenceStart) + Math.abs(endMs - evidenceEnd)
+                    : 0;
+                const nextRegion = regions[end + 1];
+                const boundaryGap = nextRegion ? nextRegion.startMs - regions[end].endMs : VAD_CLUSTER_GAP_MS;
+                const boundaryPenalty = lineIndex === lineCount - 1
+                    ? 0
+                    : (boundaryGap >= VAD_BREATH_GAP_MAX_MS ? 0 : Math.max(1, VAD_BREATH_GAP_MAX_MS - boundaryGap));
+                const expectedActiveMs = totalActiveMs * Number(weights?.[lineIndex] || 1) / totalWeight;
+                const durationDeviation = Math.abs(activeMs - expectedActiveMs);
+                const ownScore = [lexicalDistance, boundaryPenalty, durationDeviation, skippedBefore, -activityMass];
+                const candidate = {
+                    score: addScore(ownScore, tail.score),
+                    assignments: [{
+                        startMs,
+                        endMs,
+                        regions: regions.slice(start, end + 1).map((region) => ({ ...region })),
+                        activeMs,
+                        boundaryGapAfterMs: nextRegion ? boundaryGap : null,
+                        startBoundary: 'vad_start',
+                        endBoundary: 'vad_end',
+                        lexicalDistanceMs: hasEvidence ? lexicalDistance : null,
+                        skippedVocalMs: skippedBefore,
+                    }, ...tail.assignments],
+                };
+                if (!best || compareScore(candidate.score, best.score) < 0) best = candidate;
+            }
+        }
+        memo.set(key, best);
+        return best;
+    };
+
+    return solve(0, 0);
+}
+
 /** 앵커 구간 안에서 VAD 누적량(없으면 시간)을 가사 길이 비율로 분배한다. */
 export function estimateUnsyncedTimings(groups, diagnostics = {}) {
     const audioDurationMs = Number(diagnostics.audio_duration_ms ?? diagnostics.audioDurationMs) || 0;
@@ -1072,6 +1239,9 @@ export function estimateUnsyncedTimings(groups, diagnostics = {}) {
         let lowerBoundMs = Math.max(0, Number(group.lowerBoundMs) || 0);
         const lastVocalEndMs = vocalRegions.at(-1)?.endMs || 0;
         let upperBoundMs = group.upperBoundMs == null ? Number.NaN : Number(group.upperBoundMs);
+        const hasReliableUpperBound = Number.isFinite(upperBoundMs)
+            || audioDurationMs > lowerBoundMs
+            || lastVocalEndMs > lowerBoundMs;
         if (!Number.isFinite(upperBoundMs)) {
             upperBoundMs = audioDurationMs > lowerBoundMs
                 ? audioDurationMs
@@ -1103,8 +1273,12 @@ export function estimateUnsyncedTimings(groups, diagnostics = {}) {
         const method = activeIntervals.length ? 'vad_weighted' : 'time_weighted';
         const weights = group.entries.map((entry) => singableWeight(entry.text));
         const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
-        const availableDuration = allocationIntervals.reduce((sum, interval) => sum + interval.endMs - interval.startMs, 0);
-        const requiredDurationMs = Math.max(group.entries.length * 1_000, totalWeight * 90);
+        const availableDuration = (activeIntervals.length ? activeIntervals : allocationIntervals)
+            .reduce((sum, interval) => sum + interval.endMs - interval.startMs, 0);
+        // 짧은 호흡형 가사는 0.8~1.0초에도 충분히 성립한다. 줄별 실제 길이
+        // 검사는 뒤에서 다시 수행하므로 그룹 밀도 단계에서 1초 고정으로 먼저
+        // 탈락시키지 않는다.
+        const requiredDurationMs = Math.max(group.entries.length * 800, totalWeight * 90);
         const windowDensity = availableDuration / Math.max(1, group.entries.length);
         const lexicalEligibility = group.entries.map((entry) => {
             const evidence = lexicalEvidenceById instanceof Map
@@ -1113,15 +1287,23 @@ export function estimateUnsyncedTimings(groups, diagnostics = {}) {
             const allCandidates = Array.isArray(evidence?.candidates) && evidence.candidates.length
                 ? evidence.candidates
                 : (evidence ? [evidence] : []);
-            const windowCandidates = allCandidates.filter((candidate) => candidate?.thirdPassEligible !== false)
-              .filter((candidate) => {
+            const candidateFitsWindow = (candidate) => {
                 const startMs = Number(candidate?.startMs);
                 const endMs = Number(candidate?.endMs);
                 if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return true;
                 return endMs >= lowerBoundMs - 500 && startMs <= upperBoundMs + 500;
-            });
+            };
+            const candidatesInWindow = allCandidates.filter(candidateFitsWindow);
+            const windowCandidates = candidatesInWindow
+                .filter((candidate) => candidate?.thirdPassEligible !== false);
             const selectedEvidence = windowCandidates.reduce((best, candidate) =>
                 !best || Number(candidate?.similarity) > Number(best?.similarity) ? candidate : best, null);
+            const boundaryEvidence = candidatesInWindow
+                .filter((candidate) => Number(candidate?.similarity) >= 0.15)
+                .filter((candidate) => !(candidate?.rejectedReasons || []).some((reason) =>
+                    VAD_ORDERED_STRUCTURAL_REJECTION_REASONS.has(reason)))
+                .reduce((best, candidate) =>
+                    !best || Number(candidate?.similarity) > Number(best?.similarity) ? candidate : best, null);
             const lineKind = entry.lineKind || selectedEvidence?.lineKind
                 || evidence?.lineKind || classifyAlignmentLine(entry.text);
             const requiredSimilarity = lineKind === 'vocable' ? 0.50 : 0.25;
@@ -1129,22 +1311,45 @@ export function estimateUnsyncedTimings(groups, diagnostics = {}) {
             return {
                 id: entry.id,
                 lineKind,
+                repeatedLyric: entry.repeatedLyric === true,
                 similarity: Number.isFinite(similarity) ? similarity : null,
                 requiredSimilarity,
                 eligible: Number.isFinite(similarity) && similarity >= requiredSimilarity,
+                boundaryEvidenceEligible: !!boundaryEvidence,
                 evidenceWindowMatched: windowCandidates.length > 0,
+                candidateWindowMatched: candidatesInWindow.length > 0,
                 evidenceCandidateCount: allCandidates.length,
-                selectedEvidenceStartMs: Number.isFinite(Number(selectedEvidence?.startMs))
-                    ? Number(selectedEvidence.startMs) : null,
-                selectedEvidenceEndMs: Number.isFinite(Number(selectedEvidence?.endMs))
-                    ? Number(selectedEvidence.endMs) : null,
+                hasOutOfWindowCandidate: allCandidates.length > 0 && candidatesInWindow.length === 0,
+                hasStructurallyInvalidCandidate: candidatesInWindow.some((candidate) =>
+                    Number(candidate?.similarity) >= 0.15
+                    && (candidate?.rejectedReasons || []).some((reason) =>
+                        VAD_ORDERED_STRUCTURAL_REJECTION_REASONS.has(reason))),
+                selectedEvidenceStartMs: Number.isFinite(Number((selectedEvidence || boundaryEvidence)?.startMs))
+                    ? Number((selectedEvidence || boundaryEvidence).startMs) : null,
+                selectedEvidenceEndMs: Number.isFinite(Number((selectedEvidence || boundaryEvidence)?.endMs))
+                    ? Number((selectedEvidence || boundaryEvidence).endMs) : null,
                 selectedEvidenceAccepted: selectedEvidence?.accepted === true,
                 selectedEvidenceRejectedReasons: Array.isArray(selectedEvidence?.rejectedReasons)
                     ? [...selectedEvidence.rejectedReasons] : [],
             };
         });
-        const lexicallyIneligibleIndices = lexicalEligibility
-            .map((item, index) => item.eligible ? null : index)
+        // 문자 증거가 약해도 닫힌 시간 창 안에 실제 VAD가 충분하면 원문 순서를
+        // 기준으로 복구한다. 원시 CTC 위치는 쓰지 않고 검토 필요 상태로 남긴다.
+        const vadOrderedGroupEligible = method === 'vad_weighted'
+            && hasReliableUpperBound
+            && availableDuration >= requiredDurationMs;
+        const recoveryEligibility = lexicalEligibility.map((item) => {
+            const vadOrderedEligible = item.lineKind === 'lyric'
+                && vadOrderedGroupEligible
+                && !(item.repeatedLyric && item.hasOutOfWindowCandidate)
+                && !item.hasStructurallyInvalidCandidate;
+            return item.eligible || vadOrderedEligible;
+        });
+        const boundaryOptimization = activeIntervals.length
+            ? optimizeVocalBoundaryAssignments(activeIntervals, group.entries, weights, lexicalEligibility)
+            : null;
+        const lexicallyIneligibleIndices = recoveryEligibility
+            .map((eligible, index) => eligible ? null : index)
             .filter((index) => index != null);
         if (lexicallyIneligibleIndices.length > 0) {
             const ineligibleEntries = lexicallyIneligibleIndices.map((index) => group.entries[index]);
@@ -1211,6 +1416,12 @@ export function estimateUnsyncedTimings(groups, diagnostics = {}) {
         let previousStartMs = -Infinity;
 
         const starts = group.entries.map((entry, index) => {
+            const boundaryAssignment = boundaryOptimization?.assignments?.[index];
+            if (boundaryAssignment) {
+                previousStartMs = boundaryAssignment.startMs;
+                cumulative += weights[index];
+                return boundaryAssignment.startMs;
+            }
             const proposedStartMs = pointAtWeightedRatio(allocationIntervals, cumulative / totalWeight);
             const minimumStartMs = index === 0 ? lowerBoundMs + effectiveGapMs : previousStartMs + effectiveGapMs;
             const maximumStartMs = upperBoundMs - effectiveGapMs * (group.entries.length - index);
@@ -1221,6 +1432,7 @@ export function estimateUnsyncedTimings(groups, diagnostics = {}) {
         });
 
         cumulative = 0;
+        let previousChosenEndMs = lowerBoundMs;
         const groupEstimates = group.entries.map((entry, index) => {
             cumulative += weights[index];
             const rawEndMs = pointAtWeightedRatio(allocationIntervals, cumulative / totalWeight);
@@ -1228,15 +1440,57 @@ export function estimateUnsyncedTimings(groups, diagnostics = {}) {
             const nextStartMs = starts[index + 1] ?? upperBoundMs;
             let endMs = Math.min(rawEndMs, intervalEndMs, nextStartMs, upperBoundMs);
             if (endMs <= starts[index]) endMs = Math.min(upperBoundMs, starts[index] + minimumGapMs);
+            const boundaryAssignment = boundaryOptimization?.assignments?.[index] || null;
+            let chosenStartMs = boundaryAssignment?.startMs ?? starts[index];
+            let chosenEndMs = boundaryAssignment?.endMs ?? endMs;
+            let chosenMethod = method;
+            const evidenceStartMs = Number(lexicalEligibility[index].selectedEvidenceStartMs);
+            const evidenceEndMs = Number(lexicalEligibility[index].selectedEvidenceEndMs);
+            const evidenceDurationMs = evidenceEndMs - evidenceStartMs;
+            const evidenceFitsWindow = lexicalEligibility[index].eligible
+                && Number.isFinite(evidenceStartMs) && Number.isFinite(evidenceEndMs)
+                && evidenceDurationMs >= MIN_LINE_DURATION_MS
+                && evidenceStartMs >= lowerBoundMs - THIRD_PASS_EVIDENCE_TOLERANCE_MS
+                && evidenceEndMs <= upperBoundMs + THIRD_PASS_EVIDENCE_TOLERANCE_MS
+                && evidenceStartMs >= previousChosenEndMs - THIRD_PASS_EVIDENCE_TOLERANCE_MS
+                && evidenceEndMs <= nextStartMs + THIRD_PASS_EVIDENCE_TOLERANCE_MS;
+            if (evidenceFitsWindow && !boundaryAssignment) {
+                chosenStartMs = Math.max(lowerBoundMs, evidenceStartMs);
+                chosenEndMs = Math.min(upperBoundMs, evidenceEndMs);
+                chosenMethod = 'lexical_candidate';
+            } else if (boundaryAssignment && recoveryEligibility[index]) {
+                const hasTimedLexicalEvidence = lexicalEligibility[index].eligible
+                    && lexicalEligibility[index].selectedEvidenceStartMs != null
+                    && lexicalEligibility[index].selectedEvidenceEndMs != null;
+                chosenMethod = hasTimedLexicalEvidence
+                    ? 'lexical_candidate'
+                    : 'vad_boundary_review';
+            } else if (!lexicalEligibility[index].eligible && recoveryEligibility[index]) {
+                chosenMethod = 'vad_ordered_review';
+            }
+            previousChosenEndMs = chosenEndMs;
             return {
                 segment_id: entry.id,
                 segmentIndex: entry.segmentIndex,
                 text: entry.text,
-                start_ms: Math.round(starts[index]),
-                end_ms: Math.max(Math.round(starts[index]) + 80, Math.round(endMs)),
+                start_ms: Math.round(chosenStartMs),
+                end_ms: Math.max(Math.round(chosenStartMs) + 80, Math.round(chosenEndMs)),
                 confidence: 0,
                 alignmentSource: 'anchor_interpolation',
-                method,
+                method: chosenMethod,
+                quality_flags: chosenMethod === 'vad_boundary_review'
+                    ? ['lexical_uncertain', 'vad_boundary_review', 'review_required']
+                    : (chosenMethod === 'vad_ordered_review'
+                        ? ['lexical_uncertain', 'vad_ordered_review', 'review_required']
+                        : []),
+                vadAssignment: boundaryAssignment ? {
+                    regions: boundaryAssignment.regions,
+                    startBoundary: boundaryAssignment.startBoundary,
+                    endBoundary: boundaryAssignment.endBoundary,
+                    lexicalDistanceMs: boundaryAssignment.lexicalDistanceMs,
+                    skippedVocalMs: boundaryAssignment.skippedVocalMs,
+                    boundaryGapAfterMs: boundaryAssignment.boundaryGapAfterMs,
+                } : null,
                 weight: weights[index],
                 previousAnchor: group.previousAnchor,
                 nextAnchor: group.nextAnchor,
@@ -1260,7 +1514,7 @@ export function estimateUnsyncedTimings(groups, diagnostics = {}) {
             };
         });
         const invalidEstimateIndices = perLineDurationChecks
-            .map((check, index) => lexicalEligibility[index].eligible && !check.plausible ? index : null)
+            .map((check, index) => recoveryEligibility[index] && !check.plausible ? index : null)
             .filter((index) => index != null);
         if (invalidEstimateIndices.length > 0) {
             const invalidEntries = invalidEstimateIndices.map((index) => group.entries[index]);
@@ -1283,7 +1537,7 @@ export function estimateUnsyncedTimings(groups, diagnostics = {}) {
             });
         }
         estimates.push(...groupEstimates.filter((_estimate, index) =>
-            lexicalEligibility[index].eligible && !invalidEstimateIndices.includes(index)));
+            recoveryEligibility[index] && !invalidEstimateIndices.includes(index)));
     }
     return { estimates, rejectedGroups };
 }
@@ -1304,7 +1558,7 @@ export function markRejectedEstimateGroups(segments, rejectedGroups) {
             segment.qualityFlags = Array.from(new Set([
                 ...(segment.qualityFlags || []),
                 group.rejectedReason || 'estimate_rejected',
-                ...(group.rejectedReason === 'no_lexical_evidence' ? ['non_lexical_vocal_risk'] : []),
+                ...(group.rejectedReason === 'no_lexical_evidence' ? ['lexical_uncertain'] : []),
             ]));
             markedIds.push(entry.id);
         }
@@ -1324,7 +1578,16 @@ export function applyEstimatedTimings(segments, estimates) {
         segment.approx = true;
         segment.confidence = 0;
         segment.alignmentTrust = 'estimated';
-        segment.alignmentSource = 'anchor_interpolation';
+        segment.alignmentSource = estimate.method === 'vad_boundary_review'
+            ? 'vad_boundary_review'
+            : (estimate.method === 'vad_ordered_review'
+                ? 'vad_ordered_review'
+                : 'anchor_interpolation');
+        if (estimate.vadAssignment) segment.vadAssignment = structuredClone(estimate.vadAssignment);
+        segment.qualityFlags = Array.from(new Set([
+            ...(segment.qualityFlags || []).filter((flag) => flag !== 'non_lexical_vocal_risk' && flag !== 'no_lexical_evidence'),
+            ...(estimate.quality_flags || []),
+        ]));
         applied++;
     }
     return applied;
@@ -1358,6 +1621,8 @@ function applyFallbackLines(segments, entries, fallbackLines) {
         seg.gateDecision = line.gate_decision || 'accepted';
         seg.qualityFlags = Array.isArray(line.quality_flags) ? [...line.quality_flags] : [];
         if (typeof line.greedy_text_similarity === 'number') seg.greedyTextSimilarity = line.greedy_text_similarity;
+        if (typeof line.ctc_end_ms === 'number') seg.ctcEnd = line.ctc_end_ms / 1000;
+        if (typeof line.tail_extension_ms === 'number') seg.tailExtensionMs = line.tail_extension_ms;
         seg.lineKind = line.line_kind || entry.lineKind || classifyAlignmentLine(entry.text);
         if (line.repeated_lyric === true || entry.repeatedLyric === true) seg.repeatedLyric = true;
         if (!wasSynced) applied++;
@@ -1386,8 +1651,12 @@ function copyAlignmentTiming(originalSegments, alignedSegments) {
         if (aligned.gateDecision) original.gateDecision = aligned.gateDecision;
         if (Array.isArray(aligned.qualityFlags)) original.qualityFlags = [...aligned.qualityFlags];
         if (typeof aligned.greedyTextSimilarity === 'number') original.greedyTextSimilarity = aligned.greedyTextSimilarity;
+        if (typeof aligned.ctcEnd === 'number') original.ctcEnd = aligned.ctcEnd;
+        if (typeof aligned.tailExtensionMs === 'number') original.tailExtensionMs = aligned.tailExtensionMs;
         if (aligned.lineKind) original.lineKind = aligned.lineKind;
         if (aligned.repeatedLyric === true) original.repeatedLyric = true;
+        if (aligned.vadAssignment) original.vadAssignment = structuredClone(aligned.vadAssignment);
+        if (aligned.syncAssistant) original.syncAssistant = structuredClone(aligned.syncAssistant);
         // 단어별 타임스탬프 — 모델이 Viterbi 백트레이스에서 이미 만든 값이다.
         // 여기서 들고 가지 않으면 사이드카 저장 단계까지 도달하지 못하고,
         // 줄 안 진행도는 선형 보간밖에 못 그린다.
@@ -2102,11 +2371,38 @@ async function processOne(item) {
         reason: finalTimelineDropped.length > 0 ? 'third_pass_reversed_original_order' : null,
     });
 
+    const assistantRegions = primaryDiagnostics?.vocal_regions ?? primaryDiagnostics?.vocalRegions;
+    const assistantDurationMs = Number(primaryDiagnostics?.audio_duration_ms
+        ?? primaryDiagnostics?.audioDurationMs) || 0;
+    const assistantResult = Array.isArray(assistantRegions)
+        ? applyAlignmentAssistant(workingSegments, assistantRegions, assistantDurationMs)
+        : { assessments: [], changes: [] };
+    if (assistantResult.changes.length > 0) {
+        await traceAlignment(traceId, 'alignment_assistant_validation', {
+            changeCount: assistantResult.changes.length,
+            changes: assistantResult.changes,
+            vadRegionCount: assistantRegions.length,
+            audioDurationMs: assistantDurationMs,
+        });
+    }
+
     const finalUnsyncedEntries = entries.filter((entry) => {
         const segment = workingSegments[entry.segmentIndex];
         return !segment || !hasStoredTiming(segment);
     });
     const finalUnsyncedCount = finalUnsyncedEntries.length;
+    const recoverySummary = {
+        directAcousticCount: workingSegments.filter((segment) =>
+            hasStoredTiming(segment) && segment.alignmentTrust === 'acoustic_strong').length,
+        acousticSoftCount: workingSegments.filter((segment) =>
+            hasStoredTiming(segment) && segment.alignmentTrust === 'acoustic_soft').length,
+        vadOrderedReviewCount: workingSegments.filter((segment) =>
+            hasStoredTiming(segment) && segment.alignmentSource === 'vad_ordered_review').length,
+        vadBoundaryReviewCount: workingSegments.filter((segment) =>
+            hasStoredTiming(segment) && segment.alignmentSource === 'vad_boundary_review').length,
+        blockedVocableRegionCount: nonLexicalVocalRegions.length,
+        finalUnsyncedCount,
+    };
 
     // 4. 저장 (마커 줄 보존)
     const beforeSaveSegments = segments.map((segment) => ({ ...segment }));
@@ -2141,6 +2437,7 @@ async function processOne(item) {
         attemptRejectedCount: rejectedCount,
         finalUnsyncedCount,
         finalUnsyncedIds: finalUnsyncedEntries.map((entry) => entry.id),
+        recoverySummary,
         unavailableEnglishModelIds,
         unsynced_review_ids: [...new Set([...unsyncedReviewIds, ...finalTimelineUnsyncedIds])],
         acceptedPrimaryLines: lines,
@@ -2203,6 +2500,7 @@ async function processOne(item) {
         outputLrc: content,
         outputLineCount: content.split(/\r?\n/).filter(Boolean).length,
         timingAudit,
+        recoverySummary,
     });
 
     // 라이브러리 카드의 가사 보유/싱크 상태 즉시 갱신

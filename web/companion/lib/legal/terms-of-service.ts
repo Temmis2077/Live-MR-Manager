@@ -1,15 +1,15 @@
 import type { LegalSection } from "@/lib/legal/privacy-policy";
 import { GITHUB_ISSUES_URL, QA_URL } from "@/lib/legal/privacy-policy";
 
-export const TERMS_EFFECTIVE_DATE = "2026년 6월 27일";
+export const TERMS_EFFECTIVE_DATE = "2026년 8월 30일";
 
 export const TERMS_SECTIONS: LegalSection[] = [
   {
     id: "intro",
     title: "1. 총칙",
     paragraphs: [
-      "본 이용약관(이하 「약관」)은 OSW(이하 「서비스」)의 이용 조건을 정합니다. 서비스는 Windows 데스크톱 애플리케이션과 Companion 웹사이트(lmrm.vercel.app)를 포함합니다.",
-      "서비스는 현재 베타(Beta) 단계로 제공되며, 기능·UI·연동 범위가 예고 없이 변경될 수 있습니다.",
+      "본 이용약관(이하 「약관」)은 OSW(이하 「서비스」)의 이용 조건을 정합니다. 서비스는 Windows 데스크톱 애플리케이션과 Companion 웹사이트(companion-six-kappa.vercel.app)를 포함합니다.",
+      "서비스는 첫 독립 베타를 준비 중이며, 현재 공개 설치본은 없습니다. 기능·UI·연동 범위는 검증 결과에 따라 변경될 수 있습니다.",
       "운영자: 총괄 프로듀싱 Temmis2077",
       `시행일: ${TERMS_EFFECTIVE_DATE}`,
       `일반 문의·커뮤니티: 문의 허브(${QA_URL}) 및 Discord(해당 페이지 안내)`,
@@ -32,8 +32,8 @@ export const TERMS_SECTIONS: LegalSection[] = [
       "Companion 웹은 앱 설치·연동 안내, FAQ, OAuth 콜백 브릿지, 개인정보 처리방침·이용약관 게시 등을 제공합니다.",
     ],
     list: [
-      "데스크톱 앱: 로컬 음원·유튜브 스트림 처리, AI MR 분리, 멜로밍 노래책 메타 동기화(선택) 등",
-      "Companion 웹: 안내 페이지, 멜로밍 OAuth 중계(선택), 다운로드 링크",
+      "데스크톱 앱: 로컬 음원·유튜브 스트림 처리, AI MR 분리, 가사 싱크와 OBS 오버레이 등",
+      "Companion 웹: 배포 준비 상태, 도움말, 법적 고지와 개발용 멜로밍 OAuth 경로",
       "음원 파일·AI 분리 결과는 이용자 PC에만 저장·처리되며, 운영자 서버로 업로드되지 않습니다",
     ],
   },
@@ -50,7 +50,7 @@ export const TERMS_SECTIONS: LegalSection[] = [
     id: "account",
     title: "5. 계정 및 멜로밍 연동",
     paragraphs: [
-      "서비스 자체의 별도 회원가입은 없습니다. 멜로밍 노래책 연동·로그인 기능 사용 시 멜로밍(meloming.com) 계정 및 멜로밍 이용약관·정책이 적용됩니다.",
+      "서비스 자체의 별도 회원가입은 없습니다. 멜로밍 노래책 연동은 현재 앱에서 비활성입니다. 향후 공개 후 로그인 기능을 사용하면 멜로밍(meloming.com) 계정 및 멜로밍 이용약관·정책이 적용됩니다.",
       "멜로밍 OAuth 연동 시 동의하는 권한(scope)은 `profile:read`, `channels:read`, `songbook:read`, `songbook:write`이며, `schedule:read`는 요청하지 않습니다. 상세는 [개인정보 처리방침](/privacy)을 참고하세요.",
       "OAuth·API 연동은 멜로밍 및 제3자 서비스 상태에 따라 일시 중단·제한될 수 있으며, 베타 기간에는 「개발 중」 안내가 표시될 수 있습니다.",
       "이용자는 자신의 멜로밍 계정·토큰·채널 설정을 관리할 책임이 있으며, 로그아웃·연동 해제는 앱·웹에서 제공되는 기능을 통해 할 수 있습니다.",

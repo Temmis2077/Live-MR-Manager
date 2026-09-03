@@ -5,7 +5,7 @@
  * 설정 화면의 <select id="output-device-select">를 채우고, 선택 시 재생 중에도
  * 즉시 장치를 바꾼다. 빈 값("")은 시스템 기본 장치를 뜻한다.
  */
-import { invoke } from './tauri-bridge.js';
+import { audioDeviceService } from '../ipc/services/audio.js';
 
 async function notify(message, type) {
   try {
@@ -23,8 +23,8 @@ export async function refreshOutputDevices() {
   let active = '';
   try {
     [devices, active] = await Promise.all([
-      invoke('list_output_devices'),
-      invoke('get_output_device'),
+      audioDeviceService.listOutputDevices(),
+      audioDeviceService.getOutputDevice(),
     ]);
   } catch (err) {
     console.error('출력 장치 목록 실패:', err);
@@ -56,7 +56,7 @@ export function initOutputDeviceControls() {
     const name = sel.value; // "" = 기본
     sel.disabled = true;
     try {
-      const resolved = await invoke('set_output_device', { name });
+      const resolved = await audioDeviceService.setOutputDevice(name);
       await notify(`출력 장치 전환: ${resolved}`, 'success');
     } catch (err) {
       await notify('출력 장치 전환 실패: ' + err, 'error');

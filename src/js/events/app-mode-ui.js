@@ -79,7 +79,13 @@ export function initAppModeControls() {
   if (!APP_MODE_UI_ENABLED) {
     const seg = document.getElementById('app-mode-seg');
     const card = seg ? seg.closest('.settings-group') : null;
-    if (card) card.hidden = true;
+    if (card) {
+      // 탭 전환(settings-tabs.js)도 같은 hidden 속성을 쓴다. 표시만 끄면
+      // 탭을 한 번 왕복하는 순간 다시 켜지므로, 릴리즈에서 감췄다는 사실을
+      // 별도 표식으로 남겨 탭 쪽이 건드리지 않게 한다.
+      card.dataset.releaseHidden = '1';
+      card.hidden = true;
+    }
     return;
   }
 

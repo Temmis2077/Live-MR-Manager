@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum Status {
     Pending,
@@ -13,21 +13,23 @@ pub enum Status {
     Finished,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
+#[tauri_specta(event_name = "playback-status")]
 #[serde(rename_all = "camelCase")]
 pub struct PlaybackStatus {
     pub status: Status,
     pub message: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
+#[tauri_specta(event_name = "playback-progress")]
 #[serde(rename_all = "camelCase")]
 pub struct PlaybackProgress {
     pub position_ms: u64,
     pub duration_ms: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AppState {
     pub current_track: Option<String>,
@@ -40,17 +42,22 @@ pub struct AppState {
     pub is_playing: bool,
     // 트랙별 독립 페이더(0~100%, 볼륨·밸런스 위에 곱해지는 트림) + 음소거/솔로.
     pub vocal_fader: f32,
+    pub backing_fader: f32,
     pub inst_fader: f32,
     pub vocal_muted: bool,
+    pub backing_muted: bool,
     pub inst_muted: bool,
     pub vocal_solo: bool,
+    pub backing_solo: bool,
     pub inst_solo: bool,
     // 채널 라우팅: 각 채널(모니터/MR)이 어떤 소스를 포함하는지.
     // 모니터 = 내가 듣는 것, MR = 방송 출력(2번째 장치).
     pub mon_route_vocal: bool,
+    pub mon_route_backing: bool,
     pub mon_route_inst: bool,
     pub mon_route_metro: bool,
     pub mr_route_vocal: bool,
+    pub mr_route_backing: bool,
     pub mr_route_inst: bool,
     pub mr_route_metro: bool,
     // 메트로놈(3번째 소스).
@@ -71,16 +78,21 @@ impl Default for AppState {
             lyric_enabled: false,
             is_playing: false,
             vocal_fader: 100.0,
+            backing_fader: 100.0,
             inst_fader: 100.0,
             vocal_muted: false,
+            backing_muted: false,
             inst_muted: false,
             vocal_solo: false,
+            backing_solo: false,
             inst_solo: false,
             // 모니터는 기본으로 보컬+MR을 다 들음(가이드), MR 채널은 반주만.
             mon_route_vocal: true,
+            mon_route_backing: true,
             mon_route_inst: true,
             mon_route_metro: false,
             mr_route_vocal: false,
+            mr_route_backing: true,
             mr_route_inst: true,
             mr_route_metro: false,
             metro_enabled: false,
@@ -90,21 +102,21 @@ impl Default for AppState {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Genre {
     pub id: i64,
     pub name: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Category {
     pub id: i64,
     pub name: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SongMetadata {
     pub id: Option<i64>,

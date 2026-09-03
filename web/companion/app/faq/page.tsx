@@ -4,7 +4,7 @@ import { FaqList } from "@/components/FaqList";
 export const metadata = {
   title: "도움말",
   description:
-    "OSW 설치, 멜로밍 노래책 연동, 곡 정보·동기화에 대한 자주 묻는 질문",
+    "OSW 설치와 사용법 — MR 분리 속도, GPU 가속 팩, 가사 싱크, 곡 목록 가져오기·백업에 대한 자주 묻는 질문",
 };
 
 export default function FaqPage() {
@@ -16,7 +16,9 @@ export default function FaqPage() {
           <span className="badge">도움말</span>
           <h1>자주 묻는 질문</h1>
           <p>
-            앱 사용법과 멜로밍 노래책 연동에 대해 자주 받는 질문입니다.
+            처음 쓰실 때 막히기 쉬운 것부터 순서대로 모았습니다. 앱 안에서는{" "}
+            <strong>⚙ → 시작 가이드</strong>와 <strong>?</strong> 키(단축키 도움말)도
+            함께 보실 수 있습니다.
           </p>
         </section>
         <FaqList />

@@ -5,14 +5,13 @@ import {
   FAQ_URL,
   GITHUB_ISSUES_BUG_URL,
   GITHUB_ISSUES_FEATURE_URL,
-  GITHUB_ISSUES_MELOMING_URL,
   QA_URL,
 } from "@/lib/site";
 
 export const metadata = {
   title: "문의하기",
   description:
-    "OSW 설치·멜로밍 연동 문의 — Discord, FAQ, GitHub Issues",
+    "OSW 베타 준비·사용 문의 — Discord, FAQ, GitHub Issues",
 };
 
 export default function QaPage() {
@@ -27,7 +26,7 @@ export default function QaPage() {
           <span className="badge">문의</span>
           <h1>도움이 필요하신가요?</h1>
           <p>
-            설치·멜로밍 연동·사용법은 FAQ와 Discord에서 안내합니다. 재현 가능한
+            베타 준비 상태와 사용법은 FAQ와 Discord에서 안내합니다. 재현 가능한
             버그는 GitHub Issues로 등록해 주세요.
           </p>
         </section>
@@ -53,8 +52,7 @@ export default function QaPage() {
           <article className="card">
             <h2>도움말 (FAQ)</h2>
             <p>
-              채널 주소 입력, 가져오기·보내기, OAuth, 문의 시 주의사항 등을
-              모아 두었습니다.
+              설치 준비 상태, 곡 추가, MR 분리, 가사 싱크와 문의 시 주의사항을 모았습니다.
             </p>
             <Link href="/faq" className="btn btn-secondary">
               FAQ 보기
@@ -65,7 +63,7 @@ export default function QaPage() {
         <section className="card" style={{ marginTop: "1rem" }}>
           <h2>GitHub Issues — 공식 신고</h2>
           <p>
-            재현 가능한 버그·멜로밍 연동 오류·기능 제안은 아래 템플릿을 사용해
+            재현 가능한 버그와 기능 제안은 아래 템플릿을 사용해
             주세요. 개인정보·공식 문의도 Issues로 접수합니다.
           </p>
           <div className="support-issue-links">
@@ -76,14 +74,6 @@ export default function QaPage() {
               rel="noopener noreferrer"
             >
               버그 신고
-            </a>
-            <a
-              href={GITHUB_ISSUES_MELOMING_URL}
-              className="btn btn-secondary"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              멜로밍 연동 문의
             </a>
             <a
               href={GITHUB_ISSUES_FEATURE_URL}

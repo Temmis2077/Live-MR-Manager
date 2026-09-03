@@ -1,4 +1,5 @@
 use serde::{Serialize, Deserialize};
+use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 use crate::audio_player::sys_log;
@@ -14,6 +15,8 @@ use crate::audio::AudioProcessor;
 use crate::onnx_engine::OnnxEngine;
 use regex::Regex;
 use parking_lot::Mutex;
+use sha2::{Digest, Sha256};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Clone)]
 pub struct CachedAlignmentState {
@@ -134,6 +137,9 @@ pub static CANCEL_ALIGNMENT: AtomicBool = AtomicBool::new(false);
 pub static ALIGNMENT_QUEUE_LOCK: once_cell::sync::Lazy<tokio::sync::Mutex<()>> =
     once_cell::sync::Lazy::new(|| tokio::sync::Mutex::new(()));
 
+const ALIGNMENT_DEBUG_SCHEMA_VERSION: u32 = 2;
+const ALIGNMENT_ENGINE_REVISION: &str = "ctc-anchor-lexical-tail-v3";
+
 /// 개발 빌드에서만 프런트 정렬 파이프라인의 입출력을 JSONL로 보관한다.
 /// 가사 원문을 포함하므로 릴리스 빌드에서는 의도적으로 아무 파일도 쓰지 않는다.
 #[command]
@@ -163,7 +169,9 @@ pub fn write_alignment_debug_trace(
     }
 
     let record = serde_json::json!({
-        "schemaVersion": 1,
+        "schemaVersion": ALIGNMENT_DEBUG_SCHEMA_VERSION,
+        "appVersion": env!("CARGO_PKG_VERSION"),
+        "alignmentEngineRevision": ALIGNMENT_ENGINE_REVISION,
         "timestampMs": std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis())
@@ -231,6 +239,13 @@ fn normalize_path_key(path: &str) -> String {
     path.replace("\\", "/").to_lowercase()
 }
 
+fn alignment_metadata_audio_key(path: &str) -> String {
+    if let Some(id) = extract_youtube_video_id(path.trim()) {
+        return format!("youtube:{}", id);
+    }
+    normalize_path_key(path.trim())
+}
+
 use crate::youtube_url::extract_youtube_video_id;
 
 fn youtube_url_variants(url: &str) -> Vec<String> {
@@ -281,8 +296,19 @@ pub struct LineAlignment {
     pub input_index: usize,
     pub text: String,
     pub extracted_text: String,
+    /// Greedy CTC transcript와 목표 정렬문 사이의 NFD 문자 유사도(0~1).
+    /// Forced path가 모든 목표 토큰을 소비했더라도 실제 음절이 다른 추임새면
+    /// 낮아지므로, 프런트가 VAD/coverage와 독립된 가사 식별 증거로 사용한다.
+    #[serde(default)]
+    pub greedy_text_similarity: f32,
     pub start_ms: i64,
     pub end_ms: i64,
+    /// CTC가 마지막 가사 토큰을 소비한 원래 종료 시각. 노래의 모음 sustain은
+    /// 토큰 이후에도 이어질 수 있어 `end_ms`는 VAD tail만큼 늘어날 수 있다.
+    #[serde(default)]
+    pub ctc_end_ms: i64,
+    #[serde(default)]
+    pub tail_extension_ms: i64,
     pub words: Vec<WordAlignment>,
     /// 이 줄 정렬의 음향적 확신도 0~1 (그 줄 토큰이 배정된 프레임에서의 평균
     /// emission 확률의 기하평균). 모델이 "여기서 이 글자를 들었다"고 강하게 말한
@@ -336,6 +362,10 @@ pub struct AlignmentDiagnostics {
     pub manual_anchor_count: usize,
     #[serde(default)]
     pub automatic_phrase_anchor_count: usize,
+    /// Coarse path에서 절대 confidence와 lexical similarity를 모두 통과한
+    /// 비반복 줄 수. 실제 phrase boundary 수와 함께 로그 감사에 사용한다.
+    #[serde(default)]
+    pub automatic_anchor_candidate_count: usize,
     #[serde(default)]
     pub phrase_window_count: usize,
     /// 결과 오디오 시간축 기준의 phrase 경계 시각.
@@ -363,6 +393,10 @@ pub struct VocalRegion {
 pub struct WaveformSummary {
     pub points: Vec<(f32, f32)>,
     pub duration_sec: f32,
+    #[serde(default)]
+    pub vad_version: u32,
+    #[serde(default)]
+    pub vocal_regions: Vec<VocalRegion>,
 }
 
 #[command]
@@ -378,7 +412,10 @@ pub async fn get_separated_audio_list(handle: AppHandle) -> Result<Vec<Separated
             let path = entry.path();
             if path.is_dir() {
                 let folder_name = entry.file_name().to_string_lossy().to_string();
-                let has_vocal = crate::mr_cache::resolve_vocal(&path).is_some();
+                if folder_name.starts_with('_') {
+                    continue;
+                }
+                let has_vocal = crate::mr_cache::resolve_alignment_vocal(&path).is_some();
                 let has_inst = crate::mr_cache::resolve_inst(&path).is_some();
 
                 let original_path = urlencoding::decode(&folder_name).map(|d| d.into_owned()).unwrap_or(folder_name.clone());
@@ -635,6 +672,13 @@ pub async fn run_forced_alignment(
     // "준비 중"으로 표시하도록 별도 신호를 보낸다. (-1은 대기열 대기)
     let _ = handle.emit("alignment-progress", -2);
 
+    // 세션 생성 직전에 한 번 더 본다. 이 구간(오디오 디코딩 → ONNX 세션 생성)은
+    // 수 초에서 수십 초가 걸리는데 그 안에 취소 확인 지점이 하나도 없었다 —
+    // "준비 중"에서 멈춘 것처럼 보일 때 중지를 눌러도 아무 일이 없었던 이유다.
+    if CANCEL_ALIGNMENT.load(Ordering::SeqCst) {
+        return Err("작업이 사용자에 의해 취소되었습니다.".to_string());
+    }
+
     let emission_key = inference_cache_key(&resolved_audio_path, &model_path);
     let (full_emission_probs, full_vocal_activity, emission_cache_hit) =
         if let Some((emission_probs, vocal_activity)) = read_cached_inference(&emission_key) {
@@ -645,6 +689,19 @@ pub async fn run_forced_alignment(
             (emission_probs, vocal_activity, true)
         } else {
             sys_log("[Alignment] Emission cache miss: running full-song ONNX inference.");
+            // 오디오 디코딩 · ONNX 세션 생성 · 전곡 추론은 전부 동기 CPU 작업이다.
+            // 이걸 async 커맨드 본문에서 그대로 돌리면 tokio 워커 스레드를 몇
+            // 분씩 붙잡아, 그 사이 들어온 다른 커맨드(cancel_forced_alignment
+            // 포함)가 실행될 기회를 얻지 못한다 — "무한 로딩인데 중지도 안 됨"의
+            // 구조적 원인. 같은 이유로 key_bpm 분석은 이미 spawn_blocking을 쓴다
+            // (lyrics_db.rs의 autofill_song_info).
+            let blocking_handle = handle.clone();
+            let blocking_path = resolved_audio_path.clone();
+            let blocking_model = model_path.clone();
+            let (emission_probs, vocal_activity) = tauri::async_runtime::spawn_blocking(move || {
+            let handle = blocking_handle;
+            let resolved_audio_path = blocking_path;
+            let model_path = blocking_model;
             let emission_probs = if is_whisper {
                 sys_log("[Alignment] Engine B (Whisper) Preprocessing: Extracting Mel-spectrogram...");
                 let raw_samples = processor.load_and_preprocess(&resolved_audio_path)?;
@@ -693,8 +750,20 @@ pub async fn run_forced_alignment(
                     sys_log(&format!("[Alignment] Vocal activity 분석 생략: {}", err));
                     Vec::new()
                 });
-            let emission_probs = Arc::new(emission_probs);
-            let vocal_activity = Arc::new(vocal_activity);
+            Ok::<_, String>((Arc::new(emission_probs), Arc::new(vocal_activity)))
+            })
+            .await
+            .map_err(|e| {
+                // ort 전역 락 오염이면 "스레드가 중단됐습니다"보다 무엇을 해야
+                // 하는지가 중요하다 — 이 프로세스에서는 재시작 말고 방법이 없다.
+                let raw = e.to_string();
+                if crate::onnx_engine::note_possible_ort_poisoning(&raw) {
+                    crate::onnx_engine::ORT_BROKEN_MSG.to_string()
+                } else {
+                    format!("정렬 작업 스레드가 중단됐습니다: {}", raw)
+                }
+            })??;
+
             store_cached_inference(
                 emission_key,
                 Arc::clone(&emission_probs),
@@ -857,6 +926,29 @@ fn line_token_spans(
     out
 }
 
+/// 문장부호와 공백을 제거한 키가 둘 이상이면 반복 가사로 표시한다.
+/// 반복 후렴의 coarse 위치는 어느 반복인지 구분하기 어려워 자동 앵커에서 제외한다.
+fn repeated_lyric_mask(lyric_lines: &[String]) -> Vec<bool> {
+    let keys: Vec<String> = lyric_lines
+        .iter()
+        .map(|line| {
+            line.chars()
+                .filter(|ch| ch.is_alphanumeric())
+                .flat_map(|ch| ch.to_lowercase())
+                .collect()
+        })
+        .collect();
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for key in &keys {
+        if !key.is_empty() {
+            *counts.entry(key.as_str()).or_insert(0) += 1;
+        }
+    }
+    keys.iter()
+        .map(|key| !key.is_empty() && counts.get(key.as_str()).copied().unwrap_or(0) > 1)
+        .collect()
+}
+
 /// 앵커 사이 구간을 독립적으로 재정렬해 전역 정렬의 밀림 전파를 끊는다.
 ///
 /// 배경: 지금 정렬은 곡 전체를 한 번의 순차 CTC로 맞춘다. 그래서 중간에 한 번
@@ -874,6 +966,8 @@ fn refine_with_anchors(
     emission_probs: &Array2<f32>,
     target_tokens: &[usize],
     line_spans: &[LineTokenSpan],
+    repeated_lines: &[bool],
+    anchor_eligible: &[bool],
     path: &[usize],
     trans_p: f32,
     blank_p: f32,
@@ -885,37 +979,33 @@ fn refine_with_anchors(
     }
 
     // 1. 줄별로 배정된 프레임 구간과 평균 확신도를 구한다.
-    struct LineInfo { idx: usize, first: usize, last: usize, conf: f32 }
+    struct LineInfo { idx: usize, first: usize, last: usize }
     let mut infos: Vec<LineInfo> = Vec::new();
     for (li, ls) in line_spans.iter().enumerate() {
+        if repeated_lines.get(li).copied().unwrap_or(false) { continue; }
+        if !anchor_eligible.get(li).copied().unwrap_or(false) { continue; }
         if ls.tok_to <= ls.tok_from { continue; } // 토큰 없는 줄(타 언어 등)은 앵커 후보 아님
         let mut first = usize::MAX;
         let mut last = 0usize;
-        let mut sum = 0f32;
         let mut cnt = 0usize;
         for (f, &tok_idx) in path.iter().enumerate() {
             if tok_idx == usize::MAX { continue; }
             if tok_idx >= ls.tok_from && tok_idx < ls.tok_to {
                 if first == usize::MAX { first = f; }
                 last = f;
-                sum += emission_probs[[f, target_tokens[tok_idx]]];
                 cnt += 1;
             }
         }
         if cnt == 0 || first == usize::MAX { continue; }
-        infos.push(LineInfo { idx: li, first, last, conf: sum / cnt as f32 });
+        infos.push(LineInfo { idx: li, first, last });
     }
     if infos.len() < 3 { return None; }
 
-    // 2. 확신도 상위 줄을 앵커로 (중앙값 이상). 너무 촘촘하면 재정렬 효과가
-    //    없으므로 간격도 확보한다.
-    let mut confs: Vec<f32> = infos.iter().map(|i| i.conf).collect();
-    confs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let median_conf = confs[confs.len() / 2];
-
+    // 2. 호출자가 절대 confidence와 greedy lexical evidence를 모두 확인한
+    //    줄만 앵커로 사용한다. 곡 전체가 나쁜 경우에도 "나쁜 결과 중 중앙값
+    //    이상"을 앵커로 승격시키지 않는다.
     let mut anchors: Vec<&LineInfo> = Vec::new();
     for info in &infos {
-        if info.conf < median_conf { continue; }
         // 단조 증가하는 앵커만 채택(순서가 뒤집힌 건 이미 잘못된 정렬).
         if let Some(prev) = anchors.last() {
             if info.first <= prev.last { continue; }
@@ -1116,6 +1206,84 @@ fn line_vocal_activity(activity_frames: &[f32], start_frame: usize, end_frame: u
     activity_frames[from..to].iter().sum::<f32>() / (to - from) as f32
 }
 
+const VOCAL_TAIL_ACTIVITY_THRESHOLD: f32 = 0.10;
+const VOCAL_TAIL_SILENCE_FRAMES: usize = 10; // 20ms × 10 = 200ms
+const VOCAL_TAIL_MAX_MS: i64 = 3_000;
+const VOCAL_TAIL_NEXT_LINE_GAP_MS: i64 = 80;
+
+/// CTC는 마지막 음절 토큰을 인식한 순간까지만 반환하지만, 노래는 그 뒤로
+/// 모음을 길게 끄는 경우가 많다. 분리 보컬 활동이 이어지는 동안만 종료를
+/// 연장하고 200ms 연속 무성이 나오면 그 시작점에서 멈춘다.
+fn extend_vocal_tail_end_ms(
+    ctc_end_ms: i64,
+    next_line_start_ms: Option<i64>,
+    activity_frames: &[f32],
+    frame_duration_ms: i64,
+) -> i64 {
+    if ctc_end_ms <= 0 || activity_frames.is_empty() || frame_duration_ms <= 0 {
+        return ctc_end_ms;
+    }
+    let audio_end_ms = activity_frames.len() as i64 * frame_duration_ms;
+    let next_cap_ms = next_line_start_ms
+        .filter(|next| *next > ctc_end_ms)
+        .map(|next| next.saturating_sub(VOCAL_TAIL_NEXT_LINE_GAP_MS))
+        .unwrap_or(audio_end_ms);
+    let upper_ms = (ctc_end_ms + VOCAL_TAIL_MAX_MS)
+        .min(next_cap_ms)
+        .min(audio_end_ms);
+    if upper_ms <= ctc_end_ms {
+        return ctc_end_ms;
+    }
+
+    let from = ((ctc_end_ms + frame_duration_ms - 1) / frame_duration_ms) as usize;
+    let to = ((upper_ms + frame_duration_ms - 1) / frame_duration_ms) as usize;
+    let mut silence_start: Option<usize> = None;
+    let mut last_active_end_ms = ctc_end_ms;
+    for frame in from.min(activity_frames.len())..to.min(activity_frames.len()) {
+        if activity_frames[frame] >= VOCAL_TAIL_ACTIVITY_THRESHOLD {
+            silence_start = None;
+            last_active_end_ms = (((frame + 1) as i64) * frame_duration_ms).min(upper_ms);
+            continue;
+        }
+        let start = *silence_start.get_or_insert(frame);
+        if frame + 1 - start >= VOCAL_TAIL_SILENCE_FRAMES {
+            return ctc_end_ms.max((start as i64 * frame_duration_ms).min(upper_ms));
+        }
+    }
+    ctc_end_ms.max(last_active_end_ms.min(upper_ms))
+}
+
+fn normalized_alignment_chars(text: &str) -> Vec<char> {
+    text.nfd()
+        .flat_map(|ch| ch.to_lowercase())
+        .filter(|ch| ch.is_alphanumeric())
+        .collect()
+}
+
+/// Character-level Levenshtein similarity after NFD normalization. Hangul is
+/// decomposed so a one-jamo singing/ASR error is less severe than replacing a
+/// whole syllable. Empty-vs-empty is not useful alignment evidence and is 0.
+fn greedy_text_similarity(target: &str, extracted: &str) -> f32 {
+    let left = normalized_alignment_chars(target);
+    let right = normalized_alignment_chars(extracted);
+    let denominator = left.len().max(right.len());
+    if denominator == 0 { return 0.0; }
+
+    let mut previous: Vec<usize> = (0..=right.len()).collect();
+    for (i, left_ch) in left.iter().enumerate() {
+        let mut current = vec![0usize; right.len() + 1];
+        current[0] = i + 1;
+        for (j, right_ch) in right.iter().enumerate() {
+            let substitution = previous[j] + usize::from(left_ch != right_ch);
+            current[j + 1] = (current[j] + 1)
+                .min(previous[j + 1] + 1)
+                .min(substitution);
+        }
+        previous = current;
+    }
+    (1.0 - previous[right.len()] as f32 / denominator as f32).clamp(0.0, 1.0)
+}
+
 /// Full-song 20ms VAD를 프런트에 보내기 좋은 연속 구간으로 압축한다.
 /// 200ms 이하의 짧은 공백은 리버브/자음 사이 끊김으로 보고 합치고,
 /// 160ms보다 짧은 단독 활성 구간은 클릭·누설음일 가능성이 높아 제외한다.
@@ -1194,6 +1362,8 @@ fn line_time_ranges(lyric_lines: &[String], timestamps: &[WordTimestamp]) -> Vec
 fn detect_vad_phrase_anchors(
     line_spans: &[LineTokenSpan],
     line_times: &[(i64, i64)],
+    repeated_lines: &[bool],
+    anchor_eligible: &[bool],
     activity_frames: &[f32],
     frame_duration_ms: f32,
 ) -> Vec<(usize, usize)> {
@@ -1205,6 +1375,13 @@ fn detect_vad_phrase_anchors(
     }
     let mut anchors = Vec::new();
     for i in 0..line_spans.len() - 1 {
+        if repeated_lines.get(i).copied().unwrap_or(false)
+            || repeated_lines.get(i + 1).copied().unwrap_or(false)
+            || !anchor_eligible.get(i).copied().unwrap_or(false)
+            || !anchor_eligible.get(i + 1).copied().unwrap_or(false)
+        {
+            continue;
+        }
         let (line_start, line_end) = line_times[i];
         let (next_start, _) = line_times[i + 1];
         if line_spans[i].tok_to <= line_spans[i].tok_from
@@ -1237,6 +1414,43 @@ fn detect_vad_phrase_anchors(
         }
     }
     anchors
+}
+
+const AUTO_ANCHOR_MIN_CONFIDENCE: f32 = 0.005;
+const AUTO_ANCHOR_MIN_LEXICAL_SIMILARITY: f32 = 0.35;
+
+/// Backend-internal anchors run before the frontend quality gate, so they must
+/// not be selected from a relative ranking alone. Require independent acoustic
+/// and lexical evidence, and never anchor a repeated refrain automatically.
+fn automatic_anchor_eligibility(
+    confidences: &[f32],
+    lexical_similarities: &[f32],
+    repeated_lines: &[bool],
+) -> Vec<bool> {
+    let count = confidences.len().max(lexical_similarities.len()).max(repeated_lines.len());
+    (0..count).map(|index| {
+        !repeated_lines.get(index).copied().unwrap_or(false)
+            && confidences.get(index).copied().unwrap_or(0.0) >= AUTO_ANCHOR_MIN_CONFIDENCE
+            && lexical_similarities.get(index).copied().unwrap_or(0.0)
+                >= AUTO_ANCHOR_MIN_LEXICAL_SIMILARITY
+    }).collect()
+}
+
+fn line_greedy_similarities(
+    aligner: &Aligner,
+    lyric_lines: &[String],
+    line_times: &[(i64, i64)],
+    greedy_path: &[usize],
+    frame_duration_ms: f32,
+) -> Vec<f32> {
+    lyric_lines.iter().enumerate().map(|(index, line)| {
+        let (start_ms, end_ms) = line_times.get(index).copied().unwrap_or((0, 0));
+        if end_ms <= start_ms { return 0.0; }
+        let start_frame = (start_ms as f32 / frame_duration_ms).floor() as usize;
+        let end_frame = (end_ms as f32 / frame_duration_ms).ceil() as usize;
+        let extracted = aligner.get_text_from_path(greedy_path, start_frame, end_frame);
+        greedy_text_similarity(line, &extracted)
+    }).collect()
 }
 
 /// 자동 VAD 앵커를 수동 앵커와 합친다. 수동 앵커의 토큰·시간은 절대
@@ -1368,6 +1582,7 @@ fn perform_alignment_internal(
     if target_tokens.is_empty() { return Err("유효한 가사 토큰이 없습니다.".to_string()); }
 
     let line_spans = line_token_spans(&lyric_lines, &word_spans);
+    let repeated_lines = repeated_lyric_mask(&lyric_lines);
 
     // 사용자 하드 앵커(수동 싱크·보컬시작)를 (토큰, 프레임)으로 변환·정제.
     let orig_to_pos: HashMap<usize, usize> =
@@ -1376,6 +1591,7 @@ fn perform_alignment_internal(
         anchors, &orig_to_pos, &line_spans, frame_duration_ms, emission_probs.nrows(),
     );
 
+    let greedy_path = aligner.greedy_decode(emission_probs);
     let coarse_path = if !anchor_pts.is_empty() {
         // 앵커가 있으면 그 고정점으로 구간을 나눠 정렬한다 — 밀림이 앵커를 넘어
         // 전파되지 않는다. 사용자가 확정한 시각이므로 확신도 재정렬보다 강하다.
@@ -1384,11 +1600,25 @@ fn perform_alignment_internal(
             &aligner, emission_probs, &target_tokens, &anchor_pts, trans_p, blank_p, rep_p,
         )
     } else {
-        // 앵커가 없으면 전역 1회 정렬 후, 확신도 높은 줄을 앵커로 그 사이만 재정렬.
+        // 앵커가 없으면 전역 1회 정렬 후, 절대 음향·텍스트 증거를 모두
+        // 만족한 줄만 앵커로 그 사이를 재정렬한다.
         let global = aligner.forced_align(emission_probs, &target_tokens, trans_p, blank_p, rep_p);
+        let global_timestamps = aligner.get_word_timestamps(
+            &global, &word_spans, frame_duration_ms,
+        );
+        let global_line_times = line_time_ranges(&lyric_lines, &global_timestamps);
+        let global_confidences = line_confidences(
+            emission_probs, &target_tokens, &line_spans, &global,
+        );
+        let global_similarities = line_greedy_similarities(
+            &aligner, &lyric_lines, &global_line_times, &greedy_path, frame_duration_ms,
+        );
+        let global_anchor_eligible = automatic_anchor_eligibility(
+            &global_confidences, &global_similarities, &repeated_lines,
+        );
         refine_with_anchors(
             &aligner, emission_probs, &target_tokens, &line_spans,
-            &global, trans_p, blank_p, rep_p,
+            &repeated_lines, &global_anchor_eligible, &global, trans_p, blank_p, rep_p,
         )
         .unwrap_or(global)
     };
@@ -1403,9 +1633,29 @@ fn perform_alignment_internal(
         &coarse_path, &word_spans, frame_duration_ms,
     );
     let coarse_line_times = line_time_ranges(&lyric_lines, &coarse_timestamps);
+    let coarse_confidences = line_confidences(
+        emission_probs, &target_tokens, &line_spans, &coarse_path,
+    );
+    let coarse_similarities = line_greedy_similarities(
+        &aligner, &lyric_lines, &coarse_line_times, &greedy_path, frame_duration_ms,
+    );
+    let coarse_anchor_eligible = automatic_anchor_eligibility(
+        &coarse_confidences, &coarse_similarities, &repeated_lines,
+    );
+    let automatic_anchor_candidate_count = coarse_anchor_eligible
+        .iter()
+        .filter(|eligible| **eligible)
+        .count();
+    sys_log(&format!(
+        "[Alignment] 자동 앵커 다중증거 후보 {}/{}줄",
+        automatic_anchor_candidate_count,
+        line_spans.len(),
+    ));
     let auto_phrase_anchors = detect_vad_phrase_anchors(
         &line_spans,
         &coarse_line_times,
+        &repeated_lines,
+        &coarse_anchor_eligible,
         vocal_activity_frames,
         frame_duration_ms,
     );
@@ -1443,8 +1693,17 @@ fn perform_alignment_internal(
     let confidences = multi_evidence_confidences(
         &emission_confidences, &margins, &coverages, &activities,
     );
-
-    let greedy_path = aligner.greedy_decode(emission_probs);
+    let extended_line_ends: Vec<i64> = final_line_times.iter().enumerate().map(|(li, &(_, end_ms))| {
+        let next_start_ms = final_line_times.iter().skip(li + 1)
+            .map(|&(start_ms, _)| start_ms)
+            .find(|start_ms| *start_ms > end_ms);
+        extend_vocal_tail_end_ms(
+            end_ms,
+            next_start_ms,
+            vocal_activity_frames,
+            frame_duration_ms as i64,
+        )
+    }).collect();
 
     let mut all_line_alignments = Vec::new();
     let mut word_idx = 0;
@@ -1469,17 +1728,28 @@ fn perform_alignment_internal(
         }
 
         if !line_words.is_empty() {
+            let ctc_end_ms = line_end_ms;
+            let extended_end_ms = extended_line_ends.get(li).copied()
+                .unwrap_or(ctc_end_ms)
+                .max(ctc_end_ms);
             let start_frame = (line_start_ms as f32 / frame_duration_ms) as usize;
-            let end_frame = (line_end_ms as f32 / frame_duration_ms) as usize;
+            let end_frame = (ctc_end_ms as f32 / frame_duration_ms) as usize;
             let extracted_text = aligner.get_text_from_path(&greedy_path, start_frame, end_frame);
+            let text_similarity = greedy_text_similarity(&line_text, &extracted_text);
+            if let Some(last_word) = line_words.last_mut() {
+                last_word.end_ms = extended_end_ms;
+            }
 
             all_line_alignments.push(LineAlignment {
                 segment_id: line_ids.get(orig_of_line[li]).cloned().unwrap_or_default(),
                 input_index: orig_of_line[li],
                 text: line_text,
                 extracted_text,
+                greedy_text_similarity: text_similarity,
                 start_ms: line_start_ms + time_offset_ms,
-                end_ms: line_end_ms + time_offset_ms,
+                end_ms: extended_end_ms + time_offset_ms,
+                ctc_end_ms: ctc_end_ms + time_offset_ms,
+                tail_extension_ms: extended_end_ms.saturating_sub(ctc_end_ms),
                 words: line_words.into_iter().map(|word| WordAlignment {
                     word: word.word,
                     start_ms: word.start_ms + time_offset_ms,
@@ -1501,6 +1771,7 @@ fn perform_alignment_internal(
     let diagnostics = AlignmentDiagnostics {
         manual_anchor_count: anchor_pts.len(),
         automatic_phrase_anchor_count: phrase_anchors.len().saturating_sub(anchor_pts.len()),
+        automatic_anchor_candidate_count,
         phrase_window_count: phrase_anchors.len().saturating_add(1),
         phrase_boundary_ms: phrase_anchors.iter()
             .map(|&(_, frame)| frame as i64 * frame_duration_ms as i64 + time_offset_ms)
@@ -1544,30 +1815,49 @@ pub async fn get_waveform_summary(handle: AppHandle, audio_path: String) -> Resu
     if cache_path.exists() {
         if let Ok(content) = fs::read_to_string(&cache_path) {
             if let Ok(summary) = serde_json::from_str::<WaveformSummary>(&content) {
-                sys_log(&format!("[Alignment] Waveform loaded from cache: {:?}", resolved_path));
-                return Ok(summary);
+                if summary.vad_version >= 1 {
+                    sys_log(&format!(
+                        "[Alignment] Waveform/VAD loaded from cache: {:?} (vocal_regions={})",
+                        resolved_path, summary.vocal_regions.len()
+                    ));
+                    return Ok(summary);
+                }
+                sys_log(&format!("[Alignment] Waveform cache missing VAD; regenerating: {:?}", resolved_path));
             }
         }
     }
 
     sys_log(&format!("[Alignment] Generating waveform summary for: {:?}", resolved_path));
-    
-    let processor = AudioProcessor::new();
-    let n_buckets = 2000;
-    
-    let (points, duration_sec) = processor.create_waveform_summary(&resolved_path, n_buckets)?;
-    let summary = WaveformSummary { 
-        points, 
-        duration_sec
-    };
 
-    // 3. Save to Cache
-    if let Ok(json) = serde_json::to_string(&summary) {
-        fs::write(&cache_path, json).ok();
-    }
-    
-    sys_log(&format!("[Alignment] Waveform summary generated and cached: {} points, {:.2}s", summary.points.len(), duration_sec));
-    Ok(summary)
+    // Decoding and VAD are CPU/blocking file work. Keeping them on the async
+    // command executor stalls unrelated Tauri commands and makes track changes
+    // look frozen, so generate the summary on the blocking pool.
+    tokio::task::spawn_blocking(move || -> Result<WaveformSummary, String> {
+        let processor = AudioProcessor::new();
+        let n_buckets = 2000;
+        let (points, duration_sec) = processor.create_waveform_summary(&resolved_path, n_buckets)?;
+        let raw = processor.load_mono_resampled_raw(&resolved_path)?;
+        let frame_count = ((raw.len() as f64 / 16_000.0) / 0.020).ceil() as usize;
+        let vocal_activity = processor.vocal_activity_frames(&raw, frame_count);
+        let vocal_regions = summarize_vocal_regions(&vocal_activity, 20);
+        let summary = WaveformSummary {
+            points,
+            duration_sec,
+            vad_version: 1,
+            vocal_regions,
+        };
+
+        if let Ok(json) = serde_json::to_string(&summary) {
+            fs::write(&cache_path, json).ok();
+        }
+        sys_log(&format!(
+            "[Alignment] Waveform/VAD generated and cached: {} points, {:.2}s, vocal_regions={}",
+            summary.points.len(), duration_sec, summary.vocal_regions.len()
+        ));
+        Ok(summary)
+    })
+    .await
+    .map_err(|err| format!("Waveform worker failed: {err}"))?
 }
 
 /// 유튜브 URL 등을 실제 로컬 오디오 파일 경로로 변환합니다.
@@ -1596,14 +1886,19 @@ async fn resolve_audio_path(handle: &AppHandle, path: &str) -> Result<PathBuf, S
                 .unwrap_or(false)
             {
                 if let Some(parent) = p.parent() {
-                    if let Some(vocal) = crate::mr_cache::resolve_vocal(parent) {
+                    if let Some(vocal) = crate::mr_cache::resolve_alignment_vocal(parent) {
+                        if crate::mr_cache::has_harmony_artifacts(parent)
+                            && crate::mr_cache::resolve_harmony_pair(parent).is_none()
+                        {
+                            sys_log("[Alignment] Harmony artifacts rejected; falling back to combined vocal");
+                        }
                         return Ok(vocal);
                     }
                 }
             }
             return Ok(p);
         }
-        if let Some(vocal) = crate::mr_cache::resolve_vocal(&p) {
+        if let Some(vocal) = crate::mr_cache::resolve_alignment_vocal(&p) {
             return Ok(vocal);
         }
     }
@@ -1623,7 +1918,12 @@ async fn resolve_audio_path(handle: &AppHandle, path: &str) -> Result<PathBuf, S
     lookup_keys.dedup();
     for key in lookup_keys {
         let cache_dir = paths.separated.join(urlencoding::encode(&key).to_string());
-        if let Some(vocal) = crate::mr_cache::resolve_vocal(&cache_dir) {
+        if let Some(vocal) = crate::mr_cache::resolve_alignment_vocal(&cache_dir) {
+            if crate::mr_cache::has_harmony_artifacts(&cache_dir)
+                && crate::mr_cache::resolve_harmony_pair(&cache_dir).is_none()
+            {
+                sys_log("[Alignment] Harmony artifacts rejected; falling back to combined vocal");
+            }
             return Ok(vocal);
         }
     }
@@ -2127,6 +2427,37 @@ mod aligner_tests {
     static EMISSION_CACHE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
+    fn alignment_metadata_key_canonicalizes_youtube_url_variants() {
+        let short = alignment_metadata_audio_key("https://youtu.be/NbKH4iZqq1Y");
+        let watch = alignment_metadata_audio_key("https://www.youtube.com/watch?v=NbKH4iZqq1Y");
+        assert_eq!(short, watch);
+        assert_eq!(short, "youtube:NbKH4iZqq1Y");
+    }
+
+    #[test]
+    fn vocal_tail_extends_through_held_activity_until_sustained_silence() {
+        let mut activity = vec![0.0f32; 200];
+        // CTC end 1.0s 이후 0.5s 동안 모음을 끌고, 그 뒤 무성.
+        for value in &mut activity[50..75] { *value = 0.7; }
+        assert_eq!(extend_vocal_tail_end_ms(1_000, Some(3_000), &activity, 20), 1_500);
+    }
+
+    #[test]
+    fn vocal_tail_ignores_short_dips_but_respects_next_line_cap() {
+        let mut activity = vec![0.0f32; 200];
+        for value in &mut activity[50..120] { *value = 0.6; }
+        // 100ms dip은 200ms 무성 기준보다 짧아 sustain을 끊지 않는다.
+        for value in &mut activity[65..70] { *value = 0.0; }
+        assert_eq!(extend_vocal_tail_end_ms(1_000, Some(2_000), &activity, 20), 1_920);
+    }
+
+    #[test]
+    fn vocal_tail_does_not_extend_when_ctc_end_is_already_silent() {
+        let activity = vec![0.0f32; 200];
+        assert_eq!(extend_vocal_tail_end_ms(1_000, Some(3_000), &activity, 20), 1_000);
+    }
+
+    #[test]
     fn emission_cache_reuses_only_an_identical_audio_model_key() {
         let _test_lock = EMISSION_CACHE_TEST_LOCK.lock();
         EMISSION_CACHE.lock().clear();
@@ -2424,11 +2755,62 @@ mod aligner_tests {
         let mut activity = vec![0.8f32; 60];
         for frame in 10..40 { activity[frame] = 0.0; }
 
-        let anchors = detect_vad_phrase_anchors(&spans, &times, &activity, 20.0);
+        let anchors = detect_vad_phrase_anchors(
+            &spans, &times, &[false, false], &[true, true], &activity, 20.0,
+        );
         assert_eq!(anchors, vec![(3, 25)], "300ms 이상의 무성 구간 중앙만 경계가 되어야 함");
 
         for frame in 10..40 { activity[frame] = 0.3; }
-        assert!(detect_vad_phrase_anchors(&spans, &times, &activity, 20.0).is_empty());
+        assert!(detect_vad_phrase_anchors(
+            &spans, &times, &[false, false], &[true, true], &activity, 20.0,
+        ).is_empty());
+    }
+
+    #[test]
+    fn repeated_lyrics_are_not_used_as_automatic_vad_anchors() {
+        let lyrics = vec![
+            "같은 후렴!".to_string(),
+            "다른 줄".to_string(),
+            "같은후렴".to_string(),
+        ];
+        assert_eq!(repeated_lyric_mask(&lyrics), vec![true, false, true]);
+
+        let spans = vec![
+            LineTokenSpan { tok_from: 0, tok_to: 3 },
+            LineTokenSpan { tok_from: 3, tok_to: 6 },
+        ];
+        let times = vec![(0, 200), (800, 1000)];
+        let mut activity = vec![0.8f32; 60];
+        for frame in 10..40 { activity[frame] = 0.0; }
+        assert!(detect_vad_phrase_anchors(
+            &spans,
+            &times,
+            &[true, false],
+            &[true, true],
+            &activity,
+            20.0,
+        ).is_empty());
+    }
+
+    #[test]
+    fn automatic_anchors_require_absolute_acoustic_and_lexical_evidence() {
+        let eligible = automatic_anchor_eligibility(
+            &[0.004, 0.005, 0.9, 0.9],
+            &[0.9, 0.34, 0.35, 0.9],
+            &[false, false, false, true],
+        );
+        assert_eq!(eligible, vec![false, false, true, false]);
+
+        let spans = vec![
+            LineTokenSpan { tok_from: 0, tok_to: 3 },
+            LineTokenSpan { tok_from: 3, tok_to: 6 },
+        ];
+        let times = vec![(0, 200), (800, 1000)];
+        let mut activity = vec![0.8f32; 60];
+        for frame in 10..40 { activity[frame] = 0.0; }
+        assert!(detect_vad_phrase_anchors(
+            &spans, &times, &[false, false], &[true, false], &activity, 20.0,
+        ).is_empty(), "both sides of a VAD boundary must be strong anchors");
     }
 
     #[test]
@@ -2445,6 +2827,22 @@ mod aligner_tests {
         let weak = multi_evidence_confidences(&[0.8], &[0.1], &[0.5], &[0.0])[0];
         assert!(strong > weak);
         assert!(strong <= 0.8 && weak > 0.0);
+    }
+
+    #[test]
+    fn greedy_similarity_normalizes_hangul_and_punctuation() {
+        let exact = greedy_text_similarity("가슴엔, 눈물이!", "가슴엔 눈물이");
+        let near = greedy_text_similarity("가슴엔 눈물이", "가슴엔 눔물이");
+        let mismatch = greedy_text_similarity("다음 본문 가사", "우우 예아");
+        assert!((exact - 1.0).abs() < f32::EPSILON);
+        assert!(near > mismatch);
+        assert!(mismatch < 0.25);
+    }
+
+    #[test]
+    fn greedy_similarity_handles_latin_case_and_empty_text() {
+        assert!((greedy_text_similarity("Oh, YEAH", "oh yeah") - 1.0).abs() < f32::EPSILON);
+        assert_eq!(greedy_text_similarity("", ""), 0.0);
     }
 
     /// 앵커 재정렬이 "구간을 가두는" 핵심 동작을 하는지: 뒤쪽 구간을 다시
@@ -2881,4 +3279,178 @@ pub async fn load_lrc_file(handle: AppHandle, audio_path: String) -> Result<Stri
         paths.separated.to_string_lossy()
     ));
     Err("LRC file not found".to_string())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LrcCheckpoint {
+    audio_key: String,
+    slot: String,
+    reason: String,
+    created_at_ms: u64,
+    content: String,
+}
+
+fn validate_checkpoint_slot(slot: &str) -> Result<(), String> {
+    match slot {
+        "session_start" | "last_safe" => Ok(()),
+        _ => Err(format!("지원하지 않는 가사 복구 슬롯입니다: {}", slot)),
+    }
+}
+
+fn lrc_checkpoint_path(
+    paths: &crate::state::AppPaths,
+    audio_path: &str,
+    slot: &str,
+) -> Result<PathBuf, String> {
+    validate_checkpoint_slot(slot)?;
+    let normalized = normalize_path_key(audio_path);
+    let mut hasher = Sha256::new();
+    hasher.update(normalized.as_bytes());
+    let key = format!("{:x}", hasher.finalize());
+    Ok(paths
+        .separated
+        .join("_lyric_recovery")
+        .join(key)
+        .join(format!("{}.json", slot)))
+}
+
+#[command]
+pub async fn save_lrc_checkpoint(
+    handle: AppHandle,
+    audio_path: String,
+    slot: String,
+    content: String,
+    reason: String,
+) -> Result<(), String> {
+    let paths = crate::state::AppPaths::from_handle(&handle);
+    let path = lrc_checkpoint_path(&paths, &audio_path, &slot)?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| "복구 폴더 경로가 올바르지 않습니다.".to_string())?;
+    fs::create_dir_all(parent).map_err(|e| format!("가사 복구 폴더 생성 실패: {}", e))?;
+    let created_at_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    let checkpoint = LrcCheckpoint {
+        audio_key: normalize_path_key(&audio_path),
+        slot,
+        reason,
+        created_at_ms,
+        content,
+    };
+    let json = serde_json::to_string_pretty(&checkpoint)
+        .map_err(|e| format!("가사 복구 데이터 변환 실패: {}", e))?;
+    let temp = path.with_extension("json.tmp");
+    fs::write(&temp, json).map_err(|e| format!("가사 복구 임시 저장 실패: {}", e))?;
+    fs::rename(&temp, &path)
+        .or_else(|_| {
+            if path.exists() {
+                fs::remove_file(&path)?;
+            }
+            fs::rename(&temp, &path)
+        })
+        .map_err(|e| format!("가사 복구 저장 확정 실패: {}", e))?;
+    Ok(())
+}
+
+#[command]
+pub async fn load_lrc_checkpoint(
+    handle: AppHandle,
+    audio_path: String,
+    slot: String,
+) -> Result<Option<LrcCheckpoint>, String> {
+    let paths = crate::state::AppPaths::from_handle(&handle);
+    let path = lrc_checkpoint_path(&paths, &audio_path, &slot)?;
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let json = fs::read_to_string(&path)
+        .map_err(|e| format!("가사 복구 데이터 읽기 실패: {}", e))?;
+    serde_json::from_str(&json)
+        .map(Some)
+        .map_err(|e| format!("가사 복구 데이터 해석 실패: {}", e))
+}
+
+fn alignment_metadata_path(
+    paths: &crate::state::AppPaths,
+    audio_path: &str,
+) -> PathBuf {
+    let mut hasher = Sha256::new();
+    hasher.update(alignment_metadata_audio_key(audio_path).as_bytes());
+    let key = format!("{:x}", hasher.finalize());
+    paths
+        .root
+        .join("alignment_metadata")
+        .join(format!("{}.json", key))
+}
+
+#[command]
+pub async fn save_alignment_metadata(
+    handle: AppHandle,
+    audio_path: String,
+    metadata: Value,
+) -> Result<(), String> {
+    let paths = crate::state::AppPaths::from_handle(&handle);
+    let path = alignment_metadata_path(&paths, &audio_path);
+    let parent = path
+        .parent()
+        .ok_or_else(|| "정렬 메타데이터 폴더 경로가 올바르지 않습니다.".to_string())?;
+    fs::create_dir_all(parent).map_err(|e| format!("정렬 메타데이터 폴더 생성 실패: {}", e))?;
+    let json = serde_json::to_string_pretty(&metadata)
+        .map_err(|e| format!("정렬 메타데이터 변환 실패: {}", e))?;
+    let temp = path.with_extension("json.tmp");
+    fs::write(&temp, json).map_err(|e| format!("정렬 메타데이터 임시 저장 실패: {}", e))?;
+    fs::rename(&temp, &path)
+        .or_else(|_| {
+            if path.exists() {
+                fs::remove_file(&path)?;
+            }
+            fs::rename(&temp, &path)
+        })
+        .map_err(|e| format!("정렬 메타데이터 저장 확정 실패: {}", e))?;
+    Ok(())
+}
+
+#[command]
+pub async fn load_alignment_metadata(
+    handle: AppHandle,
+    audio_path: String,
+) -> Result<Option<Value>, String> {
+    let paths = crate::state::AppPaths::from_handle(&handle);
+    let path = alignment_metadata_path(&paths, &audio_path);
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let json = fs::read_to_string(&path)
+        .map_err(|e| format!("정렬 메타데이터 읽기 실패: {}", e))?;
+    serde_json::from_str(&json)
+        .map(Some)
+        .map_err(|e| format!("정렬 메타데이터 해석 실패: {}", e))
+}
+
+#[command]
+pub async fn discard_lrc_checkpoint(
+    handle: AppHandle,
+    audio_path: String,
+    slot: String,
+) -> Result<(), String> {
+    let paths = crate::state::AppPaths::from_handle(&handle);
+    let path = lrc_checkpoint_path(&paths, &audio_path, &slot)?;
+    if path.exists() {
+        fs::remove_file(path).map_err(|e| format!("가사 복구 데이터 삭제 실패: {}", e))?;
+    }
+    Ok(())
+}
+
+#[command]
+pub async fn restore_lrc_checkpoint(
+    handle: AppHandle,
+    audio_path: String,
+    slot: String,
+) -> Result<String, String> {
+    let checkpoint = load_lrc_checkpoint(handle.clone(), audio_path.clone(), slot).await?
+        .ok_or_else(|| "복원할 가사 체크포인트가 없습니다.".to_string())?;
+    save_lrc_file(handle, audio_path, checkpoint.content).await
 }

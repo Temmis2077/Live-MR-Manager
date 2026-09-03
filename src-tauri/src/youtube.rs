@@ -41,6 +41,11 @@ pub struct YoutubeMetadata {
 
 pub struct YoutubeManager;
 
+const YTDLP_STABLE_URL: &str =
+    "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
+const YTDLP_NIGHTLY_URL: &str =
+    "https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp.exe";
+
 static METADATA_CACHE: Lazy<RwLock<HashMap<String, (YoutubeMetadata, Instant)>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
 /// 마지막 yt-dlp 강제 갱신 시각(epoch secs). 배치 실패로 여러 곡이 동시에
@@ -163,7 +168,7 @@ impl YoutubeManager {
             }
         }
 
-        let url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
+        let url = YTDLP_STABLE_URL;
 
         let target = Self::managed_cache_dir().join(Self::managed_bin_name());
         if let Some(parent) = target.parent() {
@@ -187,14 +192,17 @@ impl YoutubeManager {
         }
     }
 
-    /// 관리형 yt-dlp를 최신본으로 받아 원자적으로 교체한다(성공 시 true).
+    /// 추출 오류 복구용 최신 nightly yt-dlp를 받아 원자적으로 교체한다(성공 시 true).
     ///
     /// 안전 원칙: (1) 관리형 캐시의 바이너리만 대상(시스템/번들은 건드리지 않음),
     /// (2) 임시 파일로 받아 완결됐을 때만 교체(반쯤 받다 실패해도 기존 것 보존),
     /// (3) 어떤 실패에도 기존 바이너리를 유지 — 오프라인이어도 앱은 계속 동작.
     async fn download_and_swap_yt_dlp() -> bool {
         let managed = Self::managed_cache_dir().join(Self::managed_bin_name());
-        let url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
+        // YouTube 추출기 수정은 stable 릴리스보다 nightly에 먼저 들어온다. 이미
+        // 403/봇 감지/서명 오류가 난 뒤에는 같은 stable을 다시 받는 것보다
+        // 공식 nightly로 복구하는 편이 실제 갱신 의미에 맞다.
+        let url = YTDLP_NIGHTLY_URL;
         let tmp = managed.with_extension("exe.new");
         let Ok(resp) = reqwest::get(url).await else { return false; };
         if !resp.status().is_success() {
@@ -216,7 +224,7 @@ impl YoutubeManager {
             let _ = std::fs::remove_file(&tmp);
             return false;
         }
-        crate::audio_player::sys_log("[Tools] yt-dlp를 최신 버전으로 갱신했습니다");
+        crate::audio_player::sys_log("[Tools] yt-dlp를 최신 nightly 버전으로 갱신했습니다");
         true
     }
 
@@ -567,6 +575,15 @@ impl YoutubeManager {
                 "--no-warnings".into(),
                 "--buffer-size".into(),
                 "16K".into(),
+                // 일시적인 Google Video 403/연결 끊김은 같은 형식 URL을 다시
+                // 발급받으면 회복되는 경우가 있다. 무한 재시도는 라이브 작업을
+                // 붙잡으므로 짧고 제한된 횟수만 허용한다.
+                "--retries".into(),
+                "3".into(),
+                "--fragment-retries".into(),
+                "3".into(),
+                "--retry-sleep".into(),
+                "http:2".into(),
             ];
 
             if wait_for_full {

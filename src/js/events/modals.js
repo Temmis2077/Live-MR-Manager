@@ -5,6 +5,8 @@ import { state } from '../state.js';
 import { elements } from '../ui/elements.js';
 import { invoke } from '../tauri-bridge.js';
 import { initMetaStarRatings, showNotification } from '../utils.js';
+import { openOverlayModal, closeOverlayModal } from '../ui/modals.js';
+import { libraryService } from '../../ipc/services/library.js';
 
 export function initModalListeners() {
   initMetaStarRatings();
@@ -128,7 +130,7 @@ export function initModalListeners() {
       };
 
       try {
-        await invoke('update_song_metadata', { song: updated });
+        await libraryService.update(updated);
         state.songLibrary[idx] = updated;
         if (state.currentTrack && state.currentTrack.path === updated.path) {
           state.currentTrack = updated;
@@ -140,6 +142,8 @@ export function initModalListeners() {
 
         const { renderLibrary } = await import('../ui/library.js');
         renderLibrary();
+        const { refreshLibraryPanels } = await import('../ui/library-panels.js');
+        refreshLibraryPanels();
         showNotification("정보가 수정되었습니다.", "success");
 
         const { refreshFilterDropdowns } = await import('../ui/core.js');
@@ -178,7 +182,9 @@ export function initModalListeners() {
       const query = `${title} ${artist}`.trim();
       if (!query) return;
 
-      elements.metadataSearchResultsModal.classList.add("active");
+      // 정보 수정 모달 위에 겹쳐 뜬다 — layer-stack이 Esc를 최상단 하나에만
+      // 주므로, Esc를 누르면 검색 결과만 닫히고 편집 모달은 남는다.
+      openOverlayModal(elements.metadataSearchResultsModal, { autoFocus: false });
       elements.searchResultsList.innerHTML = `
         <div class="loading-container" style="text-align:center; padding:20px;">
           <div class="spinner"></div>
@@ -238,7 +244,7 @@ export function initModalListeners() {
               if (thumbEl) thumbEl.value = coverUrl;
             }
 
-            elements.metadataSearchResultsModal.classList.remove("active");
+            closeOverlayModal(elements.metadataSearchResultsModal);
           };
           elements.searchResultsList.appendChild(item);
         });
@@ -251,9 +257,7 @@ export function initModalListeners() {
   // Metadata Search Result Close
   if (elements.searchResultsClose) {
     elements.searchResultsClose.onclick = () => {
-      if (elements.metadataSearchResultsModal) {
-        elements.metadataSearchResultsModal.classList.remove("active");
-      }
+      closeOverlayModal(elements.metadataSearchResultsModal);
     };
   }
 }

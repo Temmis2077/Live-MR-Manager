@@ -4,6 +4,8 @@
 
 import { invoke } from './tauri-bridge.js';
 import { showNotification } from './utils.js';
+import { playbackService } from '../ipc/services/playback.js';
+import { libraryService } from '../ipc/services/library.js';
 
 export async function setVolume(volume) {
   try {
@@ -32,7 +34,7 @@ export async function setTempo(ratio) {
 
 export async function togglePlayback() {
   try {
-    return await invoke("toggle_playback");
+    return await playbackService.toggle();
   } catch (err) {
     console.error("Toggle playback failed:", err);
     showNotification("재생 제어 실패", "error");
@@ -42,7 +44,7 @@ export async function togglePlayback() {
 
 export async function stopPlayback() {
   try {
-    await invoke("stop_playback");
+    await playbackService.stop();
   } catch (err) {
     console.error("Stop playback failed:", err);
     throw err;
@@ -51,7 +53,7 @@ export async function stopPlayback() {
 
 export async function seekTo(positionMs) {
   try {
-    await invoke("seek_to", { positionMs: Math.floor(positionMs) });
+    await playbackService.seek(positionMs);
   } catch (err) {
     console.error("Seek failed:", err);
   }
@@ -60,11 +62,7 @@ export async function seekTo(positionMs) {
 export async function playTrack(path, duration_ms = 0, playNow = true) {
   try {
     // play_track in backend emits events for progress/status
-    await invoke("play_track", { 
-      path, 
-      durationMs: Math.floor(duration_ms),
-      playNow: playNow 
-    });
+    await playbackService.play(path, duration_ms, playNow);
   } catch (err) {
     console.error("Play track failed:", err);
     throw err;
@@ -72,12 +70,12 @@ export async function playTrack(path, duration_ms = 0, playNow = true) {
 }
 
 export async function loadLibrary() {
-  return await invoke("load_library");
+  return await libraryService.load();
 }
 
 export async function saveLibrary(songs) {
   // Backend expects { songs: Vec<SongMetadata> }
-  return await invoke("save_library", { songs });
+  return await libraryService.save(songs);
 }
 
 export async function checkAiModelStatus() {
@@ -92,7 +90,7 @@ export async function checkAiModelStatus() {
 
 export async function deleteSongFromDb(path) {
   try {
-    await invoke("delete_song", { path });
+    await libraryService.delete(path);
   } catch (err) {
     console.error("Failed to delete song from DB:", err);
     throw err;
@@ -127,7 +125,20 @@ export async function setVocalBalance(balance) {
     console.error("Failed to set balance:", err);
   }
 }
-export async function startMrSeparation(path, modelId = null) {
+export async function startMrSeparation(path, modelId = null, harmonyModelId = null, options = {}) {
+  // 분리와 정렬을 함께 요청한 모든 화면은 이 진입점을 사용한다. 정렬 예약을
+  // 백엔드 작업보다 먼저 등록해야 아주 짧은 작업/기존 캐시 재사용 때 완료
+  // 이벤트가 먼저 지나가 정렬이 영원히 시작되지 않는 경쟁 조건이 없다.
+  let alignmentDeferred = false;
+  if (options?.alignAfterSeparation === true) {
+    const { ensureAlignmentModelsReady, deferAlignmentUntilSeparated } =
+      await import('./alignment-queue.js');
+    const ready = await ensureAlignmentModelsReady();
+    if (ready) {
+      deferAlignmentUntilSeparated(path);
+      alignmentDeferred = true;
+    }
+  }
   // 1. 즉시 준비 상태 등록 (백엔드 이벤트 도달 전)
   const { state } = await import('./state.js');
   const { renderLibrary } = await import('./ui/library.js');
@@ -136,17 +147,23 @@ export async function startMrSeparation(path, modelId = null) {
   const song = state.songLibrary.find((s) => s.path === path);
   state.activeTasks[path] = {
     percentage: 0, status: "Preparing", provider: "local", modelId: modelId || null,
+    harmonyModelId: harmonyModelId || null,
     title: song?.title || "", thumbnail: song?.thumbnail || ""
   };
   renderLibrary(); // 배지 즉시 반영
 
   try {
     // modelId: 분리 방식 선택 모달에서 고른 곡별 모델 (null이면 전역 기본값)
-    return await invoke("start_mr_separation", { path, modelId });
+    const result = await invoke("start_mr_separation", { path, modelId, harmonyModelId });
+    return { result, alignmentDeferred };
   } catch (err) {
     // 실패 시 activeTasks 정리
     delete state.activeTasks[path];
     renderLibrary();
+    if (alignmentDeferred && err !== "ALREADY_PROCESSING") {
+      const { cancelDeferredAlignment } = await import('./alignment-queue.js');
+      cancelDeferredAlignment(path);
+    }
     if (err === "ALREADY_PROCESSING") {
       showNotification("이미 대기열에 있거나 처리 중인 곡입니다.", "warning");
       return;

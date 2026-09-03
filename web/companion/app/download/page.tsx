@@ -4,7 +4,7 @@ import { GITHUB_RELEASES_URL } from "@/lib/site";
 
 export const metadata = {
   title: "다운로드",
-  description: "OSW Windows 앱 다운로드",
+  description: "OSW Windows 앱 베타 다운로드",
 };
 
 export default function DownloadPage() {
@@ -16,15 +16,14 @@ export default function DownloadPage() {
           <span className="badge">Windows</span>
           <h1>OSW 받기</h1>
           <p>
-            PC에 설치한 뒤 MR 라이브러리를 만들고, 멜로밍 노래책과 곡 정보를
-            맞출 수 있습니다.
+            Windows 10/11용 첫 독립 베타를 내려받을 수 있습니다.
           </p>
         </section>
         <article className="card">
-          <h2>최신 버전 설치</h2>
+          <h2>1.0.0-beta.1</h2>
           <p>
-            아래 버튼에서 설치 파일을 받을 수 있습니다. 설치 후 앱 설정에서
-            멜로밍 채널을 연결해 보세요.
+            GitHub Releases에서 NSIS 설치 파일을 내려받아 실행하세요. 앱 안의 업데이트
+            알림도 새 공개 릴리즈의 다운로드 페이지로 연결됩니다.
           </p>
           <a
             href={GITHUB_RELEASES_URL}
@@ -32,17 +31,17 @@ export default function DownloadPage() {
             target="_blank"
             rel="noopener noreferrer"
           >
-            설치 파일 다운로드
+            Windows 베타 다운로드
           </a>
         </article>
         <article className="card" style={{ marginTop: "1rem" }}>
-          <h2>설치 후</h2>
+          <h2>베타에서 할 수 있는 일</h2>
           <p>
-            유튜브·로컬 음원을 추가하고, 설정 → 멜로밍 노래책에서 방송 채널 주소를
-            입력해 노래 목록을 가져올 수 있습니다.
+            유튜브·로컬 음원을 추가하고 MR 분리와 가사 싱크를 준비한 뒤 라이브 화면과
+            OBS 오버레이를 사용할 수 있습니다. 멜로밍 연동은 현재 준비 중입니다.
           </p>
           <Link href="/faq" className="btn btn-secondary">
-            연동 방법 보기
+            FAQ 보기
           </Link>
         </article>
       </main>

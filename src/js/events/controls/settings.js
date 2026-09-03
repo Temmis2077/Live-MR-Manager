@@ -4,7 +4,6 @@
 import { state } from '../../state.js';
 import { elements } from '../../ui/elements.js';
 import { loadLibrary } from '../../audio.js';
-import { getAppHandler } from '../../app-context.js';
 import {
   FAQ_URL,
   GITHUB_ISSUES_BUG_URL,
@@ -22,12 +21,14 @@ import {
   importLibrarySpreadsheet,
   openAppPage,
   openCacheFolder,
+  openLogFolder,
   runCacheRescue,
   setBroadcastMode,
   setMrCacheFormat,
 } from '../../settings-api.js';
 
-async function reloadLibraryAfterSpreadsheetImport(result) {
+/** CSV 가져오기 뒤 목록 갱신 + 결과 알림. 시작 가이드의 가져오기도 같은 경로를 쓴다. */
+export async function reloadLibraryAfterSpreadsheetImport(result) {
   const { showNotification } = await import('../../utils.js');
   const { renderLibrary } = await import('../../ui/library.js');
   const { refreshFilterDropdowns } = await import('../../ui/core.js');
@@ -55,7 +56,7 @@ export function initSettingsListeners({ syncAllOverlayStylesToBackend }) {
       const { showNotification } = await import('../../utils.js');
       try {
         await exportBackup();
-        showNotification("라이브러리 목록이 성공적으로 백업되었습니다.", "success");
+        showNotification("라이브러리와 앱 설정을 백업했습니다.", "success");
       } catch (err) {
         if (err !== "CANCELLED") {
           showNotification("백업 중 오류가 발생했습니다: " + err, "error");
@@ -68,13 +69,19 @@ export function initSettingsListeners({ syncAllOverlayStylesToBackend }) {
     elements.btnImportBackup.onclick = async () => {
       const { showNotification } = await import('../../utils.js');
       try {
-        await importBackup();
+        const { added, settingsRestored } = await importBackup();
         const { renderLibrary } = await import('../../ui/library.js');
         state.songLibrary = await loadLibrary() || [];
         const { refreshFilterDropdowns } = await import('../../ui/core.js');
         await refreshFilterDropdowns();
         renderLibrary();
-        showNotification("백업본에서 없는 곡들을 성공적으로 병합했습니다.", "success");
+
+        // 복원한 설정 중 상당수(테마·오버레이 디자인·대기열)는 앱이 시작할 때
+        // 한 번만 읽는다. 여기서 부분적으로 반영하려 들면 어떤 건 되고 어떤 건
+        // 안 되는 상태가 되므로, 재시작을 안내하는 편이 정직하다.
+        let msg = added > 0 ? `백업본에서 ${added}곡을 병합했습니다.` : "백업본에 새로 추가할 곡이 없었습니다.";
+        if (settingsRestored > 0) msg += ` 앱 설정 ${settingsRestored}개는 다시 시작하면 적용됩니다.`;
+        showNotification(msg, "success");
       } catch (err) {
         if (err !== "CANCELLED") {
           showNotification("복원 중 오류가 발생했습니다: " + err, "error");
@@ -156,41 +163,6 @@ export function initSettingsListeners({ syncAllOverlayStylesToBackend }) {
         elements.btnRunRescue.classList.remove("loading-btn");
       }
     };
-  }
-
-  if (elements.themeModeSelect) {
-    const syncThemeToUi = (mode) => {
-      const dropdown = document.getElementById("theme-mode-dropdown");
-      if (!dropdown) return;
-      const selectedText = dropdown.querySelector(".selected-text");
-      const options = dropdown.querySelectorAll(".option-item");
-      options.forEach((opt) => {
-        const selected = opt.dataset.value === mode;
-        opt.classList.toggle("selected", selected);
-        if (selected && selectedText) selectedText.textContent = opt.textContent;
-      });
-    };
-
-    const initialMode = state.themeMode || localStorage.getItem("themeMode") || "dark";
-    elements.themeModeSelect.value = initialMode;
-    syncThemeToUi(initialMode);
-
-    elements.themeModeSelect.addEventListener("change", async (e) => {
-      const allowedThemes = new Set(["dark", "light", "pink", "sky"]);
-      const mode = allowedThemes.has(e.target.value) ? e.target.value : "dark";
-      const applyTheme = getAppHandler('applyAppTheme');
-      if (typeof applyTheme === "function") {
-        applyTheme(mode, { persist: true });
-      } else {
-        document.documentElement.setAttribute("data-theme", mode);
-        localStorage.setItem("themeMode", mode);
-      }
-      state.themeMode = mode;
-      syncThemeToUi(mode);
-      if (typeof syncAllOverlayStylesToBackend === "function") {
-        syncAllOverlayStylesToBackend();
-      }
-    });
   }
 
   const syncBroadcastModeToggles = (enabled) => {
@@ -283,6 +255,20 @@ export function initSettingsListeners({ syncAllOverlayStylesToBackend }) {
   if (btnOpenCache) {
     btnOpenCache.onclick = async () => {
       await openCacheFolder();
+    };
+  }
+
+  // 로그 폴더 열기 — 버그 신고 양식이 로그를 요구하는데 정작 위치를 알려주는
+  // 곳이 없었다. 폴더가 아직 없으면 백엔드가 만들어서 연다.
+  const btnOpenLogs = document.getElementById("btn-open-logs");
+  if (btnOpenLogs) {
+    btnOpenLogs.onclick = async () => {
+      const { showNotification } = await import('../../utils.js');
+      try {
+        await openLogFolder();
+      } catch (err) {
+        showNotification("로그 폴더를 열지 못했습니다: " + err, "error");
+      }
     };
   }
 

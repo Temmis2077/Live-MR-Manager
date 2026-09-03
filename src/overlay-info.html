@@ -589,13 +589,45 @@
     if (isPreviewMode) {
       document.body.style.width = `${PREVIEW_STAGE_WIDTH}px`;
       document.body.style.height = `${PREVIEW_STAGE_HEIGHT}px`;
+      update({
+        info_style: {},
+        is_playing: true,
+        is_force_visible: true,
+        title: '지금 재생 중인 곡',
+        artist: '아티스트 · OSW 미리보기',
+      });
+      window.addEventListener('message', (event) => {
+        if (event.source !== window.parent) return;
+        const style = window.OverlayShared.previewStyleFromMessage(event.data, 'info');
+        if (!style) return;
+        update({
+          info_style: style,
+          is_playing: true,
+          is_force_visible: true,
+          title: lastDisplayTitle || '지금 재생 중인 곡',
+          artist: lastDisplayArtist || '아티스트 · OSW 미리보기',
+        });
+      });
     }
     // 개발용 — ?dev=1 이면 WS 대신 창 밖에서 상태를 밀어 넣을 수 있게 연다.
     // 백엔드(Tauri/WS) 없이 프런트만으로 렌더링을 확인하기 위한 통로다.
-    if (new URLSearchParams(location.search).get('dev') === '1') {
+    if (isPreviewMode) {
+      // 미리보기는 부모 설정창의 postMessage만 받는다.
+    } else if (new URLSearchParams(location.search).get('dev') === '1') {
       window.__applyOverlayState = update;
     } else {
-      connectWS(update);
+      connectWS(update, undefined, () => {
+        // 앱 종료/서버 중단 시 마지막 곡 정보가 OBS에 고정되지 않게 즉시 숨긴다.
+        if (pendingHideTimer) {
+          clearTimeout(pendingHideTimer);
+          pendingHideTimer = null;
+        }
+        if (pendingTrackShowTimer) {
+          clearTimeout(pendingTrackShowTimer);
+          pendingTrackShowTimer = null;
+        }
+        container.classList.remove('visible');
+      });
     }
     thumb.onerror = () => {
       if (thumb.src !== DEFAULT_THUMB_URL) {
@@ -607,12 +639,6 @@
       thumb.src = DEFAULT_THUMB_URL;
     }
 
-    if (window.__TAURI__) {
-      window.__TAURI__.event.listen('overlay-state-update', (event) => {
-        update(event.payload);
-      });
-      window.__TAURI__.core.invoke('get_overlay_state').then(update).catch(() => {});
-    }
   </script>
 </body>
 </html>

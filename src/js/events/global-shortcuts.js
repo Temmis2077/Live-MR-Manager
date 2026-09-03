@@ -7,7 +7,9 @@
  * 창을 닫는 Ctrl+W·Ctrl+Q는 일부러 넣지 않았다 — 종료 전에 저장 여부를 묻는
  * 장치가 아직 없어서, 실수로 닫을 수 있는 길만 늘리는 셈이 된다.
  */
-import { register, registerDocsOnly, initShortcuts } from '../shortcuts.js';
+import {
+  register, registerDocsOnly, initShortcuts, shouldAbortDeferredFocus,
+} from '../shortcuts.js';
 import { hasOpenLayer } from '../ui/layer-stack.js';
 import { state } from '../state.js';
 import { appWindow } from '../tauri-bridge.js';
@@ -24,7 +26,7 @@ function goToScreen(view) {
  * 아직 숨겨져 있어서 focus()가 조용히 실패한다. 보일 때까지 몇 프레임
  * 지켜보다가 잡고, 그래도 안 나타나면 포기한다.
  */
-function focusSearchInput(triesLeft = 30) {
+function focusSearchInput(triesLeft = 30, initialActive = document.activeElement) {
   const input = document.getElementById('lib-search-input');
   if (input && input.offsetParent) {
     input.focus();
@@ -34,8 +36,8 @@ function focusSearchInput(triesLeft = 30) {
   if (triesLeft <= 0) return;
   // 기다리는 사이 사용자가 다른 곳을 눌렀으면 초점을 빼앗지 않는다.
   const active = document.activeElement;
-  if (active && active !== document.body && active !== input) return;
-  requestAnimationFrame(() => focusSearchInput(triesLeft - 1));
+  if (shouldAbortDeferredFocus(active, initialActive, input, document.body)) return;
+  requestAnimationFrame(() => focusSearchInput(triesLeft - 1, initialActive));
 }
 
 export function initGlobalShortcuts() {
@@ -69,9 +71,10 @@ export function initGlobalShortcuts() {
     combo: 'Ctrl+F', group: 'navigation', label: '곡 검색',
     // 검색창은 음원 관리 화면에 있다 — 다른 화면에서 눌렀으면 먼저 그리로 간다.
     handler: () => {
+      const initialActive = document.activeElement;
       const onLibrary = state.activeView === 'library' || state.activeView === 'meloming';
       if (!onLibrary) goToScreen('library');
-      focusSearchInput();
+      focusSearchInput(30, initialActive);
     },
   });
 

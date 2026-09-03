@@ -20,13 +20,119 @@ use symphonia::core::audio::{AudioBufferRef, Signal};
 use symphonia::core::codecs::DecoderOptions;
 use rubato::{Resampler, SincFixedIn, SincInterpolationType, SincInterpolationParameters, WindowFunction};
 use anyhow::{anyhow, Result};
-const BATCH_SIZE: usize = 4;
+const IDLE_PIPELINE_CAPACITY: usize = 4;
 static RUNTIME_DIAGNOSTICS_LOGGED: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
+
+fn pipeline_capacity(live_priority: bool) -> usize {
+    if live_priority { 1 } else { IDLE_PIPELINE_CAPACITY }
+}
+
+fn trim_padding_in_place(channels: &mut [Vec<f32>], start: usize, end: usize) {
+    for channel in channels {
+        channel.truncate(end);
+        channel.drain(..start);
+    }
+}
 
 pub trait InferenceEngine: Send + Sync {
     fn separate(&self, audio_path: &Path, output_dir: &Path, cancel_flag: Arc<AtomicBool>, on_progress: Box<dyn Fn(f32) + Send>) -> Result<(PathBuf, PathBuf)>;
+    fn validate_harmony_stems(&self, input: &Path, lead: &Path, backing: &Path) -> Result<(f32, f32, f32)>;
     fn get_provider(&self) -> String;
     fn get_model_name(&self) -> String;
+}
+
+#[cfg(test)]
+mod harmony_tests {
+    use super::{harmony_quality_metrics, pipeline_capacity, trim_padding_in_place};
+
+    #[test]
+    fn live_priority_keeps_only_one_pipeline_packet() {
+        assert_eq!(pipeline_capacity(true), 1);
+        assert_eq!(pipeline_capacity(false), 4);
+    }
+
+    #[test]
+    fn padding_trim_reuses_channel_allocations() {
+        let mut channels = vec![vec![0.0, 1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0, 7.0]];
+        let capacities: Vec<_> = channels.iter().map(Vec::capacity).collect();
+        trim_padding_in_place(&mut channels, 1, 3);
+        assert_eq!(channels, vec![vec![1.0, 2.0], vec![5.0, 6.0]]);
+        assert_eq!(channels.iter().map(Vec::capacity).collect::<Vec<_>>(), capacities);
+    }
+
+    #[test]
+    fn accepts_reconstructable_lead_and_backing() {
+        let input = vec![1.0, -1.0, 0.5, -0.5];
+        let lead = vec![0.8, -0.8, 0.4, -0.4];
+        let backing = vec![0.2, -0.2, 0.1, -0.1];
+        let (_, backing_ratio, error) = harmony_quality_metrics(&input, &lead, &backing).unwrap();
+        assert!(backing_ratio > 0.1);
+        assert!(error < 1e-5);
+    }
+
+    #[test]
+    fn rejects_silent_backing_and_bad_reconstruction() {
+        let input = vec![1.0; 100];
+        assert!(harmony_quality_metrics(&input, &vec![1.0; 100], &vec![0.0; 100]).is_err());
+        assert!(harmony_quality_metrics(&input, &vec![0.1; 100], &vec![0.1; 100]).is_err());
+    }
+
+    #[test]
+    fn rejects_the_observed_duplicated_harmony_shape() {
+        let input = vec![1.0; 100];
+        let lead = vec![1.0; 100];
+        let backing = vec![1.0; 100];
+        let error = harmony_quality_metrics(&input, &lead, &backing).unwrap_err().to_string();
+        assert!(error.contains("duplicated"));
+    }
+
+    #[test]
+    fn rejects_reconstruction_error_above_quarter_scale() {
+        let input = vec![1.0; 100];
+        let lead = vec![0.6; 100];
+        let backing = vec![0.1; 100];
+        assert!(harmony_quality_metrics(&input, &lead, &backing).is_err());
+    }
+}
+
+fn harmony_quality_metrics(input: &[f32], lead: &[f32], backing: &[f32]) -> Result<(f32, f32, f32)> {
+    let len = input.len().min(lead.len()).min(backing.len());
+    if len == 0 { return Err(anyhow!("Harmony stems are empty")); }
+    let mut input_sq = 0.0f64;
+    let mut lead_sq = 0.0f64;
+    let mut backing_sq = 0.0f64;
+    let mut error_sq = 0.0f64;
+    for i in 0..len {
+        let x = input[i] as f64;
+        let l = lead[i] as f64;
+        let b = backing[i] as f64;
+        input_sq += x * x;
+        lead_sq += l * l;
+        backing_sq += b * b;
+        let e = x - l - b;
+        error_sq += e * e;
+    }
+    let denom = input_sq.max(1e-12).sqrt();
+    let metrics = (
+        (lead_sq.sqrt() / denom) as f32,
+        (backing_sq.sqrt() / denom) as f32,
+        (error_sq.sqrt() / denom) as f32,
+    );
+    if !(0.02..=2.5).contains(&metrics.0) { return Err(anyhow!("Invalid lead energy ratio: {:.4}", metrics.0)); }
+    if !(0.005..=2.0).contains(&metrics.1) { return Err(anyhow!("Invalid backing energy ratio: {:.4}", metrics.1)); }
+    if metrics.0 >= 0.90 && metrics.1 >= 0.90 && metrics.2 > 0.15 {
+        return Err(anyhow!(
+            "Harmony outputs appear duplicated: lead_ratio={:.4}, backing_ratio={:.4}, reconstruction_error={:.4}",
+            metrics.0, metrics.1, metrics.2
+        ));
+    }
+    if metrics.2 > 0.25 {
+        return Err(anyhow!(
+            "Harmony reconstruction error too high: {:.4} (lead_ratio={:.4}, backing_ratio={:.4})",
+            metrics.2, metrics.0, metrics.1
+        ));
+    }
+    Ok(metrics)
 }
 
 #[derive(Clone)]
@@ -59,7 +165,7 @@ impl StftEngine {
         let mut stft_result = ndarray::Array2::from_elem((num_frames, target_bins), Complex::new(0.0f32, 0.0f32));
         let mut input = vec![Complex::new(0.0f32, 0.0f32); n_fft];
 
-        let throttle = crate::separation::BROADCAST_MODE.load(std::sync::atomic::Ordering::Relaxed);
+        let throttle = crate::separation::live_priority_active();
         for (f_idx, start) in (0..=num_samples.saturating_sub(n_fft)).step_by(self.hop_length).enumerate() {
             if throttle && (f_idx % 2 == 0) { 
                 std::thread::sleep(std::time::Duration::from_millis(1)); 
@@ -89,7 +195,7 @@ impl StftEngine {
         let n_bins_limit = n_fft / 2 + 1;
         let bins_in_frame = frames.shape()[1];
 
-        let throttle = crate::separation::BROADCAST_MODE.load(std::sync::atomic::Ordering::Relaxed);
+        let throttle = crate::separation::live_priority_active();
         for f_idx in 0..num_frames {
             if throttle && (f_idx % 2 == 0) { 
                 std::thread::sleep(std::time::Duration::from_millis(1)); 
@@ -145,7 +251,7 @@ impl StftEngine {
         
         let mut input = vec![Complex::new(0.0f32, 0.0f32); n_fft];
 
-        let throttle = crate::separation::BROADCAST_MODE.load(std::sync::atomic::Ordering::Relaxed);
+        let throttle = crate::separation::live_priority_active();
         for (f_idx, start) in (0..=num_samples.saturating_sub(n_fft)).step_by(self.hop_length).enumerate() {
             if throttle && (f_idx % 4 == 0) { std::thread::yield_now(); }
             for i in 0..n_fft {
@@ -177,7 +283,7 @@ impl StftEngine {
         let mut complex_buffer = vec![Complex::new(0.0f32, 0.0f32); n_fft];
         let n_bins_limit = n_fft / 2 + 1;
 
-        let throttle = crate::separation::BROADCAST_MODE.load(std::sync::atomic::Ordering::Relaxed);
+        let throttle = crate::separation::live_priority_active();
         for (f_idx, frame) in frames.iter().enumerate() {
             if throttle && (f_idx % 4 == 0) { std::thread::yield_now(); }
             let start = f_idx * self.hop_length;
@@ -711,8 +817,10 @@ impl InferenceEngine for WaveformRemover {
         // --- 3-STAGE PIPELINE SETUP ---
         let _pipeline_start = Instant::now();
         // STAGE 1: Preprocessing (STFT) Thread
-        let (pre_tx, pre_rx) = std::sync::mpsc::sync_channel::<(usize, Value, Vec<Vec<f32>>, usize, bool, bool)>(BATCH_SIZE * 2);
-        let (post_tx, post_rx) = std::sync::mpsc::sync_channel::<(usize, Vec<Value>, Vec<Vec<f32>>, usize, bool, bool)>(BATCH_SIZE * 2);
+        let pipeline_capacity = pipeline_capacity(crate::separation::live_priority_active());
+        sys_log(&format!("PERF: [AI-ENGINE] Pipeline capacity={} live_priority={}", pipeline_capacity, pipeline_capacity == 1));
+        let (pre_tx, pre_rx) = std::sync::mpsc::sync_channel::<(usize, Value, Vec<Vec<f32>>, usize, bool, bool)>(pipeline_capacity);
+        let (post_tx, post_rx) = std::sync::mpsc::sync_channel::<(usize, Vec<Value>, Vec<Vec<f32>>, usize, bool, bool)>(pipeline_capacity);
 
         // STAGE 1: Preprocessing (STFT) Thread
         let channels_data_clone = Arc::clone(&channels_data);
@@ -731,7 +839,7 @@ impl InferenceEngine for WaveformRemover {
                 if check_cancel() { break; }
                 
                 // [FIX] Broadcast Mode Throttle (More aggressive)
-                if crate::separation::BROADCAST_MODE.load(Ordering::Relaxed) {
+                if crate::separation::live_priority_active() {
                     std::thread::sleep(std::time::Duration::from_millis(120));
                 }
                 
@@ -753,7 +861,7 @@ impl InferenceEngine for WaveformRemover {
 
                 // Internal parallelism for Left/Right channels is still maintained
                 let (left_stft, right_stft) = if ch_count > 1 {
-                    if crate::separation::BROADCAST_MODE.load(Ordering::Relaxed) {
+                    if crate::separation::live_priority_active() {
                         let l = stft_engine_clone.stft_ndarray(&current_chunks[0], target_bins);
                         let r = stft_engine_clone.stft_ndarray(&current_chunks[1], target_bins);
                         (l, r)
@@ -892,7 +1000,7 @@ impl InferenceEngine for WaveformRemover {
 
                 let req_samples_inner = current_chunks[0].len();
                 let (voc_l, voc_r) = if ch_count > 1 {
-                    if crate::separation::BROADCAST_MODE.load(Ordering::Relaxed) {
+                    if crate::separation::live_priority_active() {
                         let l = stft_engine_clone_2.istft_ndarray(&res_l, req_samples_inner);
                         let r = stft_engine_clone_2.istft_ndarray(&res_r, req_samples_inner);
                         (l, r)
@@ -989,21 +1097,14 @@ impl InferenceEngine for WaveformRemover {
 
         // 6. Trim Padding (Remove 1.0s from both ends)
         let ai_padding_samples = (target_sample_rate as f32 * 1.0) as usize;
-        let mut trimmed_vocal = vec![vec![0.0f32; 0]; ch_count];
-        let mut trimmed_inst = vec![vec![0.0f32; 0]; ch_count];
-        
         if total_samples > 2 * ai_padding_samples {
             let start = ai_padding_samples;
             let end = total_samples - ai_padding_samples;
-            for ch in 0..ch_count {
-                trimmed_vocal[ch] = final_vocal_inner[ch][start..end].to_vec();
-                trimmed_inst[ch] = final_inst_inner[ch][start..end].to_vec();
-            }
+            trim_padding_in_place(&mut final_vocal_inner, start, end);
+            trim_padding_in_place(&mut final_inst_inner, start, end);
             sys_log(&format!("DEBUG: [WaveformRemover] Trimming AI Stabilizing padding ({} samples).", ai_padding_samples));
         } else {
             sys_log("WARN: [WaveformRemover] Result too short to trim padding, results might have edge artifacts.");
-            trimmed_vocal = final_vocal_inner;
-            trimmed_inst = final_inst_inner;
         }
 
         // 7. Save Results (post-process once; MP3 = pcm16 temp → encode, WAV = 32-bit float)
@@ -1015,9 +1116,9 @@ impl InferenceEngine for WaveformRemover {
             vocal_path.file_name(),
             inst_path.file_name()
         ));
-        self.save_mr(&trimmed_vocal, &vocal_path, target_sample_rate)
+        self.save_mr(&final_vocal_inner, &vocal_path, target_sample_rate)
             .map_err(|e| anyhow!("Vocal save failed: {}", e))?;
-        self.save_mr(&trimmed_inst, &inst_path, target_sample_rate)
+        self.save_mr(&final_inst_inner, &inst_path, target_sample_rate)
             .map_err(|e| anyhow!("Inst save failed: {}", e))?;
 
         sys_log(&format!("PERF: [WaveformRemover] Finalize & Save took: {:?}", finalize_start.elapsed()));
@@ -1025,6 +1126,30 @@ impl InferenceEngine for WaveformRemover {
         
         sys_log("DEBUG: [WaveformRemover] Advanced Separation complete with 3-stage pipeline.");
         Ok((vocal_path, inst_path))
+    }
+
+    fn validate_harmony_stems(&self, input: &Path, lead: &Path, backing: &Path) -> Result<(f32, f32, f32)> {
+        let (input_samples, input_rate, input_channels) = self.load_any_audio(input)?;
+        let (lead_samples, lead_rate, lead_channels) = self.load_any_audio(lead)?;
+        let (backing_samples, backing_rate, backing_channels) = self.load_any_audio(backing)?;
+        if input_rate != lead_rate || input_rate != backing_rate
+            || input_channels != lead_channels || input_channels != backing_channels {
+            return Err(anyhow!("Harmony stems have incompatible sample rate/channel layout"));
+        }
+        let duration_tolerance = ((input_samples.len() as f64 * 0.01) as usize)
+            .max(input_rate as usize * input_channels as usize / 5);
+        if input_samples.len().abs_diff(lead_samples.len()) > duration_tolerance
+            || input_samples.len().abs_diff(backing_samples.len()) > duration_tolerance {
+            return Err(anyhow!(
+                "Harmony stems have incompatible duration (input={}, lead={}, backing={})",
+                input_samples.len(), lead_samples.len(), backing_samples.len()
+            ));
+        }
+        let len = input_samples.len().min(lead_samples.len()).min(backing_samples.len());
+        if len < input_rate as usize {
+            return Err(anyhow!("Harmony stems are too short"));
+        }
+        harmony_quality_metrics(&input_samples[..len], &lead_samples[..len], &backing_samples[..len])
     }
 }
 
@@ -1230,7 +1355,7 @@ impl WaveformRemover {
             on_progress(processing_pct.min(99.0));
 
             // Broadcast-protection mode: yield between chunks to reduce contention.
-            if crate::separation::BROADCAST_MODE.load(Ordering::Relaxed) {
+            if crate::separation::live_priority_active() {
                 std::thread::sleep(std::time::Duration::from_millis(5));
             }
         }
@@ -1251,16 +1376,14 @@ impl WaveformRemover {
         }
 
         // 7. Trim the 1.0s stabilization padding.
-        let (trimmed_vocal, trimmed_inst) = if total_samples > 2 * ai_padding_samples {
+        if total_samples > 2 * ai_padding_samples {
             let start = ai_padding_samples;
             let end = total_samples - ai_padding_samples;
-            let v: Vec<Vec<f32>> = final_vocal.iter().map(|ch| ch[start..end].to_vec()).collect();
-            let inst: Vec<Vec<f32>> = final_inst.iter().map(|ch| ch[start..end].to_vec()).collect();
-            (v, inst)
+            trim_padding_in_place(&mut final_vocal, start, end);
+            trim_padding_in_place(&mut final_inst, start, end);
         } else {
             sys_log("WARN: [WaveformRemover] Result too short to trim padding, results might have edge artifacts.");
-            (final_vocal, final_inst)
-        };
+        }
 
         // 8. Save via the shared MR cache path.
         let format = crate::mr_cache::current_format();
@@ -1271,9 +1394,9 @@ impl WaveformRemover {
             vocal_path.file_name(),
             inst_path.file_name()
         ));
-        self.save_mr(&trimmed_vocal, &vocal_path, target_sample_rate)
+        self.save_mr(&final_vocal, &vocal_path, target_sample_rate)
             .map_err(|e| anyhow!("Vocal save failed: {}", e))?;
-        self.save_mr(&trimmed_inst, &inst_path, target_sample_rate)
+        self.save_mr(&final_inst, &inst_path, target_sample_rate)
             .map_err(|e| anyhow!("Inst save failed: {}", e))?;
 
         sys_log(&format!("PERF: [WaveformRemover] Total raw separation time for track: {:?}", start_time.elapsed()));

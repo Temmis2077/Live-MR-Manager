@@ -14,18 +14,15 @@ export const state = {
   // 보기 모드는 표 하나뿐이다 — 그리드·버튼 모드는 제거했다.
   viewMode: "list",
 
-  // 라이브 '다음 곡' 큐 — 곡 경로 배열. 비어서 시작하고 사용자가 담는다
-  // (라이브러리 전체를 자동으로 밀어 넣지 않는다).
-  // 나중에 신청곡 연동이 붙어도 결국 이 배열에 들어온다.
-  liveQueue: JSON.parse(localStorage.getItem("liveQueue") || "[]"),
+  // 라이브 '다음 곡' 큐 — 이번 앱 실행에서만 유지하는 임시 대기열이다.
+  // 공연을 다시 열었을 때 지난 순서가 살아나거나 자동으로 재생되면 안 된다.
+  liveQueue: [],
 
   // 오버레이로 보낸 현재 줄의 구간·단어 타임. 라이브 본문의 진행도가 이 값을
   // 그대로 써서 두 화면이 구조적으로 어긋날 수 없게 한다(lyric-drawer가 채운다).
   overlayLyricWindow: null,
-  // 현재 앱 실행 중 라이브 화면에서 실제로 재생한 곡. 이전 곡은 라이브러리
-  // 필터가 아니라 이 이력을 역순으로 따라간다.
-  livePlaybackHistory: [],
-  themeMode: localStorage.getItem("themeMode") || "dark",
+  // Red Orbit is the single app theme. Legacy stored values are migrated by main.js.
+  themeMode: "dark",
   masterVolume: (() => {
     const raw = parseFloat(localStorage.getItem("masterVolume") || "100");
     if (!Number.isFinite(raw)) return 100;
@@ -70,11 +67,11 @@ export const state = {
 };
 
 // --- Helper Functions for UI ---
-import { invoke } from './tauri-bridge.js';
+import { libraryService } from '../ipc/services/library.js';
 
 export async function getAllGenres() {
   try {
-    const genres = await invoke('get_genres');
+    const genres = await libraryService.getGenres();
     // 결과가 비면 배열이 아닐 수 있다(개발용 목 백엔드·구버전 응답).
     // 예전에는 여기서 map이 터져 "장르 로드 실패" 스택이 콘솔을 채웠고,
     // 진짜 오류가 그 소음에 묻혔다.
@@ -87,7 +84,7 @@ export async function getAllGenres() {
 
 export async function getAllCategories() {
   try {
-    const categories = await invoke('get_categories');
+    const categories = await libraryService.getCategories();
     return Array.isArray(categories) ? categories.map(c => c.name) : [];
   } catch (err) {
     console.error('Failed to load categories:', err);

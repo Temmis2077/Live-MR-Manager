@@ -1,8 +1,24 @@
-/* --- Base Design Tokens (Restored from Original) --- */
+/* OSW "Red Orbit" design tokens — the single source of brand truth. */
 @font-face {
   font-family: 'SUITE';
   font-weight: 300;
   src: url('../assets/fonts/SUITE-Light.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'LINE Seed Sans KR';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('../assets/fonts/LINESeedKR-Bold.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Space Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../assets/fonts/SpaceMono-Regular.ttf') format('truetype');
 }
 
 @font-face {
@@ -54,14 +70,11 @@
 /* 네이티브 컨트롤(셀렉트 팝업 목록, 스크롤바, 체크박스 등)이 테마를 따르게
    한다 — 지정하지 않으면 다크 모드에서도 OS 기본(밝은) 팝업이 떠서 이질적. */
 :root,
-html[data-theme="dark"] {
-  color-scheme: dark;
-}
-
+html[data-theme="dark"],
 html[data-theme="light"],
 html[data-theme="pink"],
 html[data-theme="sky"] {
-  color-scheme: light;
+  color-scheme: dark;
 }
 
 /* 셀렉트 옵션 색을 테마 토큰으로 고정 (color-scheme 미지원 렌더러 안전망) */
@@ -71,44 +84,96 @@ select option {
 }
 
 :root,
-html[data-theme="dark"] {
-  --bg-color: #08080a;
-  --sidebar-bg: rgba(13, 13, 18, 0.98);
-  --dock-bg: rgba(18, 18, 24, 0.85);
-  --glass-bg: rgba(255, 255, 255, 0.03);
-  --glass-border: rgba(255, 255, 255, 0.08);
+html[data-theme="dark"],
+html[data-theme="light"],
+html[data-theme="pink"],
+html[data-theme="sky"] {
+  /* User palette, split by meaning instead of used as decoration. */
+  --signal: #C95760;
+  --signal-rgb: 201 87 96;
+  --signal-hover: #D66B73;
+  --signal-active: #AD3E48;
+  --orbit: #9662B8;
+  --orbit-rgb: 150 98 184;
+  --orbit-highlight: #B487CB;
+  --orbit-active: #754A91;
+  --orbit-deep: #654176;
+  --orbit-border: #4B3655;
+  --danger: #7F2932;
+  --wine: #522B31;
 
-  /* 브랜드 보라(마크·워드마크와 동일 계열) — 이전엔 범용 파랑(#3b82f6)이었다. */
-  --accent-primary: #8b5cf6;
-  --accent-rgb: 139 92 246;
-  --accent-secondary: #a78bfa;
-  --accent-gradient: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%);
-  --accent-glow: rgba(139, 92, 246, 0.4);
+  /* Product states stay independent from the brand palette. */
+  --success: #70BE9F;
+  --success-rgb: 112 190 159;
+  --warning: #D8B76A;
+  --warning-rgb: 216 183 106;
+  --info: #7FA9D2;
+  --info-rgb: 127 169 210;
+  --error: #D27C82;
+  --error-rgb: 210 124 130;
+  --review-caution: var(--warning);
+  --review-strong: #D49365;
+  --review-critical: var(--error);
+  --review-source: var(--orbit-highlight);
 
-  /* 앱 모드별 지오메트리 — 기본(라이브 모드 방향)은 넉넉한 라운드.
-     녹음 모드는 body[data-app-mode="recording"]에서 더 각지게 오버라이드. */
-  --radius-nav: 10px;
-  --radius-card: 14px;
+  /* Compatibility aliases while components migrate to semantic roles. */
+  --accent-primary: var(--signal);
+  --accent-rgb: var(--signal-rgb);
+  --accent-secondary: var(--signal-hover);
+  --accent-gradient: linear-gradient(110deg, var(--signal-active), var(--signal) 56%, var(--orbit));
+  --accent-glow: rgb(var(--signal-rgb) / 0.14);
+  --ai-accent: var(--orbit);
+  --ai-accent-rgb: var(--orbit-rgb);
 
-  --text-main: #f8fafc;
-  --text-muted: #94a3b8;
-  --text-dim: #64748b;
-  --text-inverse: #ffffff;
+  --bg-color: #121015;
+  --sidebar-bg: rgba(24, 21, 27, 0.985);
+  --dock-bg: rgba(27, 23, 30, 0.97);
+  --glass-bg: rgba(37, 32, 41, 0.72);
+  --glass-border: rgba(180, 135, 203, 0.14);
+  --panel-border: rgba(180, 135, 203, 0.18);
 
-  --surface-1: rgba(255, 255, 255, 0.03);
-  --surface-2: rgba(255, 255, 255, 0.05);
-  --surface-3: rgba(255, 255, 255, 0.1);
-  --overlay-bg: rgba(0, 0, 0, 0.7);
-  --shadow-strong: rgba(0, 0, 0, 0.6);
-  --input-bg: rgba(255, 255, 255, 0.03);
-  --input-bg-focus: rgba(255, 255, 255, 0.06);
-  --menu-bg: rgba(18, 18, 24, 0.95);
-  --scrollbar-thumb: rgba(255, 255, 255, 0.2);
-  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.35);
+  --radius-control: 8px;
+  --radius-nav: 4px 10px 10px 10px;
+  --radius-card: 4px 10px 10px 10px;
+
+  --text-main: #E7E0E6;
+  --text-muted: #B3AAB2;
+  --text-dim: #887F87;
+  --text-inverse: #F4EFF3;
+
+  --surface-1: #18151B;
+  --surface-2: #1E1A21;
+  --surface-3: #252029;
+  --overlay-bg: rgba(8, 7, 10, 0.62);
+  --shadow-strong: rgba(4, 3, 5, 0.42);
+  --input-bg: #1B181E;
+  --input-bg-focus: #211C24;
+  --menu-bg: rgba(28, 24, 31, 0.99);
+  --scrollbar-thumb: rgba(180, 135, 203, 0.24);
+  --scrollbar-thumb-hover: rgba(201, 87, 96, 0.32);
 
   --safe-area: 40px;
-  --dock-height: 100px;
+  --dock-height: 60px;
   --titlebar-height: 38px;
+
+  /* Unified compact layout scale. Geometry is shared by every workspace. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --control-sm: 28px;
+  --control-md: 34px;
+  --control-lg: 42px;
+  --page-gutter: 16px;
+  --panel-secondary: 288px;
+  --panel-detail: 356px;
+  --content-readable: 960px;
+  --modal-sm: 420px;
+  --modal-md: 560px;
+  --modal-lg: 760px;
+  --modal-xl: 1040px;
 
   /* Button Sizing System (Adjusted to be more compact) */
   --btn-h-sm: 24px;
@@ -125,94 +190,8 @@ body[data-app-mode="recording"] {
   --radius-card: 9px;
 }
 
-html[data-theme="light"] {
-  --bg-color: #f7f3eb;
-  --sidebar-bg: rgba(246, 241, 233, 0.96);
-  --dock-bg: rgba(241, 235, 226, 0.9);
-  --glass-bg: rgba(77, 63, 49, 0.05);
-  --glass-border: rgba(77, 63, 49, 0.16);
-
-  --accent-primary: #9a6b3f;
-  --accent-rgb: 154 107 63;
-  --accent-secondary: #b68457;
-  --accent-gradient: linear-gradient(135deg, #9a6b3f 0%, #b68457 100%);
-  --accent-glow: rgba(154, 107, 63, 0.3);
-
-  --text-main: #2d241c;
-  --text-muted: #4f4032;
-  --text-dim: #7a6653;
-  --text-inverse: #ffffff;
-
-  --surface-1: rgba(108, 88, 68, 0.05);
-  --surface-2: rgba(108, 88, 68, 0.09);
-  --surface-3: rgba(108, 88, 68, 0.14);
-  --overlay-bg: rgba(70, 56, 42, 0.24);
-  --shadow-strong: rgba(68, 52, 37, 0.2);
-  --input-bg: rgba(253, 250, 245, 0.92);
-  --input-bg-focus: rgba(255, 253, 249, 1);
-  --menu-bg: rgba(247, 242, 235, 0.97);
-  --scrollbar-thumb: rgba(132, 108, 86, 0.4);
-  --scrollbar-thumb-hover: rgba(104, 84, 65, 0.5);
-}
-
-html[data-theme="pink"] {
-  --bg-color: #fff6f8;
-  --sidebar-bg: rgba(255, 246, 250, 0.96);
-  --dock-bg: rgba(251, 241, 246, 0.9);
-  --glass-bg: rgba(147, 85, 105, 0.05);
-  --glass-border: rgba(147, 85, 105, 0.15);
-
-  --accent-primary: #ef7da8;
-  --accent-rgb: 239 125 168;
-  --accent-secondary: #f4a16e;
-  --accent-gradient: linear-gradient(135deg, #ef7da8 0%, #f4a16e 100%);
-  --accent-glow: rgba(239, 125, 168, 0.26);
-
-  --text-main: #3b2831;
-  --text-muted: #6b4d5b;
-  --text-dim: #8e6b7b;
-  --text-inverse: #ffffff;
-
-  --surface-1: rgba(147, 85, 105, 0.05);
-  --surface-2: rgba(147, 85, 105, 0.09);
-  --surface-3: rgba(147, 85, 105, 0.14);
-  --overlay-bg: rgba(116, 70, 88, 0.2);
-  --shadow-strong: rgba(109, 63, 81, 0.18);
-  --input-bg: rgba(255, 251, 254, 0.94);
-  --input-bg-focus: rgba(255, 255, 255, 1);
-  --menu-bg: rgba(255, 246, 250, 0.97);
-  --scrollbar-thumb: rgba(191, 135, 159, 0.42);
-  --scrollbar-thumb-hover: rgba(165, 110, 134, 0.52);
-}
-
-html[data-theme="sky"] {
-  --bg-color: #f8fcff;
-  --sidebar-bg: rgba(246, 251, 255, 0.97);
-  --dock-bg: rgba(240, 248, 255, 0.92);
-  --glass-bg: rgba(74, 126, 163, 0.04);
-  --glass-border: rgba(74, 126, 163, 0.13);
-
-  --accent-primary: #7fc4ef;
-  --accent-rgb: 127 196 239;
-  --accent-secondary: #9ed6f5;
-  --accent-gradient: linear-gradient(135deg, #7fc4ef 0%, #9ed6f5 100%);
-  --accent-glow: rgba(127, 196, 239, 0.22);
-
-  --text-main: #243949;
-  --text-muted: #4b6478;
-  --text-dim: #6e879b;
-  --text-inverse: #ffffff;
-
-  --surface-1: rgba(74, 126, 163, 0.045);
-  --surface-2: rgba(74, 126, 163, 0.08);
-  --surface-3: rgba(74, 126, 163, 0.12);
-  --overlay-bg: rgba(78, 119, 150, 0.18);
-  --shadow-strong: rgba(59, 95, 122, 0.16);
-  --input-bg: rgba(252, 255, 255, 0.95);
-  --input-bg-focus: rgba(255, 255, 255, 1);
-  --menu-bg: rgba(246, 251, 255, 0.98);
-  --scrollbar-thumb: rgba(147, 186, 214, 0.38);
-  --scrollbar-thumb-hover: rgba(121, 163, 194, 0.48);
+@media (min-width: 1440px) {
+  :root { --page-gutter: 24px; }
 }
 
 /* Premium Custom Scrollbars */

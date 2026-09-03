@@ -171,6 +171,36 @@ pub async fn open_cache_folder(window: WebviewWindow) -> Result<(), String> {
     Ok(())
 }
 
+/// 로그 폴더를 파일 탐색기로 연다.
+///
+/// 버그 신고 양식이 로그를 요구하는데 정작 앱 어디에도 위치를 알려주는 곳이
+/// 없었다. 로그는 audio_player::sys_log가 `<앱폴더>/logs/app.log`에 쌓는다.
+/// 아직 한 줄도 안 쌓였으면 폴더가 없으므로 만들어서 연다 — "폴더가
+/// 없습니다"라는 에러는 신고하려는 사람에게 아무 도움이 안 된다.
+#[tauri::command]
+pub async fn open_log_folder(window: WebviewWindow) -> Result<(), String> {
+    let dir = window.state::<crate::state::AppPaths>().root.join("logs");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("로그 폴더를 만들지 못했습니다: {}", e))?;
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        std::process::Command::new("explorer")
+            .arg(dir.to_string_lossy().to_string())
+            .creation_flags(0x08000000)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&dir)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 /// 이 곡의 MR 분리 결과가 들어있는 폴더를 파일 탐색기로 연다.
 /// 캐시 폴더 이름은 경로를 정규화·URL 인코딩한 값이라 사용자가 직접 찾기
 /// 어려우므로(유튜브 URL이 그대로 인코딩됨), 여기서 해석해 열어준다.
@@ -205,16 +235,56 @@ pub async fn open_mr_folder(window: WebviewWindow, path: String) -> Result<(), S
     Ok(())
 }
 
+/// 백업 파일 형식 v2.
+///
+/// v1은 곡 배열만 담은 JSON이었다. 그래서 백업을 들고 새 PC로 옮겨도 테마·
+/// 오버레이 디자인·라이브 대기열 같은 앱 설정은 전부 처음부터 다시 맞춰야
+/// 했다(그 값들은 프런트의 localStorage에 있고 DB에 없다).
+///
+/// v2는 설정을 함께 담는다. 설정의 의미는 프런트만 알고 백엔드는 문자열
+/// 맵으로 통과시키기만 한다 — 키가 늘어도 여기를 고칠 일이 없다.
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct BackupFileV2 {
+    pub format_version: u32,
+    pub songs: Vec<SongMetadata>,
+    #[serde(default)]
+    pub app_settings: std::collections::HashMap<String, String>,
+}
+
+/// 옛 백업(곡 배열)과 새 백업(객체)을 모두 읽는다.
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum BackupFile {
+    V2(BackupFileV2),
+    /// v1 — 곡 배열만. 설정은 없는 것으로 친다.
+    V1(Vec<SongMetadata>),
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportBackupResult {
+    pub added: usize,
+    /// 프런트가 localStorage에 되돌릴 설정. v1 백업이면 비어 있다.
+    pub app_settings: std::collections::HashMap<String, String>,
+}
+
 #[tauri::command]
-pub async fn export_backup(paths: State<'_, crate::state::AppPaths>) -> Result<(), String> {
+pub async fn export_backup(
+    paths: State<'_, crate::state::AppPaths>,
+    app_settings: Option<std::collections::HashMap<String, String>>,
+) -> Result<(), String> {
     if let Some(path) = file_dialog_in_documents()
         .add_filter("JSON", &["json"])
-        .set_file_name("LiveMR_Backup.json")
+        .set_file_name("OSW_Backup.json")
         .save_file()
         .await
     {
-        let songs = library::get_songs_internal(paths.inner().clone()).await?;
-        let json = serde_json::to_string_pretty(&songs).map_err(|e| e.to_string())?;
+        let backup = BackupFileV2 {
+            format_version: 2,
+            songs: library::get_songs_internal(paths.inner().clone()).await?,
+            app_settings: app_settings.unwrap_or_default(),
+        };
+        let json = serde_json::to_string_pretty(&backup).map_err(|e| e.to_string())?;
         std::fs::write(path.path(), json).map_err(|e| e.to_string())?;
         Ok(())
     } else {
@@ -223,26 +293,36 @@ pub async fn export_backup(paths: State<'_, crate::state::AppPaths>) -> Result<(
 }
 
 #[tauri::command]
-pub async fn import_backup(_app: AppHandle, paths: State<'_, crate::state::AppPaths>) -> Result<(), String> {
+pub async fn import_backup(
+    _app: AppHandle,
+    paths: State<'_, crate::state::AppPaths>,
+) -> Result<ImportBackupResult, String> {
     if let Some(path) = file_dialog_in_documents()
         .add_filter("JSON", &["json"])
         .pick_file()
         .await
     {
         let json = std::fs::read_to_string(path.path()).map_err(|e| e.to_string())?;
-        let backup_songs: Vec<SongMetadata> = serde_json::from_str(&json).map_err(|e| e.to_string())?;
-        
+        let (backup_songs, app_settings) = match serde_json::from_str::<BackupFile>(&json)
+            .map_err(|e| format!("백업 파일을 읽을 수 없습니다: {}", e))?
+        {
+            BackupFile::V2(v2) => (v2.songs, v2.app_settings),
+            BackupFile::V1(songs) => (songs, std::collections::HashMap::new()),
+        };
+
         let mut current_songs = library::get_songs_internal(paths.inner().clone()).await?;
         let current_paths: std::collections::HashSet<String> = current_songs.iter().map(|s| s.path.clone()).collect();
-        
+
+        let mut added = 0;
         for song in backup_songs {
             if !current_paths.contains(&song.path) {
                 current_songs.push(song);
+                added += 1;
             }
         }
-        
+
         library::save_library_internal(current_songs).await?;
-        Ok(())
+        Ok(ImportBackupResult { added, app_settings })
     } else {
         Err("CANCELLED".into())
     }

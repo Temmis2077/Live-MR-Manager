@@ -121,8 +121,8 @@ export function showInputContextMenu(event, editable) {
           showNotification("붙여넣기에 실패했습니다. (클립보드 접근 권한 확인)", "warning");
         }
       } finally {
-        elements.contextMenu.classList.remove("active");
-        elements.contextMenu.style.display = "none";
+        const { closeContextMenu } = await import("../../ui/components.js");
+        closeContextMenu();
       }
     };
   };
@@ -149,6 +149,7 @@ export function showInputContextMenu(event, editable) {
   elements.contextMenu.style.left = `${x}px`;
   elements.contextMenu.style.display = "flex";
   elements.contextMenu.classList.add("active");
+  import("../../ui/components.js").then((m) => m.openContextMenuLayer());
 }
 
 export function persistCurrentTrackAudioSettings(partial) {

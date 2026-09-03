@@ -74,7 +74,11 @@ function restructureIntoPanes(tab) {
   const urlCard = tab.querySelector('#overlay-url-display')?.closest('.ai-model-card');
   const designCard = tab.querySelector('#overlay-preset-dropdown')?.closest('.ai-model-card');
   const visibilityCard = tab.querySelector('.ov-visibility-card');
+  const offsetCard = tab.querySelector('.ov-offset-card');
+  const lyricOptions = tab.querySelector('.lyric-line-visibility-toggle')?.closest('div[style*="background"]');
   const forceVisibleRow = tab.querySelector('#toggle-overlay-force-visible')?.closest('.group-header');
+  const forceVisibleTitle = forceVisibleRow?.querySelector('h3');
+  if (forceVisibleTitle) forceVisibleTitle.textContent = '미리보기 상태';
 
   const container = tab.querySelector('.overlay-tab-container') || tab;
   container.appendChild(panes);
@@ -95,27 +99,93 @@ function restructureIntoPanes(tab) {
     right.appendChild(previewBox);
   }
 
+  const categoryNav = document.createElement('nav');
+  categoryNav.className = 'ov-category-nav';
+  categoryNav.setAttribute('role', 'tablist');
+  categoryNav.setAttribute('aria-label', '오버레이 설정 분류');
+
+  const categoryBody = document.createElement('div');
+  categoryBody.className = 'ov-category-body';
+  const categories = [
+    { id: 'layout', label: '화면 구성', hint: '표시 항목 · 타이밍' },
+    { id: 'design', label: '디자인', hint: '프리셋 · 크기 · 색' },
+    { id: 'lyrics', label: '가사', hint: '원문 · 차음 · 번역' },
+    { id: 'connection', label: 'OBS 연결', hint: '주소 · 네트워크' },
+  ];
+
+  const panels = new Map();
+  const selectCategory = (id, focus = false) => {
+    const safeId = panels.has(id) ? id : 'layout';
+    categoryNav.querySelectorAll('[data-ov-category]').forEach((button) => {
+      const active = button.dataset.ovCategory === safeId;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-selected', String(active));
+      button.tabIndex = active ? 0 : -1;
+      if (active && focus) button.focus();
+    });
+    panels.forEach((panel, panelId) => { panel.hidden = panelId !== safeId; });
+    requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+  };
+  tab._selectOverlayCategory = selectCategory;
+
+  categories.forEach((category, index) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'ov-category-tab';
+    button.dataset.ovCategory = category.id;
+    button.id = `ov-category-${category.id}`;
+    button.setAttribute('role', 'tab');
+    button.setAttribute('aria-controls', `ov-category-panel-${category.id}`);
+    button.innerHTML = `<span>${category.label}</span><small>${category.hint}</small>`;
+    button.addEventListener('click', () => selectCategory(category.id));
+    button.addEventListener('keydown', (event) => {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      event.preventDefault();
+      const next = (index + (event.key === 'ArrowRight' ? 1 : -1) + categories.length) % categories.length;
+      selectCategory(categories[next].id, true);
+    });
+    categoryNav.appendChild(button);
+
+    const panel = document.createElement('section');
+    panel.className = 'ov-category-panel';
+    panel.id = `ov-category-panel-${category.id}`;
+    panel.setAttribute('role', 'tabpanel');
+    panel.setAttribute('aria-labelledby', button.id);
+    panels.set(category.id, panel);
+    categoryBody.appendChild(panel);
+  });
+
+  left.append(categoryNav, categoryBody);
+
+  if (forceVisibleRow) panels.get('layout').appendChild(forceVisibleRow);
+  if (visibilityCard) panels.get('layout').appendChild(visibilityCard);
+  if (offsetCard) panels.get('layout').appendChild(offsetCard);
+  if (designCard) panels.get('design').appendChild(designCard);
+  if (lyricOptions) {
+    const lyricCard = document.createElement('div');
+    lyricCard.className = 'ai-model-card ov-lyrics-card';
+    lyricCard.innerHTML = '<div class="ai-title-large">가사 표시 줄</div><div class="ai-model-desc">인앱 가사창과 OBS에 보여줄 줄을 각각 선택합니다.</div>';
+    lyricCard.appendChild(lyricOptions);
+    panels.get('lyrics').appendChild(lyricCard);
+  }
+
+  if (urlCard) {
+    const connectionDetails = document.createElement('details');
+    connectionDetails.className = 'ov-connection-details';
+    connectionDetails.innerHTML = `
+      <summary>
+        <span><strong>브라우저 소스 주소 보기</strong><small>OBS에 처음 추가하거나 주소를 다시 확인할 때만 펼치세요.</small></span>
+      </summary>`;
+    connectionDetails.appendChild(urlCard);
+    panels.get('connection').appendChild(connectionDetails);
+  }
+
   const guide = document.createElement('div');
   guide.className = 'ov-guide';
   guide.innerHTML = `
-    <div class="ov-guide-title">OBS 쪽 설정은 한 번만</div>
-    <div class="ov-guide-body">
-      소스 추가 → <strong>브라우저</strong> → 왼쪽 주소 붙여넣기 →
-      “장면이 활성화될 때 새로 고침” 켜기.
-      배경은 투명하게 전달되므로 <strong>색상 키를 쓸 필요가 없습니다.</strong>
-    </div>
-    <div class="ov-guide-body" style="margin-top:8px">
-      방송 중에는 이 창을 닫아도 됩니다. 라이브 화면에서 만진 값이 오버레이에 바로 반영됩니다.
-    </div>`;
-  right.appendChild(guide);
-
-  // 좌측 — 상시 표시 → 연결·URL → 화면에 보여줄 것 → 디자인 세부 (시안 순서).
-  // 표시 항목이 디자인 세부보다 위인 이유: "무엇을 띄울지"를 먼저 정하고
-  // "어떻게 보일지"를 다듬는 순서가 실제 사용 흐름이다.
-  if (forceVisibleRow) left.appendChild(forceVisibleRow);
-  if (urlCard) left.appendChild(urlCard);
-  if (visibilityCard) left.appendChild(visibilityCard);
-  if (designCard) left.appendChild(designCard);
+    <div class="ov-guide-title">OBS 연결은 처음 한 번만</div>
+    <div class="ov-guide-body">소스 추가 → <strong>브라우저</strong> → 주소 붙여넣기 → “장면이 활성화될 때 새로 고침”을 켜세요. 색상 키는 필요 없습니다.</div>`;
+  panels.get('connection').appendChild(guide);
 
   // 위 목록에 없는 나머지도 전부 왼쪽으로 쓸어 담는다.
   //
@@ -124,8 +194,12 @@ function restructureIntoPanes(tab) {
   // 실제로 그렇게 됐다). 오버레이와 무관한 작업이 이 화면을 깨뜨리면 안 된다.
   // 순서는 위에서 정한 것이 유지되고, 모르는 카드는 그 아래에 붙는다.
   Array.from(container.children).forEach((child) => {
-    if (child !== panes) left.appendChild(child);
+    if (child !== panes && child.childElementCount > 0) panels.get('layout').appendChild(child);
   });
+
+  // 창을 다시 열 때는 항상 실제 조절 화면부터 보인다. OBS 주소를 마지막으로
+  // 확인했더라도 다음 진입까지 주소 화면이 따라오지 않게 한다.
+  selectCategory('layout');
 
   tab.dataset.paned = '1';
 }
@@ -139,6 +213,7 @@ export function openOverlayFloat() {
   const tab = $('overlay-tab');
   if (!tab) return;
   restructureIntoPanes(tab);
+  tab._selectOverlayCategory?.('layout');
 
   // 원래 자리를 기억해 둔다 — 닫을 때 그대로 돌려놓아야 탭으로 열 때도 정상.
   if (tab.parentElement !== slot) {

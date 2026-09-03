@@ -101,7 +101,7 @@ pub async fn delete_ai_model(window: WebviewWindow, model_id: String) -> Result<
 fn active_model_filename() -> String {
     let model_id = {
         let db = crate::state::DB.lock();
-        db.query_row("SELECT value FROM Settings WHERE key = 'active_model_id'", [], |row| row.get::<_, String>(0)).unwrap_or_else(|_| "kim".to_string())
+        db.query_row("SELECT value FROM Settings WHERE key = 'active_model_id'", [], |row| row.get::<_, String>(0)).unwrap_or_else(|_| crate::state::DEFAULT_MODEL_ID.to_string())
     };
     ModelManager::spec_from_id(&model_id)
         .map(|spec| spec.name)
@@ -166,6 +166,9 @@ pub async fn add_custom_model(
     }
     if crate::custom_models::preset_by_key(&preset_key).is_none() {
         return Err(format!("알 수 없는 아키텍처 프리셋: {}", preset_key));
+    }
+    if crate::custom_models::is_harmony_preset(&preset_key) && source_kind != "file" {
+        return Err("리드/화음 모델은 라이선스 확인이 필요한 로컬 ONNX 파일로만 등록할 수 있습니다.".into());
     }
 
     let id = format!(
@@ -281,7 +284,7 @@ pub async fn remove_custom_model(window: WebviewWindow, model_id: String) -> Res
         let db = crate::state::DB.lock();
         let active: String = db.query_row("SELECT value FROM Settings WHERE key = 'active_model_id'", [], |row| row.get(0)).unwrap_or_default();
         if active == model_id {
-            db.execute("INSERT OR REPLACE INTO Settings (key, value) VALUES ('active_model_id', 'kim')", []).ok();
+            db.execute("INSERT OR REPLACE INTO Settings (key, value) VALUES ('active_model_id', ?)", [crate::state::DEFAULT_MODEL_ID]).ok();
             let mut engine = crate::separation::ROFORMER_ENGINE.lock();
             *engine = None;
             *crate::separation::ENGINE_MODEL_ID.lock() = None;
@@ -342,7 +345,12 @@ pub fn get_active_separations() -> Vec<String> {
 }
 
 #[tauri::command]
-pub async fn start_mr_separation(window: WebviewWindow, path: String, model_id: Option<String>) -> Result<(), String> {
+pub async fn start_mr_separation(
+    window: WebviewWindow,
+    path: String,
+    model_id: Option<String>,
+    harmony_model_id: Option<String>,
+) -> Result<(), String> {
     let norm = normalize_cache_key(&path);
     if crate::separation::ACTIVE_SEPARATIONS.lock().contains_key(&norm) {
         let _ = sys_log(&format!("[Command] [Error] start_mr_separation failed: ALREADY_PROCESSING for {}", path));
@@ -352,11 +360,24 @@ pub async fn start_mr_separation(window: WebviewWindow, path: String, model_id: 
     // Per-request model choice (속도/품질 선택 모달). Validate up front so a
     // bad id fails the request instead of surfacing mid-queue as a task error.
     if let Some(ref id) = model_id {
-        ModelManager::spec_from_id(id).map_err(|_| format!("알 수 없는 분리 모델: {}", id))?;
+        let spec = ModelManager::spec_from_id(id).map_err(|_| format!("알 수 없는 분리 모델: {}", id))?;
+        if spec.params.as_ref().map(|_| crate::custom_models::get(id)
+            .map(|m| crate::custom_models::is_harmony_preset(&m.preset_key)).unwrap_or(false)).unwrap_or(false) {
+            return Err("화음 분리 모델은 1차 보컬/반주 모델로 사용할 수 없습니다.".into());
+        }
+    }
+    if let Some(ref id) = harmony_model_id {
+        ModelManager::spec_from_id(id).map_err(|_| format!("알 수 없는 화음 분리 모델: {}", id))?;
+        let valid = crate::custom_models::get(id)
+            .map(|m| crate::custom_models::is_harmony_preset(&m.preset_key) && m.url.trim().is_empty())
+            .unwrap_or(false);
+        if !valid {
+            return Err("리드/화음 전용 프리셋으로 직접 등록한 로컬 ONNX 모델을 선택해주세요.".into());
+        }
     }
 
     let cache = window.state::<crate::state::AppPaths>().separated.join(urlencoding::encode(&norm).to_string());
-    let task = crate::separation::task::SeparationTask::new(window, path, cache, model_id);
+    let task = crate::separation::task::SeparationTask::new(window, path, cache, model_id, harmony_model_id);
     tauri::async_runtime::spawn(async move { task.run().await; });
     Ok(())
 }

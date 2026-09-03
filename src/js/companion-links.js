@@ -3,7 +3,7 @@
  * web/companion/lib/site.ts 와 동기화 유지
  */
 export const GITHUB_REPO = 'Temmis2077/OSW';
-export const COMPANION_BASE = 'https://lmrm.vercel.app';
+export const COMPANION_BASE = 'https://companion-six-kappa.vercel.app';
 
 export const FAQ_URL = `${COMPANION_BASE}/faq`;
 export const QA_URL = `${COMPANION_BASE}/qa`;

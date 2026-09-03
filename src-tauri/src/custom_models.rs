@@ -1,7 +1,7 @@
 //! Custom AI separation models.
 //!
 //! Users can register additional ONNX separation models on top of the two
-//! built-in ones (`kim`, `inst_hq_3`). Because the separation engine needs to
+//! the built-in commercially usable model. Because the separation engine needs to
 //! know the STFT/architecture parameters for a model — and those cannot be
 //! reliably inferred for an arbitrary file — each custom model is tied to an
 //! **architecture preset**. The preset supplies the concrete parameters the
@@ -126,7 +126,25 @@ pub const PRESETS: &[ArchPreset] = &[
         outputs_instrumental: false,
         vocal_source_index: 0,
     },
+    ArchPreset {
+        key: "melband_roformer_karaoke",
+        label: "Mel-Band RoFormer Karaoke (리드/화음, 로컬 모델)",
+        description: "통합 보컬을 리드 보컬과 화음/코러스로 나누는 2차 전용 ONNX 모델. 자동 다운로드하지 않으며 [1,2,N] → [1,2,2,N], 리드=source 0 구성이어야 합니다.",
+        engine: EngineKind::RawWaveform,
+        is_mdx: false,
+        is_roformer: true,
+        is_kara: true,
+        n_fft: 2048,
+        hop_length: 512,
+        target_bins: 1025,
+        outputs_instrumental: false,
+        vocal_source_index: 0,
+    },
 ];
+
+pub fn is_harmony_preset(key: &str) -> bool {
+    key == "melband_roformer_karaoke"
+}
 
 pub fn preset_by_key(key: &str) -> Option<&'static ArchPreset> {
     PRESETS.iter().find(|p| p.key == key)

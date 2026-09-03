@@ -7,6 +7,59 @@ import { getSongCategory } from './library.js';
 import { setMetaStarRating } from '../utils.js';
 // 장르/카테고리 기준은 taxonomy.js 단일 소스 (docs/GENRE_CATEGORY_STANDARD.md).
 import { GENRES, CATEGORIES } from '../taxonomy.js';
+import { pushLayer, popLayer } from './layer-stack.js';
+
+/** 열려 있는 오버레이 모달의 레이어 핸들 (요소 → handle) */
+const modalLayers = new WeakMap();
+
+/**
+ * `.modal-overlay` 하나를 여는 공통 경로.
+ *
+ * 예전에는 모달마다 닫는 방법이 제각각이었다 — 어떤 것은 Esc가 되고 어떤
+ * 것은 안 되고, 배경 클릭도 마찬가지였다. 더 나쁜 건 controls/library.js가
+ * Esc에서 `.modal-overlay.active`를 통째로 지워 버려서, 각 모달이 정해 둔
+ * 닫기 함수(closeEditModal 등)를 건너뛰고 상태가 남았다는 점이다.
+ *
+ * 여기를 통해 열면 Esc·배경 클릭·닫기 아이콘이 전부 같은 close로 모이고,
+ * 포커스도 열기 전 자리로 돌아간다.
+ *
+ * @param {Element} el `.modal-overlay` 요소
+ * @param {object} [opts]
+ * @param {Function} [opts.onClose] 닫을 때 실행할 정리 작업
+ * @param {string} [opts.closeIconId] 헤더 x 버튼의 id
+ */
+export function openOverlayModal(el, { onClose, closeIconId, autoFocus = true } = {}) {
+  if (!el) return null;
+  if (modalLayers.has(el)) closeOverlayModal(el);
+
+  const close = () => closeOverlayModal(el);
+
+  el.onclick = (event) => {
+    if (event.target === el) close();
+  };
+  if (closeIconId) {
+    const icon = document.getElementById(closeIconId);
+    if (icon) icon.onclick = close;
+  }
+
+  el.classList.add('active');
+  const handle = pushLayer({ id: el.id || 'modal', el, close, autoFocus });
+  handle.onClose = onClose;
+  modalLayers.set(el, handle);
+  return handle;
+}
+
+/** openOverlayModal로 연 모달을 닫는다. 버튼 클릭 경로도 이걸 쓴다. */
+export function closeOverlayModal(el) {
+  if (!el) return;
+  const handle = modalLayers.get(el);
+  modalLayers.delete(el);
+  el.classList.remove('active');
+  if (handle) {
+    popLayer(handle);
+    handle.onClose?.();
+  }
+}
 
 /** 커스텀 셀렉트(.custom-select)의 옵션 목록을 주어진 값들로 다시 만든다. */
 function fillCustomSelect(dropdown, values) {
@@ -124,21 +177,27 @@ export function openEditModal(song, index) {
     if (label) label.classList.toggle("disabled", isSeparated);
   }
 
-  elements.metadataModal.classList.add("active");
+  // Esc·배경 클릭도 반드시 아래 정리를 거치게 한다. 예전에는 Esc가
+  // closeEditModal()을 건너뛰어서 editingSongIndex와 MR 체크박스의 disabled가
+  // 남았고, 다음에 연 곡의 체크박스가 잠긴 채로 뜨는 일이 있었다.
+  openOverlayModal(elements.metadataModal, { onClose: resetEditModalState });
+}
+
+/** 편집 모달을 닫은 뒤 남는 상태를 정리한다(다음에 열 때를 위해). */
+function resetEditModalState() {
+  const mrCheckbox = document.getElementById("edit-is-mr");
+  if (mrCheckbox) {
+    mrCheckbox.disabled = false;
+    const label = mrCheckbox.closest(".mr-checkbox-label");
+    if (label) label.classList.remove("disabled");
+  }
+  state.editingSongIndex = null;
 }
 
 export function closeEditModal() {
-  if (elements.metadataModal) {
-    elements.metadataModal.classList.remove("active");
-    // Reset disabled state for next open
-    const mrCheckbox = document.getElementById("edit-is-mr");
-    if (mrCheckbox) {
-      mrCheckbox.disabled = false;
-      const label = mrCheckbox.closest(".mr-checkbox-label");
-      if (label) label.classList.remove("disabled");
-    }
-  }
-  state.editingSongIndex = null;
+  if (elements.metadataModal) closeOverlayModal(elements.metadataModal);
+  // openOverlayModal을 거치지 않고 열린 경우에도 상태는 정리되게 한다.
+  resetEditModalState();
 }
 
 export function openConfirmModal(title, message, onConfirm) {
@@ -164,10 +223,17 @@ export function openConfirmModal(title, message, onConfirm) {
   };
   
   cancelBtn.onclick = closeConfirmModal;
-  
-  elements.confirmModal.classList.add("active");
+
+  // 헤더의 x·배경 클릭·Esc를 전부 취소 경로로 묶는다 — 확인 모달은 파일
+  // 삭제처럼 되돌릴 수 없는 동작 앞에 서므로, 빠져나갈 길이 '취소' 버튼
+  // 하나뿐이면 곤란하다. 셋 다 openOverlayModal이 붙여 준다.
+  openOverlayModal(elements.confirmModal, { closeIconId: "confirm-close-icon" });
+
+  // 되돌릴 수 없는 동작 앞이므로 초점은 '취소'에 둔다 — Enter를 습관적으로
+  // 눌러도 삭제가 실행되지 않게.
+  cancelBtn.focus();
 }
 
 export function closeConfirmModal() {
-  if (elements.confirmModal) elements.confirmModal.classList.remove("active");
+  if (elements.confirmModal) closeOverlayModal(elements.confirmModal);
 }

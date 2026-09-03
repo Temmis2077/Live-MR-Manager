@@ -10,8 +10,10 @@ export const API_VERSION = "2026-01-11";
 export const OAUTH_SCOPE =
   "profile:read channels:read songbook:read songbook:write";
 
+// 멜로밍 OAuth는 오픈 베타에서 UI가 숨겨져 있다. 다시 공개하기 전에는 이 URI가
+// 멜로밍 콘솔의 등록값과 일치하는지 별도로 확인해야 한다.
 export const PRODUCTION_REDIRECT_URI =
-  "https://lmrm.vercel.app/oauth/callback";
+  "https://companion-six-kappa.vercel.app/oauth/callback";
 
 export type TokenResponse = {
   access_token: string;

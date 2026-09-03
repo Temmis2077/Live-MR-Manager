@@ -22,8 +22,54 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
+use once_cell::sync::Lazy;
+use parking_lot::Mutex;
+
 use crate::ffmpeg_tools::tools_cache_dir;
 use crate::vocal_remover::{InferenceEngine, WaveformRemover};
+
+/// 디리버브 엔진 빌드가 이 프로세스에서 이미 진행 중인가.
+///
+/// TensorRT 첫 엔진 빌드가 [`DEREVERB_TIMEOUT_SECS`] 안에 못 끝나면
+/// `resolve_alignment_vocal`은 원본 보컬로 폴백하고 돌아가지만, 백그라운드로
+/// 던진 스레드는 취소되지 않고 계속 돈다(타임아웃으로 "회수"해도 빌드 자체는
+/// 안 멈춘다). 이 상태에서 창(윈도우) 재정렬마다 새 시도가 또 spawn되면,
+/// 같은 모델의 TensorRT 엔진을 여러 스레드가 동시에 빌드하려 들어 GPU/빌더
+/// 자원을 서로 잡아먹고 전부 300초를 넘겨 실패한다.
+///
+/// 실측: 한 곡을 정렬하는 동안 앵커 창마다 이 사이클이 반복돼(로그에서
+/// "Starting new CTC alignment path"가 5번, 매번 "300초 초과"), 실제 정렬
+/// 작업(수 초~수십 초)이 아니라 헛도는 디리버브 재시도들 때문에 정렬이
+/// 몇 분씩 안 끝나는 것처럼 보였다.
+///
+/// 한 번에 하나만 시도하게 막는다. 이미 진행 중이면 새로 시작하지 않고 바로
+/// 원본 보컬로 넘어간다 — 먼저 시작한 시도가 끝까지 가서 TensorRT 엔진 캐시를
+/// 채우면, 그 이후의 모든 호출(같은 곡의 다음 창, 다음 곡)은 몇 초 만에 끝난다.
+static DEREVERB_BUILD_INFLIGHT: Lazy<Mutex<bool>> = Lazy::new(|| Mutex::new(false));
+
+/// `DEREVERB_BUILD_INFLIGHT`를 true로 켜고, 스코프를 벗어나면(정상 반환이든
+/// 패닉이든) 자동으로 끈다. generate()가 내부에서 패닉해도(예: ort 세션 생성
+/// 실패) 플래그가 영구히 걸려 디리버브가 이후 계속 조용히 건너뛰어지는 일을
+/// 막는다.
+struct InflightGuard;
+
+impl InflightGuard {
+    /// 이미 진행 중이면 None(호출자는 원본 보컬로 폴백해야 함).
+    fn try_acquire() -> Option<Self> {
+        let mut inflight = DEREVERB_BUILD_INFLIGHT.lock();
+        if *inflight {
+            return None;
+        }
+        *inflight = true;
+        Some(Self)
+    }
+}
+
+impl Drop for InflightGuard {
+    fn drop(&mut self) {
+        *DEREVERB_BUILD_INFLIGHT.lock() = false;
+    }
+}
 
 const MODEL_FILENAME: &str = "dereverb_mel_band_roformer.onnx";
 
@@ -59,9 +105,18 @@ fn set_enabled_db(enabled: bool) {
 }
 
 /// 이미 만들어진 디리버브 보컬 캐시(mp3/wav 어느 형식이든).
-fn cached_dr(vocal_parent: &Path) -> Option<PathBuf> {
+fn output_stem(vocal_path: &Path) -> &'static str {
+    let is_lead = vocal_path.file_stem().and_then(|x| x.to_str())
+        .map(|x| x.eq_ignore_ascii_case("lead_vocal"))
+        .unwrap_or(false);
+    if is_lead { "lead_vocal_dr" } else { "vocal_dr" }
+}
+
+fn cached_dr(vocal_path: &Path) -> Option<PathBuf> {
+    let vocal_parent = vocal_path.parent()?;
+    let stem = output_stem(vocal_path);
     for ext in ["wav", "mp3"] {
-        let p = vocal_parent.join(format!("vocal_dr.{}", ext));
+        let p = vocal_parent.join(format!("{}.{}", stem, ext));
         if p.is_file() {
             return Some(p);
         }
@@ -86,7 +141,7 @@ pub async fn resolve_alignment_vocal(vocal_path: PathBuf) -> PathBuf {
         Some(p) => p.to_path_buf(),
         None => return vocal_path,
     };
-    if let Some(c) = cached_dr(&parent) {
+    if let Some(c) = cached_dr(&vocal_path) {
         return c;
     }
     // GPU 팩 없이 CPU로 이 RawWaveform 모델을 돌리면 수십 분이 걸릴 수 있어
@@ -97,6 +152,16 @@ pub async fn resolve_alignment_vocal(vocal_path: PathBuf) -> PathBuf {
         );
         return vocal_path;
     }
+    // 이미 다른 창(윈도우)이 같은 모델의 엔진을 빌드하는 중이면 또 시작하지
+    // 않는다 — 동시에 여러 스레드가 같은 TensorRT 엔진을 빌드하려 들면 서로
+    // 자원을 잡아먹고 전부 실패한다. 먼저 시작한 시도가 끝까지 가게 둔다.
+    let Some(guard) = InflightGuard::try_acquire() else {
+        crate::audio_player::sys_log(
+            "[Dereverb] 다른 창(윈도우)의 엔진 빌드가 이미 진행 중 — 이번 호출은 원본 보컬로 진행",
+        );
+        return vocal_path;
+    };
+
     // 무거운 RoFormer 패스라 블로킹 스레드에서. 새 모델의 첫 TensorRT 엔진 빌드가
     // 비정상적으로 오래 걸리거나 멈춰도 타임아웃으로 회수해 정렬이 막히지 않게 한다.
     let vp = vocal_path.clone();
@@ -107,7 +172,14 @@ pub async fn resolve_alignment_vocal(vocal_path: PathBuf) -> PathBuf {
     ));
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(DEREVERB_TIMEOUT_SECS),
-        tokio::task::spawn_blocking(move || generate(&vp, &parent)),
+        tokio::task::spawn_blocking(move || {
+            let out = generate(&vp, &parent);
+            // 이 클로저는 백그라운드 스레드에서 끝까지 돈다 — 위 타임아웃이
+            // 먼저 포기해도 guard는 이 스레드가 실제로 끝날 때 풀린다. 그래야
+            // 다음 시도(같은 곡의 다음 창, 또는 다음 곡)가 그 전까지 막힌다.
+            drop(guard);
+            out
+        }),
     )
     .await;
     match result {
@@ -160,7 +232,7 @@ fn generate(vocal_path: &Path, out_parent: &Path) -> Result<PathBuf, String> {
 
     // dry의 실제 확장자를 보존(분리 출력이 mp3일 수도 wav일 수도).
     let ext = dry.extension().and_then(|e| e.to_str()).unwrap_or("wav");
-    let dest = out_parent.join(format!("vocal_dr.{}", ext));
+    let dest = out_parent.join(format!("{}.{}", output_stem(vocal_path), ext));
     std::fs::copy(&dry, &dest).map_err(|e| format!("vocal_dr 복사 실패: {}", e))?;
     let _ = std::fs::remove_dir_all(&tmp);
     crate::audio_player::sys_log(&format!("[Dereverb] 정렬용 디리버브 보컬 생성: {:?}", dest));

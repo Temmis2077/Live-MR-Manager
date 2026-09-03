@@ -8,6 +8,11 @@ use symphonia::core::probe::Hint;
 use rodio::Source;
 use crate::state::DB;
 use crate::types::SongMetadata;
+use crate::ipc::ApiError;
+
+fn library_error(code: &str, error: String) -> ApiError {
+    ApiError::recoverable(code, error)
+}
 
 pub fn to_sqlite_err(e: SqliteError) -> String {
     e.to_string()
@@ -109,8 +114,10 @@ pub fn probe_audio_duration(path: &str) -> Option<String> {
 }
 
 #[tauri::command]
-pub async fn update_song_metadata(song: SongMetadata) -> Result<(), String> {
+#[specta::specta]
+pub async fn update_song_metadata(song: SongMetadata) -> Result<(), ApiError> {
     save_library_internal(vec![song]).await
+        .map_err(|error| library_error("library.song.update_failed", error))
 }
 
 #[tauri::command]
@@ -322,18 +329,18 @@ pub async fn get_songs(paths: tauri::State<'_, crate::state::AppPaths>) -> Resul
 }
 
 #[tauri::command]
-pub async fn load_library(paths: tauri::State<'_, crate::state::AppPaths>) -> Result<Vec<SongMetadata>, String> { 
+#[specta::specta]
+pub async fn load_library(paths: tauri::State<'_, crate::state::AppPaths>) -> Result<Vec<SongMetadata>, ApiError> {
     match get_songs_internal(paths.inner().clone()).await {
         Ok(songs) => Ok(songs),
         Err(e) => {
             let _ = crate::audio_player::sys_log(&format!("[Command] [Error] load_library failed: {}", e));
-            Err(e)
+            Err(library_error("library.load_failed", e))
         }
     }
 }
 
-#[tauri::command]
-pub async fn get_categories() -> Result<Vec<crate::types::Category>, String> {
+async fn get_categories_internal() -> Result<Vec<crate::types::Category>, String> {
     let db = DB.lock();
     // Only categories that appear on at least one track (same idea as get_genres).
     let mut stmt = db.prepare(
@@ -368,7 +375,13 @@ pub async fn get_categories() -> Result<Vec<crate::types::Category>, String> {
 }
 
 #[tauri::command]
-pub async fn get_genres() -> Result<Vec<crate::types::Genre>, String> {
+#[specta::specta]
+pub async fn get_categories() -> Result<Vec<crate::types::Category>, ApiError> {
+    get_categories_internal().await
+        .map_err(|error| library_error("library.categories.load_failed", error))
+}
+
+async fn get_genres_internal() -> Result<Vec<crate::types::Genre>, String> {
     let db = DB.lock();
     let mut stmt = db.prepare(
         "SELECT g.id, g.name
@@ -383,6 +396,13 @@ pub async fn get_genres() -> Result<Vec<crate::types::Genre>, String> {
     Ok(res)
 }
 
+#[tauri::command]
+#[specta::specta]
+pub async fn get_genres() -> Result<Vec<crate::types::Genre>, ApiError> {
+    get_genres_internal().await
+        .map_err(|error| library_error("library.genres.load_failed", error))
+}
+
 /// 어느 트랙도 쓰지 않는 장르·카테고리 행을 지운다.
 ///
 /// 옛 스키마의 영문 슬러그(jpop, rock, ballad …)와 표준화 과정에서 중복이 된
@@ -392,8 +412,7 @@ pub async fn get_genres() -> Result<Vec<crate::types::Genre>, String> {
 ///
 /// 이름이 비어 있는 행도 함께 정리한다(빈 장르 ''가 실제로 있었다).
 /// 트랙이 하나라도 붙어 있으면 지우지 않는다.
-#[tauri::command]
-pub async fn prune_unused_taxonomy() -> Result<(u32, u32), String> {
+async fn prune_unused_taxonomy_internal() -> Result<(u32, u32), String> {
     let db = DB.lock();
 
     // 빈 이름 장르를 참조하는 트랙은 먼저 '장르 없음'으로 풀어 준다.
@@ -430,6 +449,13 @@ pub async fn prune_unused_taxonomy() -> Result<(u32, u32), String> {
 }
 
 #[tauri::command]
+#[specta::specta]
+pub async fn prune_unused_taxonomy() -> Result<(u32, u32), ApiError> {
+    prune_unused_taxonomy_internal().await
+        .map_err(|error| library_error("library.taxonomy.prune_failed", error))
+}
+
+#[tauri::command]
 pub async fn add_category(name: String) -> Result<i64, String> {
     let db = DB.lock();
     db.execute("INSERT INTO Categories (name) VALUES (?)", params![name]).map_err(to_sqlite_err)?;
@@ -457,11 +483,12 @@ pub async fn map_track_to_categories(track_id: i64, category_ids: Vec<i64>) -> R
 }
 
 #[tauri::command]
-pub async fn delete_song(path: String) -> Result<(), String> {
+#[specta::specta]
+pub async fn delete_song(path: String) -> Result<(), ApiError> {
     let db = DB.lock();
     db.execute("DELETE FROM Tracks WHERE path = ?", params![path]).map_err(|e| {
         let _ = crate::audio_player::sys_log(&format!("[Command] [Error] delete_song failed: {}", e));
-        to_sqlite_err(e)
+        library_error("library.song.delete_failed", to_sqlite_err(e))
     })?;
     Ok(())
 }
@@ -539,12 +566,13 @@ pub async fn save_library_internal(songs: Vec<SongMetadata>) -> Result<(), Strin
 }
 
 #[tauri::command]
-pub async fn save_library(_app: AppHandle, songs: Vec<SongMetadata>) -> Result<(), String> {
+#[specta::specta]
+pub async fn save_library(_app: AppHandle, songs: Vec<SongMetadata>) -> Result<(), ApiError> {
     match save_library_internal(songs).await {
         Ok(_) => Ok(()),
         Err(e) => {
             let _ = crate::audio_player::sys_log(&format!("[Command] [Error] save_library failed: {}", e));
-            Err(e)
+            Err(library_error("library.save_failed", e))
         }
     }
 }

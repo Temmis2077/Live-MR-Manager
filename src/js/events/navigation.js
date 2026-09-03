@@ -1,5 +1,5 @@
 /**
- * js/events/navigation.js - Sidebar Navigation & Tabs
+ * js/events/navigation.js - Workspace Navigation & Tabs
  */
 import { state } from '../state.js';
 import { elements } from '../ui/elements.js';
@@ -9,34 +9,6 @@ import { updateBroadcastTasksControlVisibility } from '../ui/components.js';
 import { pushEntry, rememberScroll, back, forward, canGoBack, canGoForward } from '../nav-history.js';
 
 export function initNavigation() {
-  document.querySelectorAll(".nav-item").forEach(item => {
-    item.addEventListener("click", () => {
-      const tabId = item.id.replace("nav-", "");
-      // "노래 추가"는 탭이 아니라 원스톱 추가 모달을 연다.
-      if (tabId === "add-song") {
-        import('../ui/add-song-modal.js').then(({ openAddSongModal }) => openAddSongModal());
-        return;
-      }
-      // "가사 창"은 탭이 아니라 별도 가사 호버창을 연다.
-      if (tabId === "lyrics-window") {
-        import('../tauri-bridge.js').then(({ invoke }) => invoke('open_lyrics_window'))
-          .catch((err) => {
-            console.error('[LyricsWindow] open failed:', err);
-            import('../utils.js').then(m => m.showNotification('가사 창을 열지 못했습니다: ' + err, 'error'));
-          });
-        return;
-      }
-      // "OBS 오버레이 설정"은 화면이 아니라 떠 있는 패널이다 — 어디서 열든
-      // 같은 패널로 열린다(라이브에서 화면을 떠나지 않게 만든 것을 통일).
-      if (tabId === "overlay") {
-        import('../ui/overlay-float.js').then(({ openOverlayFloat }) => openOverlayFloat())
-          .catch((err) => console.error('[Overlay] panel failed:', err));
-        return;
-      }
-      if (tabId) switchTab(tabId);
-    });
-  });
-
   const btnCopyOverlayUrl = document.getElementById("btn-copy-overlay-url");
 
   if (btnCopyOverlayUrl) {
@@ -94,11 +66,7 @@ export function switchTab(tabId, options = {}) {
     elements.viewSubtitle.style.display = subtitle ? "block" : "none";
   }
 
-  document.querySelectorAll(".nav-item").forEach(i => {
-    i.classList.toggle("active", i.id === `nav-${tabId}`);
-  });
-
-  // 유튜브/내 파일 탭은 라이브러리에 합병됨 — 곡 추가는 사이드바 "노래 추가"로.
+  // 유튜브/내 파일 탭은 라이브러리에 합병됨.
   const isMusicTab = (tabId === "library" || tabId === "meloming");
   if (elements.libraryControls) elements.libraryControls.style.display = isMusicTab ? "flex" : "none";
   if (elements.viewControls) elements.viewControls.style.display = isMusicTab ? "flex" : "none";
@@ -132,6 +100,11 @@ export function switchTab(tabId, options = {}) {
   // Close drawer if moving to a non-music (system) tab
   if (!isMusicTab && document.body.classList.contains('drawer-open')) {
     document.body.classList.remove('drawer-open');
+  }
+  if (!isMusicTab) {
+    document.body.classList.remove('lib-filters-open', 'lib-inspector-open');
+    document.getElementById('lib-filters-toggle')?.setAttribute('aria-expanded', 'false');
+    document.getElementById('lib-inspector-toggle')?.setAttribute('aria-expanded', 'false');
   }
 
   // 음원 관리 3단 레이아웃 — 음악 탭에서만 펼친다.
@@ -306,4 +279,3 @@ async function initAlignmentViewer() {
   alignmentViewer = new ForcedAlignmentViewer("alignment-viewer-root");
   // Constructor already calls setupListeners, setupCanvasListeners, and loadTrackList
 }
-

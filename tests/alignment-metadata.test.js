@@ -2,6 +2,19 @@ import { describe, expect, it } from 'vitest';
 import { applyAlignmentMetadata, buildAlignmentMetadata } from '../src/js/alignment-metadata.js';
 
 describe('alignment metadata sidecar', () => {
+  it('persists assistant reasoning without changing the LRC schema', () => {
+    const source = [{
+      text: '검토 줄', start: 1, end: 2, approx: true,
+      syncAssistant: {
+        status: 'estimated_review', reasonCodes: ['assistant_repositioned'],
+        vocalOverlapMs: 900, vocalOverlapRatio: 0.9,
+      },
+    }];
+    const restored = applyAlignmentMetadata(source, buildAlignmentMetadata(source)).segments;
+    expect(restored[0].syncAssistant).toMatchObject({
+      status: 'estimated_review', reasonCodes: ['assistant_repositioned'], vocalOverlapMs: 900,
+    });
+  });
   it('restores AI trust without changing source text or timing', () => {
     const sidecar = buildAlignmentMetadata([{
       text: '원문 가사', start: 12.34, end: 14, approx: true,
@@ -55,6 +68,34 @@ describe('alignment metadata sidecar', () => {
     const restored = applyAlignmentMetadata([{ text: '수동 확정', start: 4.2 }], sidecar);
     expect(restored.segments[0]).toMatchObject({
       approx: false, alignmentTrust: 'manual', alignmentSource: 'manual',
+    });
+  });
+
+  it('does not turn an untimed non-approximate placeholder into a manual anchor', () => {
+    const sidecar = buildAlignmentMetadata([{
+      text: '아직 미싱크', start: 0, end: 0, approx: false,
+    }]);
+    const restored = applyAlignmentMetadata([{ text: '아직 미싱크', start: 0, end: 0 }], sidecar);
+    expect(restored.segments[0].alignmentTrust).not.toBe('manual');
+    expect(restored.segments[0].alignmentSource).not.toBe('manual');
+  });
+
+  it('round-trips the VAD boundary evidence without writing it into LRC timing', () => {
+    const source = [{
+      text: '경계 복구', start: 1, end: 3, approx: true,
+      alignmentSource: 'vad_boundary_review',
+      vadAssignment: {
+        regions: [{ startMs: 1_000, endMs: 1_800, activity: 0.8 }],
+        startBoundary: 'vad_start', endBoundary: 'vad_end',
+      },
+    }];
+    const restored = applyAlignmentMetadata(
+      [{ text: '경계 복구', start: 1, end: 3 }],
+      buildAlignmentMetadata(source),
+    );
+    expect(restored.segments[0]).toMatchObject({
+      alignmentSource: 'vad_boundary_review',
+      vadAssignment: { startBoundary: 'vad_start', endBoundary: 'vad_end' },
     });
   });
 });

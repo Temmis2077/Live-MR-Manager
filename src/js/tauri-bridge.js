@@ -54,8 +54,7 @@ export async function invoke(command, args = {}) {
       return;
     case 'list_all_models':
       return [
-        { id: 'kim', name: 'Kim Vocal 2', isCustom: false, presetKey: null },
-        { id: 'inst_hq_3', name: 'Inst HQ 3', isCustom: false, presetKey: null },
+        { id: 'melband_roformer_vocals_mit', name: 'melband_roformer_vocals.onnx', isCustom: false, presetKey: null },
       ];
     case 'list_output_devices':
       return [
@@ -75,6 +74,8 @@ export async function invoke(command, args = {}) {
         metroEnabled: false, metroBpm: 0, metroGain: 80, mrDevice: '',
         monDelayMs: 0, monEstLatencyMs: 50, mrDelayMs: 0, mrEstLatencyMs: 0,
         limiterEnabled: true,
+        vocalBalance: Number(localStorage.getItem('liveVocalMix') ?? 0), vocalEnabled: true,
+        masterVolume: Number(localStorage.getItem('masterVolume') ?? 100), pitch: 0, tempo: 1,
       };
     case 'set_track_fader':
     case 'set_track_mute':

@@ -1,6 +1,6 @@
 /** Pure live-performance helpers. Kept DOM-free so timing and queue behavior
  * can be verified without a Tauri window. */
-import { lineProgress } from './alignment-metadata.js';
+import { getProgressBoundsMs, lineProgress } from './alignment-metadata.js';
 
 /**
  * MR(반주)이 준비된 곡인가.
@@ -13,6 +13,17 @@ export function isMrReady(song) {
   if (!song) return false;
   return !!(song.isSeparated || song.is_separated || song.isMr || song.is_mr
     || song.mr_path || song.hasMr || song.has_mr || song.mrReady);
+}
+
+/** 라이브 헤더에 표시할 저장된 조성·템포. 없는 값은 추정하지 않는다. */
+export function getLiveKeyBpm(song) {
+  const rawKey = song?.songKey ?? song?.song_key ?? song?.key;
+  const key = typeof rawKey === 'string' && rawKey.trim() ? rawKey.trim() : null;
+  const rawBpm = Number(song?.bpm);
+  const bpm = Number.isFinite(rawBpm) && rawBpm >= 1 && rawBpm <= 400
+    ? Math.round(rawBpm)
+    : null;
+  return { key, bpm };
 }
 
 /**
@@ -32,7 +43,12 @@ export function isMrReady(song) {
 export function resolveLineWindow(current, upcoming) {
   const startSec = definedTime(current?.start);
   const upcomingStart = definedTime(upcoming?.start);
-  const rawEnd = definedTime(current?.end)
+  const alignedBounds = getProgressBoundsMs(current);
+  const alignedEnd = alignedBounds.endMs > alignedBounds.startMs
+    && Number(current?.ctcEnd) > 0
+    ? alignedBounds.endMs / 1000
+    : null;
+  const rawEnd = alignedEnd ?? definedTime(current?.end)
     ?? (startSec != null && upcomingStart != null && upcomingStart > startSec ? upcomingStart : null);
   const endSec = rawEnd == null || startSec == null
     ? rawEnd
@@ -59,22 +75,15 @@ const definedTime = (value) => {
  *  줄 뒤에 긴 간주가 붙으면 진행바가 30초에 걸쳐 기어가 노래와 어긋난다. */
 const MAX_SWEEP_SEC = 10;
 
-/**
- * 줄이 끝난 뒤에도 화면에 붙들어 두는 시간.
- *
- * 정렬이 주는 end는 그 줄의 토큰이 끝나는 시점이라, 부르는 사람이 끝음을
- * 끄는 동안 이미 지나간다. 그때 바로 다음 줄로 넘기면 아직 부르고 있는데
- * 화면에는 다음 가사가 떠 있다.
- */
-const HOLD_AFTER_END_SEC = 1.5;
-
-/**
- * 다음 줄을 미리 띄우기 시작하는 시점(그 줄 시작까지 남은 시간).
- *
- * 간주 내내 다음 줄을 띄워 두면 "지금 부르는 줄"이 있어야 할 자리에 한참
- * 뒤의 가사가 10초씩 앉아 있다. 곧 부를 때만 바꾼다.
- */
-const LEAD_IN_SEC = 4;
+/** 실제 발화 종료 시각. 진행 표시용 10초 상한은 다음 줄 미리 보기 판정에
+ * 쓰지 않는다. 끝 시각이 없는 LRC는 다음 줄 시작을 현재 줄의 끝으로 본다. */
+function resolveDisplayEndSec(current, upcoming) {
+  const bounds = getProgressBoundsMs(current);
+  if (bounds.endMs > bounds.startMs && Number(current?.ctcEnd) > 0) {
+    return bounds.endMs / 1000;
+  }
+  return definedTime(current?.end) ?? definedTime(upcoming?.start);
+}
 
 /**
  * 지금 시각 이후에 처음 시작하는 줄의 인덱스. 없으면 -1.
@@ -86,9 +95,8 @@ const LEAD_IN_SEC = 4;
 /**
  * 이미 시작한 줄 중 가장 마지막 것 = 지금 부르고 있거나 방금 부른 줄.
  *
- * 끝났는지는 보지 않는다. 끝난 뒤에도 다음 줄로 넘어가기 전까지는 이 줄이
- * "지금 부르는 줄" 자리를 지켜야 하기 때문이다 — 언제 넘길지는 부르는 쪽
- * (buildPerformerLyricModel)이 HOLD/LEAD_IN으로 정한다.
+ * 실제 재생 인덱스가 줄 사이에서 -1이 되거나 한 틱 늦게 바뀌어도, 방금 부른
+ * 줄과 다음 줄을 안정적으로 찾기 위해 사용한다.
  */
 function findRecentlySungSegment(list, pos) {
   for (let i = list.length - 1; i >= 0; i -= 1) {
@@ -142,27 +150,23 @@ export function buildPerformerLyricModel(segments, currentIndex, positionSec, ma
   const upcomingIndex = index >= 0 ? index + 1 : findUpcomingIndex(list, pos);
   const upcoming = upcomingIndex >= 0 ? list[upcomingIndex] || null : null;
 
-  // "지금 부르는 줄" 자리는 부르고 있는 줄, 또는 방금 부른 줄이 지킨다.
-  //
-  // 예전에는 부르는 줄이 없기만 하면(index === -1) 곧바로 다음 줄을 올렸다.
-  // 그런데 정렬의 end는 토큰이 끝나는 시점이라 끝음을 끄는 동안 이미 지나가고,
-  // 줄 사이 간격이 길면 한참 뒤의 가사가 10초씩 그 자리에 앉아 있었다 —
-  // 아직 이 줄을 부르는데 화면에는 다음 가사가 떠 있었다.
-  //
-  // 그래서 두 단계를 둔다: 끝난 뒤 잠깐은 그대로 붙들고(HOLD_AFTER_END_SEC),
-  // 다음 줄이 곧 시작할 때만(LEAD_IN_SEC) 미리 바꿔 준다.
+  // 중앙 수행자 화면은 이미 끝난 문장보다 앞으로 부를 문장을 우선한다.
+  // 현재 인덱스가 다음 폴링까지 이전 줄을 가리켜도, 실제 종료 시각을 지났다면
+  // 다음 줄을 즉시 메인으로 올린다. 시작 전이므로 진행도는 0으로 유지한다.
   const sung = index >= 0 ? list[index] || null : null;
   const justSung = sung ?? findRecentlySungSegment(list, pos);
   const upcomingStartSec = definedTime(upcoming?.start);
-  const leadInDue = upcomingStartSec != null && upcomingStartSec - pos <= LEAD_IN_SEC;
-  // 방금 끝난 줄은 잠깐 더 붙든다 — end는 끝음을 끄는 시간을 담지 않는다.
-  const justSungEnd = definedTime(justSung?.end);
-  const stillHolding = justSungEnd != null && pos - justSungEnd < HOLD_AFTER_END_SEC;
-  // 아직 아무 줄도 안 부른 곡 첫머리에는 붙들 것이 없으니 다음 줄을 보여 준다.
+  const justSungEnd = resolveDisplayEndSec(justSung, upcoming);
+  const currentHasEnded = justSungEnd != null && pos >= justSungEnd;
+  // 첫 줄 전에도 같은 방식으로 첫 가사를 미리 보여 준다.
   const pending = sung == null && upcoming != null
-    && (justSung == null || (leadInDue && !stillHolding));
+    ? (justSung == null || currentHasEnded)
+    : (upcoming != null && currentHasEnded);
   const current = pending ? upcoming : justSung;
   const next = pending ? (list[upcomingIndex + 1] || null) : upcoming;
+  const displayIndex = pending
+    ? upcomingIndex
+    : (index >= 0 ? index : list.indexOf(justSung));
 
   const nextStartSec = definedTime(next?.start);
   const { startSec: currentStart, endSec: currentEnd } = resolveLineWindow(current, upcoming);
@@ -187,6 +191,8 @@ export function buildPerformerLyricModel(segments, currentIndex, positionSec, ma
   return {
     current,
     next,
+    /** 중앙 메인 가사로 표시 중인 원본 배열 인덱스. */
+    displayIndex,
     /** 아직 부르기 전(리드인)으로 미리 띄운 줄인가. */
     pending,
     /** 지금 줄을 부르기 시작할 때까지 남은 시간. 리드인일 때만 값이 있다. */

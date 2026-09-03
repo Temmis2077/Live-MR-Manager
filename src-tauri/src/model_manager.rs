@@ -3,7 +3,8 @@ use std::fs;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri::path::BaseDirectory;
 use futures::StreamExt;
-use std::io::Write;
+use std::io::{Read, Write};
+use sha2::{Digest, Sha256};
 
 use crate::vocal_remover::ModelParams;
 
@@ -31,13 +32,30 @@ pub struct ModelManager {
 
 #[allow(dead_code)]
 impl ModelManager {
+    fn sha256_file(path: &PathBuf) -> Result<String, String> {
+        let mut file = fs::File::open(path).map_err(|e| e.to_string())?;
+        let mut hasher = Sha256::new();
+        let mut buffer = [0u8; 1024 * 1024];
+        loop {
+            let read = file.read(&mut buffer).map_err(|e| e.to_string())?;
+            if read == 0 { break; }
+            hasher.update(&buffer[..read]);
+        }
+        Ok(format!("{:x}", hasher.finalize()))
+    }
+
     pub fn spec_from_id(model_id: &str) -> Result<ModelSpec, String> {
         if let Some((id, name, url)) = crate::state::MODELS.iter().find(|(id, _, _)| *id == model_id) {
+            let params = if *id == crate::state::DEFAULT_MODEL_ID {
+                crate::custom_models::preset_by_key("melband_roformer").map(|preset| preset.to_params())
+            } else {
+                None
+            };
             return Ok(ModelSpec {
                 id: id.to_string(),
                 name: name.to_string(),
                 url: url.to_string(),
-                params: None,
+                params,
             });
         }
 
@@ -72,6 +90,7 @@ impl ModelManager {
             // based on observed production artifacts in this app
             "Kim_Vocal_2.onnx" => 55 * 1024 * 1024,
             "UVR-MDX-NET-Inst_HQ_3.onnx" => 55 * 1024 * 1024,
+            "melband_roformer_vocals.onnx" => 900 * 1024 * 1024,
             _ => 10 * 1024 * 1024,
         }
     }
@@ -195,6 +214,17 @@ impl ModelManager {
             if total_size > 0 {
                 let percentage = (downloaded as f32 / total_size as f32) * 100.0;
                 let _ = handle.emit("model-download-progress", percentage);
+            }
+        }
+        drop(file);
+
+        if model_name == "melband_roformer_vocals.onnx" {
+            const EXPECTED_SHA256: &str = "64a4f3bee48fbe7d971b23875adc924ed004c3533f49672592641dddc0f6f561";
+            let actual = Self::sha256_file(&path)
+                .map_err(|e| format!("모델 무결성 검사 실패: {}", e))?;
+            if !actual.eq_ignore_ascii_case(EXPECTED_SHA256) {
+                let _ = fs::remove_file(&path);
+                return Err(format!("모델 SHA-256 불일치: expected {}, got {}", EXPECTED_SHA256, actual));
             }
         }
 

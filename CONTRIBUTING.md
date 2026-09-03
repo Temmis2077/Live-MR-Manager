@@ -19,7 +19,7 @@ npm install
 npm run tauri dev
 ```
 
-사전 요구는 [README의 개발 환경](README.md#-개발-환경) 절을 보세요.
+사전 요구는 [README의 개발 실행](README.md#개발-실행) 절을 보세요.
 
 ## 바꾸기 전에
 

@@ -7,7 +7,7 @@
 :root {
     --card-bg: var(--surface-1);
     --accent-blue: var(--accent-primary);
-    --accent-red: #ef4444;
+    --accent-red: var(--error);
     --border-color: var(--glass-border);
     --align-text-soft: var(--text-muted);
     --align-scroll-thumb: var(--surface-3);
@@ -36,11 +36,11 @@
     --align-btn-border: var(--glass-border);
     --align-btn-hover-border: color-mix(in srgb, var(--accent-primary) 55%, transparent);
     --align-btn-hover-shadow: color-mix(in srgb, var(--accent-primary) 26%, transparent);
-    --align-danger-bg: rgba(239, 68, 68, 0.1);
-    --align-danger-border: rgba(239, 68, 68, 0.2);
-    --align-danger-text: #ef4444;
-    --align-danger-hover-bg: #ef4444;
-    --align-danger-hover-shadow: rgba(239, 68, 68, 0.3);
+    --align-danger-bg: rgb(var(--error-rgb) / 0.1);
+    --align-danger-border: rgb(var(--error-rgb) / 0.2);
+    --align-danger-text: var(--error);
+    --align-danger-hover-bg: var(--danger);
+    --align-danger-hover-shadow: rgb(var(--error-rgb) / 0.3);
     --align-track-item-bg: var(--surface-1);
     --align-track-item-border: color-mix(in srgb, var(--glass-border) 55%, transparent);
     --align-track-item-hover-bg: color-mix(in srgb, var(--accent-primary) 14%, transparent);
@@ -87,13 +87,13 @@ html[data-theme="sky"] {
     height: 100%; 
     min-height: 0; /* Flexbox 내에서 카드가 넘치는 것을 방지 */
     width: 100%;
-    grid-template-columns: minmax(280px, 0.8fr) minmax(400px, 3fr) minmax(280px, 0.8fr);
-    gap: 16px;
-    padding: 10px 0 30px 0; /* 끝선 위치를 30px 하단으로 고정 */
+    grid-template-columns: minmax(220px, 260px) minmax(380px, 1fr) minmax(240px, 300px);
+    gap: var(--space-2);
+    padding: var(--space-2) var(--page-gutter) var(--space-4);
     box-sizing: border-box;
     color: var(--text-main);
     background: transparent;
-    animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    animation: none;
     align-items: stretch;
     overflow: visible;
 }
@@ -114,17 +114,17 @@ html[data-theme="sky"] {
 .alignment-card {
     background: var(--card-bg);
     border: 1px solid var(--border-color);
-    border-radius: 16px;
-    padding: 12px;
-    backdrop-filter: blur(15px);
-    -webkit-backdrop-filter: blur(15px);
+    border-radius: var(--radius-card);
+    padding: var(--space-3);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    box-shadow: 0 8px 30px var(--align-shadow-card);
+    gap: var(--space-3);
+    box-shadow: none;
     height: 100%;
     min-height: 0; /* 중요: 내부 콘텐츠에 의해 카드가 늘어나는 것 방지 */
-    transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: background .18s, border-color .18s;
     position: relative;
     overflow: hidden; /* 내부 스크롤 활성화를 위해 다시 hidden으로 변경 */
 }
@@ -132,7 +132,7 @@ html[data-theme="sky"] {
 .alignment-card:hover {
     background: var(--align-surface-input);
     border-color: var(--align-btn-hover-border);
-    box-shadow: 0 12px 30px color-mix(in srgb, var(--align-shadow-card) 80%, transparent), 0 0 20px var(--align-shadow-accent) !important;
+    box-shadow: none;
 }
 
 /* 3. Column Wrappers */
@@ -141,7 +141,7 @@ html[data-theme="sky"] {
     min-height: 0; /* 중요: 그리드 아이템이 콘텐츠 크기에 따라 늘어나는 것 방지 */
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: var(--space-2);
     overflow: visible; /* 그림자 확산을 위해 유지하되 내부 카드가 높이 제한 */
     min-width: 0;
 }
@@ -374,8 +374,8 @@ canvas#waveform-canvas {
 /* AI 정렬 신뢰도가 낮아 검토가 권장되는 줄 — 은근한 앰버 틴트 + "확인" 배지.
    사용자가 이 줄을 고치면 다음 정렬의 하드 앵커가 되어 정확도가 누적된다. */
 .lyric-line-item.needs-review {
-    border-color: color-mix(in srgb, #e0a020 55%, var(--align-item-border));
-    background: color-mix(in srgb, #e0a020 8%, var(--align-item-bg));
+    border-color: color-mix(in srgb, var(--review-caution) 55%, var(--align-item-border));
+    background: color-mix(in srgb, var(--review-caution) 8%, var(--align-item-bg));
 }
 
 .alignment-playback-status {
@@ -401,8 +401,8 @@ canvas#waveform-canvas {
 }
 
 .alignment-action-hint.error {
-    border-color: color-mix(in srgb, #d73a49 60%, var(--align-item-border));
-    color: #ef6b78;
+    border-color: color-mix(in srgb, var(--error) 60%, var(--align-item-border));
+    color: var(--error);
 }
 
 .alignment-advanced-controls {
@@ -426,9 +426,9 @@ canvas#waveform-canvas {
     flex-wrap: wrap;
     margin-bottom: 10px;
     padding: 9px 10px;
-    border: 1px solid color-mix(in srgb, #e0a020 60%, var(--align-item-border));
+    border: 1px solid color-mix(in srgb, var(--review-caution) 60%, var(--align-item-border));
     border-radius: 9px;
-    background: color-mix(in srgb, #e0a020 10%, var(--align-item-bg));
+    background: color-mix(in srgb, var(--review-caution) 10%, var(--align-item-bg));
     color: var(--align-text-soft);
     font-size: 0.74rem;
 }
@@ -438,13 +438,27 @@ canvas#waveform-canvas {
 }
 
 .lyric-line-item.estimated-sync {
-    border-color: color-mix(in srgb, #dc6b2f 68%, var(--align-item-border));
-    background: color-mix(in srgb, #dc6b2f 12%, var(--align-item-bg));
+    border-color: color-mix(in srgb, var(--review-strong) 68%, var(--align-item-border));
+    background: color-mix(in srgb, var(--review-strong) 12%, var(--align-item-bg));
+}
+
+.alignment-viewer-root {
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+}
+
+@media (max-width: 1100px) {
+  .alignment-container {
+    grid-template-columns: minmax(190px, 220px) minmax(360px, 1fr) minmax(210px, 250px);
+    padding-inline: var(--space-2);
+  }
 }
 
 .lyric-line-item.unsynced-review {
-    border-color: color-mix(in srgb, #d73a49 72%, var(--align-item-border));
-    background: color-mix(in srgb, #d73a49 10%, var(--align-item-bg));
+    border-color: color-mix(in srgb, var(--review-critical) 72%, var(--align-item-border));
+    background: color-mix(in srgb, var(--review-critical) 10%, var(--align-item-bg));
 }
 
 .lyric-line-item .review-badge {
@@ -456,51 +470,28 @@ canvas#waveform-canvas {
     letter-spacing: 0.02em;
     padding: 2px 7px;
     border-radius: 999px;
-    color: #7a5200;
-    background: color-mix(in srgb, #e0a020 78%, white);
-    border: 1px solid color-mix(in srgb, #e0a020 60%, transparent);
+    color: var(--review-caution);
+    background: color-mix(in srgb, var(--review-caution) 24%, transparent);
+    border: 1px solid color-mix(in srgb, var(--review-caution) 50%, transparent);
     cursor: help;
 }
 
 .lyric-line-item .review-badge.estimated-badge {
-    color: #71300f;
-    background: color-mix(in srgb, #dc6b2f 72%, white);
-    border-color: color-mix(in srgb, #dc6b2f 65%, transparent);
+    color: var(--review-strong);
+    background: color-mix(in srgb, var(--review-strong) 28%, transparent);
+    border-color: color-mix(in srgb, var(--review-strong) 58%, transparent);
 }
 
 .lyric-line-item .review-badge.unsynced-badge {
-    color: #761b24;
-    background: color-mix(in srgb, #ef6b78 74%, white);
-    border-color: color-mix(in srgb, #d73a49 68%, transparent);
+    color: var(--review-critical);
+    background: color-mix(in srgb, var(--review-critical) 30%, transparent);
+    border-color: color-mix(in srgb, var(--review-critical) 62%, transparent);
 }
 
 .lyric-line-item .review-badge.non-lexical-badge {
-    color: #64227a;
-    background: color-mix(in srgb, #b65ad1 72%, white);
-    border-color: color-mix(in srgb, #8f3eaa 68%, transparent);
-}
-
-@media (prefers-color-scheme: dark) {
-    .lyric-line-item .review-badge {
-        color: #ffd27a;
-        background: color-mix(in srgb, #e0a020 24%, transparent);
-        border-color: color-mix(in srgb, #e0a020 50%, transparent);
-    }
-    .lyric-line-item .review-badge.estimated-badge {
-        color: #ffc5a3;
-        background: color-mix(in srgb, #dc6b2f 28%, transparent);
-        border-color: color-mix(in srgb, #dc6b2f 58%, transparent);
-    }
-    .lyric-line-item .review-badge.unsynced-badge {
-        color: #ffb0b8;
-        background: color-mix(in srgb, #d73a49 30%, transparent);
-        border-color: color-mix(in srgb, #ef6b78 62%, transparent);
-    }
-    .lyric-line-item .review-badge.non-lexical-badge {
-        color: #efbdff;
-        background: color-mix(in srgb, #9c47b5 30%, transparent);
-        border-color: color-mix(in srgb, #c26adb 62%, transparent);
-    }
+    color: var(--review-source);
+    background: color-mix(in srgb, var(--review-source) 30%, transparent);
+    border-color: color-mix(in srgb, var(--review-source) 62%, transparent);
 }
 
 @keyframes sync-pulse {
@@ -873,7 +864,8 @@ canvas#waveform-canvas {
 }
 
 .v2-theme .success-btn {
-    background: color-mix(in srgb, var(--accent-primary) 45%, #10b981 55%) !important;
+    background: var(--success) !important;
+    color: var(--bg-color) !important;
     font-weight: 800;
     padding: 6px 16px !important;
     font-size: 0.75rem !important;
@@ -1043,8 +1035,10 @@ canvas#waveform-canvas {
     font-weight: 700;
     color: #fff;
 }
-.track-status-badge.synced { background: rgba(16, 185, 129, 0.9); }
-.track-status-badge.unsynced { background: rgba(245, 158, 11, 0.9); }
+.track-status-badge.synced { background: rgb(var(--success-rgb) / 0.16); color: var(--success); border: 1px solid rgb(var(--success-rgb) / 0.28); }
+.track-status-badge.unsynced { background: rgb(var(--warning-rgb) / 0.16); color: var(--warning); border: 1px solid rgb(var(--warning-rgb) / 0.28); }
+.track-status-badge.synced::before { content: '✓'; margin-right: 4px; }
+.track-status-badge.unsynced::before { content: '!'; margin-right: 4px; }
 .track-item.current {
     border-color: var(--accent-primary);
     box-shadow: 0 0 0 1px var(--accent-primary) inset;
@@ -1097,9 +1091,9 @@ canvas#waveform-canvas {
     height: 100% !important;
 }
 #alignment-track-modal .modal-content {
-    height: 80vh !important;
-    display: flex !important;
-    flex-direction: column !important;
+    height: min(80vh, 720px);
+    display: flex;
+    flex-direction: column;
 }
 
 #alignment-track-modal .modal-body {
@@ -1240,7 +1234,7 @@ canvas#waveform-canvas {
 }
 
 .marker-label-vocal {
-    color: #22c55e;
+    color: var(--success);
 }
 
 .marker-time-input {
@@ -1283,8 +1277,8 @@ canvas#waveform-canvas {
 }
 
 .marker-delete-btn:hover {
-    color: #ef4444;
-    border-color: #ef4444;
+    color: var(--error);
+    border-color: var(--error);
 }
 
 /* 타임바 따라가기 토글 (재생 위치 자동 추적) */
@@ -1352,4 +1346,26 @@ canvas#waveform-canvas {
 .sync-ctrl-btn.tap-btn.end-btn:hover {
     background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
     box-shadow: none;
+}
+.assistant-invalid-badge {
+    color: var(--danger-color, #ff6b75);
+    border-color: color-mix(in srgb, var(--danger-color, #ff6b75) 55%, transparent);
+    background: color-mix(in srgb, var(--danger-color, #ff6b75) 12%, transparent);
+}
+
+.alignment-assistant-bar {
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    font-size: 0.75rem;
+    color: var(--align-text-soft);
+}
+
+.alignment-assistant-bar button {
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.16));
+    border-radius: 6px;
+    background: var(--surface-elevated, rgba(255, 255, 255, 0.06));
+    color: inherit;
+    padding: 3px 7px;
+    cursor: pointer;
 }

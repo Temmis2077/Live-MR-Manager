@@ -18,9 +18,11 @@ use super::settings::{
     KEY_OAUTH_VERIFIER, KEY_REFRESH_TOKEN,
 };
 
-pub const REDIRECT_URI: &str = "https://lmrm.vercel.app/oauth/callback";
-pub const COMPANION_EXCHANGE_URL: &str = "https://lmrm.vercel.app/api/oauth/exchange";
-pub const COMPANION_REFRESH_URL: &str = "https://lmrm.vercel.app/api/oauth/refresh";
+pub const REDIRECT_URI: &str = "https://companion-six-kappa.vercel.app/oauth/callback";
+pub const COMPANION_EXCHANGE_URL: &str =
+    "https://companion-six-kappa.vercel.app/api/oauth/exchange";
+pub const COMPANION_REFRESH_URL: &str =
+    "https://companion-six-kappa.vercel.app/api/oauth/refresh";
 const APP_DEEP_LINK_SCHEME: &str = "osw";
 const LEGACY_DEEP_LINK_SCHEME: &str = "live-mr-manager";
 

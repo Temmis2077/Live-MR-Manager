@@ -1,6 +1,6 @@
 /* --- Tasks Page Styles (Restored) --- */
 .tasks-container {
-  max-width: 1000px;
+  max-width: var(--content-readable);
   margin: 0 auto;
   padding: 0 0 20px 0;
   width: 100%;
@@ -14,12 +14,13 @@
 .section-toggle {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-2);
   width: 100%;
-  padding: 12px 16px;
+  min-height: var(--control-lg);
+  padding: var(--space-2) var(--space-3);
   background: var(--surface-1);
   border: 1px solid var(--glass-border);
-  border-radius: 12px;
+  border-radius: var(--radius-card);
   color: var(--text-main);
   font-size: 0.9rem;
   font-weight: 700;
@@ -66,13 +67,13 @@
 }
 
 .task-status-text.task-status-error {
-  color: #ef4444;
+  color: var(--error);
 }
 
 .tasks-list {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 20px;
+  gap: var(--space-3);
 }
 
 @media (max-width: 768px) {
@@ -84,19 +85,19 @@
 .task-card {
   background: var(--surface-1);
   border: 1px solid var(--glass-border);
-  border-radius: 16px;
-  padding: 16px 20px 10px 20px;
+  border-radius: var(--radius-card);
+  padding: var(--space-3);
   display: flex;
   flex-direction: column;
   min-width: 0;
-  animation: slideInUp 0.3s ease;
-  transition: transform 0.3s cubic-bezier(0.23, 1, 0.32, 1), background 0.3s ease;
+  animation: none;
+  transition: background 0.18s ease, border-color 0.18s ease;
 }
 
 .task-card:hover {
   background: var(--surface-2);
   border-color: rgb(var(--accent-rgb) / 0.5);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2), 0 0 15px rgb(var(--accent-rgb) / 0.1) !important;
+  box-shadow: none;
 }
 
 @keyframes slideInUp {
@@ -186,14 +187,14 @@
 }
 
 .btn-task-cancel {
-  background: rgba(239, 68, 68, 0.1);
-  border-color: rgba(239, 68, 68, 0.2);
-  color: #ef4444;
+  background: rgb(var(--error-rgb) / 0.1);
+  border-color: rgb(var(--error-rgb) / 0.2);
+  color: var(--error);
   cursor: pointer;
 }
 
 .btn-task-cancel:hover {
-  background: #ef4444 !important;
+  background: var(--error) !important;
   color: var(--text-inverse) !important;
 }
 
@@ -269,10 +270,18 @@ html[data-theme="sky"] .task-progress-container {
   font-weight: 500;
 }
 
+.alignment-queue-actions {
+  margin-bottom: var(--space-2);
+}
+
+.alignment-queue-actions[hidden] {
+  display: none;
+}
+
 /* --- Settings Page Styles (Restored) --- */
 .settings-container {
-  --settings-actions-width: 200px;
-  max-width: 900px;
+  --settings-actions-width: 220px;
+  max-width: var(--content-readable);
   margin: 0 auto;
   padding: 0 0 20px 0;
 }
@@ -303,11 +312,11 @@ html[data-theme="sky"] .task-progress-container {
 }
 
 .settings-header {
-  margin-bottom: 40px;
+  margin-bottom: var(--space-6);
 }
 
 .settings-header h2 {
-  font-size: 2rem;
+  font-size: 1.5rem;
   font-weight: 800;
   margin-bottom: 10px;
   color: var(--text-main);
@@ -315,20 +324,24 @@ html[data-theme="sky"] .task-progress-container {
 
 .settings-header p {
   color: var(--text-dim);
-  font-size: 1.1rem;
+  font-size: .88rem;
 }
 
 /* 설정 하위 카테고리 탭 바 — 설정을 한 화면에 다 몰아넣지 않고 분류해 보여준다. */
 .settings-subtabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-1);
   position: sticky;
   top: 0;
   z-index: 5;
-  padding: 18px 0 14px;
-  margin-bottom: 12px;
-  background: var(--bg-main, var(--surface-0));
+  padding: var(--space-2) 0;
+  margin-bottom: var(--space-3);
+  /* --bg-main도 --surface-0도 어디에도 정의된 적이 없어 폴백이 끝까지 비었고,
+     결과적으로 완전 투명이었다. 붙박이(sticky) 탭 바인데 배경이 없으니 설정
+     항목들이 탭 글자 뒤로 비쳐 지나가, 탭으로 나뉜 화면이 아니라 하나로
+     이어진 긴 목록처럼 보였다. 실제로 4개 테마 모두에 있는 변수를 쓴다. */
+  background: var(--bg-color);
   border-bottom: 1px solid var(--glass-border);
 }
 
@@ -339,8 +352,9 @@ html[data-theme="sky"] .task-progress-container {
   color: var(--text-muted);
   font-size: 0.9rem;
   font-weight: 600;
-  padding: 8px 16px;
-  border-radius: 10px;
+  min-height: var(--control-md);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-control);
   cursor: pointer;
   transition: background 0.2s, color 0.2s, border-color 0.2s;
 }
@@ -472,15 +486,40 @@ html[data-theme="sky"] .task-progress-container {
 }
 
 .settings-group {
-  margin-bottom: 48px;
-  animation: slideInUp 0.5s ease backwards;
+  /* 카드 사이 간격을 여기서만 정한다. 예전에는 카드마다 인라인 margin이
+     제각각(0 / 15 / 20px)이라 대부분은 서로 붙어 있고 몇 개만 떨어져 있었다. */
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-bottom: var(--space-6);
+  animation: none;
+}
+
+/* display를 지정하면 [hidden]의 UA 규칙(display:none)을 명시도로 이겨 버린다.
+   탭 전환은 hidden 속성으로 섹션을 감추므로, 이 한 줄이 없으면 모든 섹션이
+   항상 보이고 탭이 무력화된다. */
+.settings-group[hidden] { display: none; }
+
+.settings-group > .ai-model-card { margin: 0; }
+
+/* 섹션 전체에 붙는 안내문(카드가 아님). 예전에는 인라인으로 margin -8px/16px을
+   써서 흐름을 억지로 당겼는데, 위 gap과 겹쳐 이 섹션만 제목 아래가 79px로
+   벌어졌다. 간격은 gap에 맡기고 글자 크기만 정한다. */
+.settings-note {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--text-dim);
+  word-break: keep-all;
 }
 
 .group-header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 24px;
+  gap: var(--space-2);
+  /* 위 .settings-group의 gap(12px)에 더해져 총 20px — 제목과 첫 카드 사이는
+     카드끼리(12px)보다 넓어야 섹션 경계가 읽힌다. */
+  margin-bottom: 8px;
   color: var(--accent-primary);
 }
 
@@ -551,8 +590,8 @@ html[data-theme="sky"] .task-progress-container {
 }
 
 .ai-recommend-card {
-  background: rgba(245, 158, 11, 0.08);
-  border: 1px solid rgba(245, 158, 11, 0.3);
+  background: rgb(var(--warning-rgb) / 0.08);
+  border: 1px solid rgb(var(--warning-rgb) / 0.3);
   border-radius: 16px;
   padding: 16px 20px;
   margin-bottom: 24px;
@@ -570,7 +609,7 @@ html[data-theme="sky"] .task-progress-container {
 
 .ai-recommend-title {
   font-weight: 800;
-  color: #f59e0b;
+  color: var(--warning);
   font-size: 0.95rem;
   margin-bottom: 4px;
 }
@@ -591,32 +630,40 @@ html[data-theme="sky"] .task-progress-container {
 .recommend-link {
   font-size: 0.8rem;
   font-weight: 700;
-  color: #f59e0b;
+  color: var(--warning);
   text-decoration: none;
   padding: 6px 12px;
-  background: rgba(245, 158, 11, 0.15);
+  background: rgb(var(--warning-rgb) / 0.15);
   border-radius: 6px;
   transition: all 0.2s;
-  border: 1px solid rgba(245, 158, 11, 0.2);
+  border: 1px solid rgb(var(--warning-rgb) / 0.2);
 }
 
 .recommend-link:hover {
-  background: #f59e0b;
-  color: #000;
-  box-shadow: 0 0 10px rgba(245, 158, 11, 0.4);
+  background: var(--warning);
+  color: var(--bg-color);
+  box-shadow: none;
 }
 
 .ai-model-card {
   background: var(--surface-1);
   border: 1px solid var(--glass-border);
-  border-radius: 16px;
-  padding: 12px 16px; /* Reduced from 20px */
+  border-radius: var(--radius-card);
+  padding: var(--space-3) var(--space-4);
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 20px;
+  gap: var(--space-4);
   transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
   width: 100%;
+}
+
+@media (max-width: 760px) {
+  .settings-container .ai-model-card {
+    grid-template-columns: 1fr;
+    gap: var(--space-3);
+  }
+  .settings-container .ai-actions-right { width: 100%; }
 }
 
 .ai-model-card:hover {
@@ -644,15 +691,15 @@ html[data-theme="sky"] .task-progress-container {
 }
 
 .ai-status-badge.status-online {
-  background: rgba(16, 185, 129, 0.15);
-  color: #10b981;
-  border: 1px solid rgba(16, 185, 129, 0.2);
+  background: rgb(var(--success-rgb) / 0.15);
+  color: var(--success);
+  border: 1px solid rgb(var(--success-rgb) / 0.2);
 }
 
 .ai-status-badge.status-offline {
-  background: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
-  border: 1px solid rgba(239, 68, 68, 0.2);
+  background: rgb(var(--error-rgb) / 0.15);
+  color: var(--error);
+  border: 1px solid rgb(var(--error-rgb) / 0.2);
 }
 
 .ai-title-large {
@@ -672,6 +719,52 @@ html[data-theme="sky"] .task-progress-container {
   word-break: keep-all;
 }
 
+/* 긴 설명은 접어 둔다. 설정을 바꾸러 온 사람에게 매번 필요한 글이 아니고,
+   펼쳐 두면 항목 사이가 벌어져 무엇이 어떤 설정인지 훑기 어렵다.
+   자식 요소에 display를 직접 주지 않는다 — 닫힌 <details>의 감춤이 풀린다. */
+.setting-help {
+  margin-top: 4px;
+}
+
+.setting-help > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: fit-content;
+  padding: 2px 0;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  font-weight: 650;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.setting-help > summary::-webkit-details-marker { display: none; }
+
+/* 접힘·펼침을 알려 주는 화살표 */
+.setting-help > summary::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-left: 4px solid currentColor;
+  border-top: 3.5px solid transparent;
+  border-bottom: 3.5px solid transparent;
+  transition: transform 0.15s ease;
+}
+
+.setting-help[open] > summary::before { transform: rotate(90deg); }
+
+.setting-help > summary:hover { color: var(--text-muted); }
+
+.setting-help > summary:focus-visible {
+  outline: 2px solid var(--accent-secondary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.setting-help[open] > summary { margin-bottom: 5px; }
+
 .ai-actions-right {
   display: flex;
   flex-direction: column;
@@ -679,6 +772,44 @@ html[data-theme="sky"] .task-progress-container {
   width: 150px;
   flex-shrink: 0;
 }
+
+/* 출력 장치 고르기. 예전에는 select에 인라인 min-width:220px이 박혀 있어
+   200px짜리 칸 안에서 줄어들지 못했고, 장치 이름이 길면(예: "Speakers
+   (Realtek High Definition Audio) (48000Hz, 2ch)") 382px까지 벌어져
+   카드 밖으로 74px 삐져나왔다. 칸에 맞춰 줄어들고 이름은 말줄임한다.
+   .ai-actions-right가 같은 명시도로 flex-direction:column을 잡고 있어
+   여기서는 한 단계 더 좁혀 확실히 이기게 한다. */
+.settings-container .ai-actions-right.device-picker {
+  flex-direction: row;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-container .device-picker > select {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  padding: 9px 11px;
+  border-radius: 8px;
+  background: var(--surface-1);
+  color: var(--text-main);
+  border: 1px solid var(--glass-border);
+  text-overflow: ellipsis;
+}
+
+/* ↻는 글리프 하나짜리 아이콘 버튼인데 .btn-ai-action의 width:100%를 그대로
+   물려받아 칸 전체(200px)를 차지했고, 그 바람에 select가 24px로 짓눌리고
+   버튼이 카드 밖으로 밀려났다. 아이콘에 맞는 크기를 준다. */
+.settings-container .device-picker > button {
+  flex: none;
+  width: auto;
+  min-width: 38px;
+  padding: 0 11px;
+  white-space: nowrap;
+}
+
 
 .settings-container .ai-actions-right.support-actions-grid {
   display: grid;
@@ -692,6 +823,12 @@ html[data-theme="sky"] .task-progress-container {
   min-width: 0;
   padding: 0 8px;
   font-size: 0.75rem;
+}
+
+/* 보조 버튼이 홀수여도 마지막 칸이 어정쩡하게 비지 않게, 주 버튼(버그 신고)을
+   맨 아래 한 줄로 깐다. 실제로 눌러야 하는 것이 커져서 순서도 자연스럽다. */
+.settings-container .support-actions-grid #btn-open-bug-report {
+  grid-column: 1 / -1;
 }
 
 .btn-ai-action {
@@ -776,11 +913,11 @@ html[data-theme="sky"] .task-progress-container {
 }
 
 .settings-status-text.is-error {
-  color: #ef4444;
+  color: var(--error);
 }
 
 .settings-status-text.is-notice {
-  color: #fbbf24;
+  color: var(--warning);
 }
 
 .btn-ai-action.is-coming-soon {
@@ -971,6 +1108,31 @@ html[data-theme="dark"] .overlay-preview-wrapper::before {
   border-color: rgb(var(--accent-rgb) / 0.5);
 }
 
+.addsong-harmony-option {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(200px, 1.2fr);
+  align-items: center;
+  cursor: default;
+}
+
+.addsong-harmony-option:hover {
+  border-color: var(--glass-border);
+}
+
+.addsong-harmony-option .addsong-model-desc:last-child {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 720px) {
+  .addsong-harmony-option {
+    grid-template-columns: 1fr;
+  }
+
+  .addsong-harmony-option .addsong-model-desc:last-child {
+    grid-column: auto;
+  }
+}
+
 .addsong-model-label {
   font-weight: 700;
 }
@@ -1046,6 +1208,36 @@ html[data-theme="dark"] .overlay-preview-wrapper::before {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* 곡을 고르면 장르를 자동으로 찾아 붙인다 — 행마다 무엇이 잡혔는지 보이고,
+   아래 안내문에서 그대로 둘지 바꿀지 정한다. */
+.addsong-genre-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: rgb(var(--accent-rgb) / 0.16);
+  color: var(--accent-secondary);
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+
+.addsong-genre-tag.is-loading {
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.addsong-genre-note {
+  min-height: 16px;
+  font-size: 0.74rem;
+  line-height: 1.4;
+  color: var(--text-dim);
+  word-break: keep-all;
+}
+
+.addsong-genre-note[data-tone="ok"] { color: var(--accent-secondary); }
+.addsong-genre-note[data-tone="warn"] { color: var(--warning); }
 
 /* 노래 추가 — 통합 검색 결과 (좌: 유튜브 / 우: 가사 링크) */
 .addsong-search-panes {
@@ -1158,8 +1350,8 @@ html[data-theme="dark"] .overlay-preview-wrapper::before {
   padding: 1px 6px;
   margin-right: 5px;
   border-radius: 999px;
-  background: rgba(34, 197, 94, 0.16);
-  color: #4ade80;
+  background: rgb(var(--success-rgb) / 0.16);
+  color: var(--success);
   font-size: 0.62rem;
   font-weight: 800;
 }

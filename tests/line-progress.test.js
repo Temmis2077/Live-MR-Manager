@@ -10,7 +10,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   lineProgress, buildAlignmentMetadata, applyAlignmentMetadata,
-  readVocalRegions, snapToVocalEdge,
+  filterWordTimingsForProgress, readVocalRegions, snapToVocalEdge,
+  getProgressBoundsMs,
 } from '../src/js/alignment-metadata.js';
 
 /** 오버레이 쪽 정본 구현(shared.js는 클래식 스크립트라 이렇게 불러온다). */
@@ -106,6 +107,82 @@ describe('lineProgress — 단어 타임이 있을 때', () => {
       expect(v).toBeGreaterThanOrEqual(0);
       expect(v).toBeLessThanOrEqual(1);
     }
+  });
+});
+
+describe('진행도 단어 타임 필터', () => {
+  it('LRC의 다음 줄 연결 end보다 CTC 끝과 끝음 연장을 우선한다', () => {
+    expect(getProgressBoundsMs({
+      start: 10, end: 14, ctcEnd: 11.8, tailExtensionMs: 300,
+    })).toEqual({ startMs: 10000, endMs: 12100 });
+  });
+  it('줄 밖으로 조금 벗어난 모델 경계를 확정된 줄 구간에 맞춘다', () => {
+    expect(filterWordTimingsForProgress({
+      start: 10, end: 12,
+      words: [{ word: '첫', startMs: 9900, endMs: 10600 }, { word: '끝', startMs: 11400, endMs: 12100 }],
+    })).toEqual([
+      { t: '첫', s: 10000, e: 10600 },
+      { t: '끝', s: 11400, e: 12000 },
+    ]);
+  });
+
+  it('작은 프레임 겹침은 앞 단어 끝 경계에 맞춘다', () => {
+    expect(filterWordTimingsForProgress({
+      start: 0, end: 2,
+      words: [{ word: '앞', startMs: 100, endMs: 700 }, { word: '뒤', startMs: 650, endMs: 1200 }],
+    })).toEqual([
+      { t: '앞', s: 100, e: 675 },
+      { t: '뒤', s: 675, e: 1200 },
+    ]);
+  });
+
+  it('가사 싱크 보컬 구간 사이의 무음에서는 진행이 멈춘다', () => {
+    const seg = {
+      text: '아무리 우겨도', start: 10, end: 14,
+      words: [{ word: '아무리', startMs: 10000, endMs: 12000 }, { word: '우겨도', startMs: 12000, endMs: 14000 }],
+      vocalRegions: [
+        { startMs: 10000, endMs: 11200, activity: 0.8 },
+        { startMs: 12800, endMs: 14000, activity: 0.9 },
+      ],
+    };
+    const beforeSilence = lineProgress(seg, 11200);
+    expect(lineProgress(seg, 12000)).toBeCloseTo(beforeSilence, 6);
+    expect(lineProgress(seg, 12799)).toBeCloseTo(beforeSilence, 6);
+    expect(lineProgress(seg, 13400)).toBeGreaterThan(beforeSilence);
+  });
+
+  it('80ms 이하 VAD 틈은 프레임 노이즈로 합치고 긴 틈만 호흡으로 남긴다', () => {
+    const filtered = filterWordTimingsForProgress({
+      text: '테스트', start: 1, end: 3,
+      vocalRegions: [
+        { startMs: 1000, endMs: 1500 },
+        { startMs: 1560, endMs: 2000 },
+        { startMs: 2400, endMs: 3000 },
+      ],
+    });
+    expect(filtered).toHaveLength(2);
+    expect(filtered[0]).toMatchObject({ s: 1000, e: 2000 });
+    expect(filtered[1]).toMatchObject({ s: 2400, e: 3000 });
+  });
+
+  it('큰 겹침·역전은 원시 단어열을 버리고 줄 보간으로 물러난다', () => {
+    const seg = {
+      start: 0, end: 2,
+      words: [{ word: '앞', startMs: 100, endMs: 1000 }, { word: '역전', startMs: 400, endMs: 800 }],
+    };
+    expect(filterWordTimingsForProgress(seg)).toBeNull();
+    expect(lineProgress(seg, 1000)).toBeCloseTo(0.5, 3);
+  });
+
+  it('줄 밖 단어 또는 너무 짧은 단어가 섞이면 부분 진행을 만들지 않는다', () => {
+    expect(filterWordTimingsForProgress({
+      start: 1, end: 2,
+      words: [{ word: '밖', startMs: 100, endMs: 500 }],
+    })).toBeNull();
+    expect(filterWordTimingsForProgress({
+      start: 1, end: 2,
+      words: [{ word: '점', startMs: 1200, endMs: 1210 }],
+    })).toBeNull();
   });
 });
 
@@ -216,8 +293,14 @@ describe('보컬 활동 구간 — 저장·복원', () => {
 
   it('사이드카가 없거나 비어도 빈 배열', () => {
     expect(readVocalRegions(null)).toEqual([]);
-    expect(readVocalRegions({})).toEqual([]);
-  });
+  expect(readVocalRegions({})).toEqual([]);
+});
+
+it('reads waveform VAD regions returned in backend snake_case', () => {
+  expect(readVocalRegions({
+    vocalRegions: [{ start_ms: 1200, end_ms: 2600, activity: 0.75 }],
+  })).toEqual([{ startMs: 1200, endMs: 2600, activity: 0.75 }]);
+});
 
   it('가사를 고쳐 줄이 바뀌어도 보컬 구간은 유효하다', () => {
     // 곡 단위 값이라 sourceFingerprint 검사와 무관해야 한다.

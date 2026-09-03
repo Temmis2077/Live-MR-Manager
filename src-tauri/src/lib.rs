@@ -8,6 +8,8 @@ mod model_manager;
 mod custom_models;
 pub mod vocal_remover;
 pub mod audio_player;
+pub mod audio_core;
+pub mod ipc;
 mod separation;
 pub mod state;
 mod alignment;
@@ -32,7 +34,6 @@ mod spreadsheet;
 mod rescue;
 mod overlay_server;
 mod updater;
-mod migration;
 
 fn load_env_files() {
     let manifest_env = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(".env");
@@ -50,13 +51,9 @@ fn focus_main_window(app: &tauri::AppHandle) {
 
 pub fn run() {
     load_env_files();
-
-    // 구 식별자 데이터를 새 식별자로 가져오기 — Tauri 창·이벤트 루프가 생기기
-    // 전에 실행해야 한다. setup() 안에서 네이티브 모달을 띄우면 그 모달이
-    // 메시지 루프를 펌핑하면서 이미 생성된 WebView2가 리소스 요청을 처리하고,
-    // 아직 manage() 안 된 AppPaths를 state()로 접근해 패닉·abort로 이어진다.
-    // 여기(빌더 생성 전)선 창이 없어 모달이 안전하고, DB·새 폴더 생성보다도 앞선다.
-    crate::migration::maybe_migrate_legacy_data();
+    if let Err(error) = crate::onnx_engine::initialize_bundled_runtime() {
+        crate::audio_player::sys_log(&format!("[ONNX Runtime] {error}"));
+    }
 
     let mut builder = tauri::Builder::default();
 
@@ -76,6 +73,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_deep_link::init())
         .setup(|app| {
+            ipc::contract_builder().mount_events(app);
             crate::meloming::oauth::sync_credentials_from_env();
             if let Some(window) = app.get_webview_window("main") {
                 *crate::state::MAIN_WINDOW.lock() = Some(window);
@@ -145,102 +143,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            audio_commands::get_model_settings, audio_commands::update_model_settings,
-            audio_commands::play_track, audio_commands::toggle_playback, audio_commands::stop_playback, audio_commands::seek_to, audio_commands::set_pitch, audio_commands::set_tempo, audio_commands::set_volume, audio_commands::set_master_volume,
-            audio_commands::set_vocal_balance, audio_commands::toggle_ai_feature,
-            audio_commands::list_output_devices, audio_commands::get_output_device, audio_commands::set_output_device,
-            audio_commands::get_mr_output_device, audio_commands::set_mr_output_device,
-            audio_commands::set_channel_route, audio_commands::set_metronome, audio_commands::set_bus_delay, audio_commands::set_limiter,
-            audio_commands::get_mix_state, audio_commands::set_track_fader, audio_commands::set_track_mute, audio_commands::set_track_solo,
-            model_commands::check_mr_separated,
-            model_commands::get_separation_info,
-            model_commands::delete_mr,
-            model_commands::start_mr_separation, 
-            model_commands::youtube_metadata_fetcher,
-            library::get_audio_metadata, audio_commands::get_playback_state, 
-            model_commands::check_ai_runtime, model_commands::check_model_ready, model_commands::download_ai_model, 
-            library::save_library, library::load_library, library::get_songs, library::get_categories, library::get_genres, 
-            library::get_track_count, library::prune_unused_taxonomy,
-            model_commands::cancel_separation, 
-            model_commands::set_broadcast_mode,
-            model_commands::get_mr_cache_format,
-            model_commands::set_mr_cache_format,
-            system::get_audio_devices,
-            system::open_cache_folder,
-            system::open_mr_folder,
-            system::get_mr_cache_dir,
-            system::set_mr_cache_dir,
-            system::reset_mr_cache_dir,
-            model_commands::delete_ai_model,
-            model_commands::get_gpu_recommendation,
-            model_commands::list_model_presets,
-            model_commands::list_all_models,
-            model_commands::list_custom_models,
-            model_commands::add_custom_model,
-            model_commands::remove_custom_model,
-            library::add_category, library::delete_category,
-            library::delete_song, library::map_track_to_categories,
-            system::get_app_paths,
-            system::pick_audio_files,
-            system::open_lyrics_window,
-            gpu_pack::get_gpu_pack_status,
-            gpu_pack::open_gpu_pack_dir,
-            gpu_pack::install_gpu_pack,
-            gpu_pack::cancel_gpu_pack_install,
-            dereverb::get_dereverb_status,
-            dereverb::set_dereverb_enabled,
-            dereverb::open_dereverb_dir,
-            search::search_youtube,
-            search::search_lyrics_sites,
-            lyrics_db::fetch_synced_lyrics,
-            lyrics_db::autofill_song_info,
-            system::export_backup, 
-            system::import_backup,
-            system::export_library_spreadsheet,
-            system::import_library_spreadsheet,
-            rescue::run_cache_rescue,
-            rescue::run_local_rescue,
-            model_commands::get_active_separations,
-            audio_commands::get_ai_engine_status, 
-            library::update_song_metadata,
-            key_bpm::analyze_key_bpm,
-            audio_commands::get_alignment_sync_state,
-            alignment::get_separated_audio_list, alignment::run_forced_alignment,
-            alignment::cancel_forced_alignment, alignment::read_audio_file,
-            alignment::apply_alignment_tuning,
-            alignment::write_alignment_debug_trace,
-            alignment::get_waveform_summary, alignment::get_model_list,
-            alignment::download_alignment_model, alignment::list_downloadable_alignment_models,
-            alignment::save_lrc_file, alignment::load_lrc_file,
-            system::remote_js_log,
-            updater::check_for_app_update,
-            updater::open_app_update_page,
-            metadata_fetcher::search_track_metadata, metadata_fetcher::fetch_and_process_tags,
-            metadata_fetcher::init_metadata_context,
-            // 번역 사전 '관리' 명령(get_unclassified_tags / update_custom_dictionary /
-            // sync_dictionary_to_db)은 등록에서 뺐다 — 그 UI를 없앴기 때문이다.
-            // 자동 번역이 읽는 사전 자체는 그대로 남는다(읽기 전용이 된 것뿐).
-            overlay_server::update_overlay_state,
-            overlay_server::update_overlay_style,
-            overlay_server::update_overlay_lyrics,
-            overlay_server::update_overlay_lyrics_full,
-            overlay_server::get_overlay_state,
-            overlay_server::get_lan_addresses,
-            overlay_server::update_overlay_progress,
-            meloming::meloming_get_user_profile,
-            meloming::meloming_get_channel_id,
-            meloming::meloming_set_channel_id,
-            meloming::meloming_test_connection,
-            meloming::meloming_pull_songs,
-            meloming::meloming_get_credentials,
-            meloming::meloming_set_credentials,
-            meloming::meloming_oauth_status,
-            meloming::meloming_oauth_start,
-            meloming::meloming_oauth_finish,
-            meloming::meloming_oauth_logout,
-            meloming::meloming_push_songs
-        ])
+        .invoke_handler(ipc::handler())
 
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

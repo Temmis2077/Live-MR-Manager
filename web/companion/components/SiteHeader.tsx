@@ -1,6 +1,5 @@
 import Image from "next/image";
 import Link from "next/link";
-import { MelomingAuthNav } from "@/components/MelomingAuthNav";
 import { SITE_LOGO, SITE_NAME } from "@/lib/site";
 
 const LINKS = [
@@ -39,7 +38,6 @@ export function SiteHeader({ currentPath = "/" }: Props) {
             </Link>
           ))}
         </nav>
-        <MelomingAuthNav />
       </div>
     </header>
   );

@@ -7,6 +7,9 @@
 .worktrees/
 # 아이디어 메모 (개인 스크래치)
 IDEA.md
+# 공개 저장소에 올리지 않는 운영·감사·실험 문서
+docs-private/
+src-tauri/runtime/
 # 디자인 참고용 시안 — 레포에 올리지 않는다
 design/
 
@@ -44,11 +47,14 @@ logs
 *.txt
 # 번들되는 폰트의 라이선스 원문은 반드시 함께 배포해야 한다 (OFL-1.1 요구)
 !src/assets/fonts/SUITE-LICENSE.txt
+!src/assets/fonts/LINESeed-OFL.txt
+!src/assets/fonts/SpaceMono-OFL.txt
 *.bak
 *.json
 !tauri.conf.json
 !package.json
 !package-lock.json
+!tsconfig.json
 !web/companion/tsconfig.json
 !src-tauri/src/seed_tags.json
 target_old/
@@ -67,11 +73,16 @@ _기획안
 
 # Audio Models (Large dependencies)
 src-tauri/models/
+*.ckpt
 *.onnx
 *.onnx_data
+test-output/
 src-tauri/last_json.json
 src-tauri/LiveMR_*.csv
 src-tauri/LiveMR_*.json
 
 backup/
 .env*
+
+# scripts/pack_gpu_pack.py 산출물 (~2.5GB zip). 릴리즈 자산으로만 올린다.
+dist/

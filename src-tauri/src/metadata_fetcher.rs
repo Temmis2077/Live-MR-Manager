@@ -508,7 +508,6 @@ async fn process_metadata_logic(client: &reqwest::Client, artist: String, track:
 // 번역 사전 '관리' UI는 제거했다. 사전을 고치는 명령(get_unclassified_tags /
 // update_custom_dictionary)도 함께 지웠다 — 부르는 곳이 없어졌다.
 // 자동 번역이 읽는 사전 데이터 자체는 그대로다(읽기 전용이 된 것뿐).
-#[tauri::command]
 pub async fn sync_dictionary_to_db(_app: AppHandle) -> Result<(), String> {
     let ctx_lock = CONTEXT.read();
     let _ctx = match &*ctx_lock {

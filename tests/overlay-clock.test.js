@@ -22,6 +22,12 @@ function makeClock() {
   return w.OverlayShared.createPositionClock();
 }
 
+function makeShared() {
+  const w = {};
+  new Function('window', src)(w);
+  return w.OverlayShared;
+}
+
 beforeEach(() => {
   clockNow = 1000;
   globalThis.performance = { now: () => clockNow };
@@ -29,6 +35,18 @@ beforeEach(() => {
 
 afterEach(() => {
   globalThis.performance = realPerf;
+});
+
+describe('오버레이 미리보기 메시지', () => {
+  it('미리보기 전용 메시지만 대상별로 허용한다', () => {
+    const shared = makeShared();
+    const style = { scale: 1.5, font_size: 32 };
+    const valid = { type: 'osw-overlay-preview-style', target: 'lyrics', style };
+    expect(shared.previewStyleFromMessage(valid, 'lyrics')).toBe(style);
+    expect(shared.previewStyleFromMessage(valid, 'info')).toBeNull();
+    expect(shared.previewStyleFromMessage({ ...valid, type: 'overlay-state-update' }, 'lyrics')).toBeNull();
+    expect(shared.previewStyleFromMessage({ ...valid, style: null }, 'lyrics')).toBeNull();
+  });
 });
 
 /** 벽시계를 ms만큼 흘린다. */
@@ -103,6 +121,40 @@ describe('위치 시계 — 어긋남 처리', () => {
     c.update(120000, 200000, true);   // 사용자가 탐색
     expect(Math.round(c.now())).toBeGreaterThan(119000);
     expect(Math.round(c.now())).toBeLessThan(121000);
+  });
+
+  it('탐색 다음 프레임에도 이전 target으로 되끌려가지 않는다', () => {
+    const c = makeClock();
+    c.update(10000, 200000, false);
+    c.update(10000, 200000, true);
+    c.now();
+    advance(100);
+    c.now();
+    c.update(10100, 200000, true); // 이전 target을 만든다.
+    advance(16);
+    c.now();
+
+    c.update(120000, 200000, true); // 큰 탐색 → 스냅
+    const atSeek = c.now();
+    advance(16);
+    const nextFrame = c.now();
+    expect(atSeek).toBeGreaterThanOrEqual(120000);
+    expect(nextFrame).toBeGreaterThanOrEqual(atSeek);
+    expect(nextFrame).toBeLessThan(120100);
+  });
+
+  it('작은 지연 패킷을 수렴해도 재생 위치는 역행하지 않는다', () => {
+    const c = makeClock();
+    c.update(10000, 200000, false);
+    c.update(10000, 200000, true);
+    let prev = c.now();
+    for (let i = 0; i < 20; i++) {
+      advance(16);
+      const value = c.now();
+      expect(value).toBeGreaterThanOrEqual(prev);
+      prev = value;
+      if (i % 6 === 5) c.update(Math.max(10000, value - 120), 200000, true);
+    }
   });
 
   it('작은 오차는 튀지 않고 수렴한다', () => {

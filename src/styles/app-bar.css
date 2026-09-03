@@ -1,7 +1,7 @@
 /* 앱 상단바 — 사이드바를 대체하는 단일 셸 (시안 구성).
    [OSW 마크 | 현재 화면 ▾] … [화면별 컨트롤] [⚙] */
 
-/* 사이드바는 DOM에 남겨 두고 숨긴다 — nav-item 핸들러를 앱바가 재사용한다. */
+/* 이전 버전의 사이드바가 백업 HTML에 남아 있어도 앱 셸에는 참여하지 않는다. */
 .sidebar {
   display: none !important;
 }
@@ -22,6 +22,10 @@
   border-bottom: 1px solid var(--glass-border);
   position: relative;
   z-index: 40;
+}
+
+.app-bar [data-appbar-views][hidden] {
+  display: none !important;
 }
 
 /* ── 브랜드 ─────────────────────────────────────────────── */
@@ -264,7 +268,7 @@
 }
 
 /* '노래 추가'는 사이드바의 큰 버튼에서 앱바의 주 버튼으로 */
-.nav-item.appbar-add-song {
+.appbar-add-song {
   display: flex !important;
   align-items: center;
   gap: 6px;
@@ -281,7 +285,7 @@
   cursor: pointer;
 }
 
-.nav-item.appbar-add-song span {
+.appbar-add-song span {
   font-size: 0.78rem !important;
   font-weight: 800 !important;
 }

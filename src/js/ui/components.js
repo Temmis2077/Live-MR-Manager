@@ -8,6 +8,7 @@ import { getAppHandler } from '../app-context.js';
 import { invoke } from '../tauri-bridge.js';
 import { getThumbnailUrl } from '../utils.js';
 import { extractYoutubeVideoId } from '../youtube-utils.js';
+import { pushLayer, popLayer } from './layer-stack.js';
 
 export function updateBroadcastTasksControlVisibility() {
   if (!elements.broadcastTasksControl) return;
@@ -239,7 +240,7 @@ function renderAlignmentQueue() {
   // "대기열 전체 지우기" — 항목이 있을 때만 노출, 클릭 시 처리 중 취소 + 전체 제거
   const actionsBar = document.getElementById('alignment-queue-actions');
   if (actionsBar) {
-    actionsBar.style.display = items.length > 0 ? 'flex' : 'none';
+    actionsBar.hidden = items.length === 0;
     const clearBtn = document.getElementById('alignment-clear-all');
     if (clearBtn && !clearBtn._wired) {
       clearBtn._wired = true;
@@ -353,7 +354,7 @@ function renderAlignmentQueue() {
 }
 
 export function updateTaskUI() {
-  if (!elements.taskBadge) return;
+  const taskBadge = document.getElementById('task-badge') || elements.taskBadge;
 
   const separationCount = renderSeparationTasks();
   const alignmentActiveCount = renderAlignmentQueue();
@@ -366,8 +367,10 @@ export function updateTaskUI() {
   if (alignBadge) alignBadge.textContent = formatCount((state.alignmentQueue || []).length);
 
   const total = separationCount + alignmentActiveCount;
-  elements.taskBadge.textContent = total;
-  elements.taskBadge.style.display = total > 0 ? "flex" : "none";
+  if (taskBadge) {
+    taskBadge.textContent = total;
+    taskBadge.style.display = total > 0 ? "inline-flex" : "none";
+  }
 
   updateBroadcastTasksControlVisibility();
 }
@@ -458,6 +461,66 @@ export function updatePlayButton() {
     });
 }
 
+/**
+ * 컨텍스트 메뉴 닫기 — 메뉴 항목 8곳이 같은 두 줄을 반복하고 있었다.
+ * 한 곳으로 모아 두면 레이어 스택에서 빼는 것도 빠뜨리지 않는다.
+ */
+let contextMenuLayer = null;
+
+export function closeContextMenu() {
+  if (!elements.contextMenu) return;
+  elements.contextMenu.classList.remove("active");
+  elements.contextMenu.style.display = 'none';
+  if (contextMenuLayer) {
+    popLayer(contextMenuLayer);
+    contextMenuLayer = null;
+  }
+}
+
+/** 메뉴를 띄운 직후 Esc로 닫을 수 있게 레이어에 올린다. */
+export function openContextMenuLayer() {
+  if (contextMenuLayer) popLayer(contextMenuLayer);
+  contextMenuLayer = pushLayer({
+    id: 'context-menu',
+    el: elements.contextMenu,
+    close: closeContextMenu,
+    trapFocus: false,
+    autoFocus: false,
+  });
+}
+
+/** MR 분리 결과 삭제 실행. 확인 모달에서 '확인'을 눌렀을 때만 불린다. */
+async function performMrDelete(song, deleteMr) {
+  try {
+    const { stopPlayback } = await import('../player.js');
+    await stopPlayback();
+    await deleteMr(song.path);
+    clearMrPresenceCache(song.path);
+    invoke('remote_js_log', { msg: `[MR Delete] Successfully deleted MR` }).catch(() => {});
+
+    // Update local state to reflect deletion
+    const songInLib = state.songLibrary.find(s => s.path === song.path);
+    if (songInLib) {
+      songInLib.isSeparated = false;
+      songInLib.is_separated = false;
+      songInLib.isMr = false;
+      songInLib.is_mr = false;
+      songInLib.mr_path = null;
+    }
+
+    const { renderLibrary } = await import('./library.js');
+    renderLibrary();
+
+    const { showNotification } = await import('../utils.js');
+    showNotification("MR 분리 결과를 삭제했습니다.", "success");
+  } catch (err) {
+    invoke('remote_js_log', { msg: `[MR Delete Error] ${err.message}` }).catch(() => {});
+    console.error("MR Delete failed:", err);
+    const { showNotification } = await import('../utils.js');
+    showNotification("MR 삭제에 실패했습니다: " + err, "error");
+  }
+}
+
 export function showSongContextMenu(e, song, originalIndex) {
   if (!elements.contextMenu) {
     const errorMsg = "[Context Menu] Element not found in elements object.";
@@ -487,6 +550,7 @@ export function showSongContextMenu(e, song, originalIndex) {
   elements.contextMenu.style.left = `${x}px`;
   elements.contextMenu.style.display = 'flex';
   elements.contextMenu.classList.add("active");
+  openContextMenuLayer();
 
   const menuSeparate = document.getElementById("menu-separate");
   const menuDeleteMr = document.getElementById("menu-delete-mr");
@@ -512,8 +576,7 @@ export function showSongContextMenu(e, song, originalIndex) {
   // 라이브 '다음 곡'에 담기 — 큐는 사용자가 직접 채운다.
   if (menuQueue) {
     menuQueue.onclick = async () => {
-      elements.contextMenu.classList.remove("active");
-      elements.contextMenu.style.display = 'none';
+      closeContextMenu();
       const { addToLiveQueue } = await import('../live-screen.js');
       const { showNotification } = await import('../utils.js');
       const added = addToLiveQueue(song.path);
@@ -524,8 +587,7 @@ export function showSongContextMenu(e, song, originalIndex) {
   // 가사 싱크 수정 — 그 곡을 실은 채로 가사 싱크 화면으로 간다.
   if (menuLyricSync) {
     menuLyricSync.onclick = async () => {
-      elements.contextMenu.classList.remove("active");
-      elements.contextMenu.style.display = 'none';
+      closeContextMenu();
       const { openAlignmentForTrack } = await import('../events/navigation.js');
       await openAlignmentForTrack(song.path, { forceLoad: true });
     };
@@ -564,34 +626,19 @@ export function showSongContextMenu(e, song, originalIndex) {
       if (menuDeleteMr) {
         invoke('remote_js_log', { msg: `[MR Delete Init] Setting display=${isSeparated ? "block" : "none"}` }).catch(() => {});
         menuDeleteMr.style.display = isSeparated ? "block" : "none";
+        // 되돌릴 수 없는 동작이라 한 번 묻는다 — 분리 결과를 지우면 다시
+        // 만드는 데 곡당 몇 분이 걸리고, 실행 취소할 방법이 없다.
+        // (곡 삭제는 이미 확인을 거치는데 MR 삭제만 즉시 실행되고 있었다.)
         menuDeleteMr.onclick = async () => {
           invoke('remote_js_log', { msg: `[MR Delete Click] Attempting to delete MR for: ${song.path}` }).catch(() => {});
-          elements.contextMenu.classList.remove("active");
-          elements.contextMenu.style.display = 'none';
-          try {
-            const { stopPlayback } = await import('../player.js');
-            await stopPlayback();
-            await deleteMr(song.path);
-            clearMrPresenceCache(song.path);
-            invoke('remote_js_log', { msg: `[MR Delete] Successfully deleted MR` }).catch(() => {});
-            
-            // Update local state to reflect deletion
-            const songInLib = state.songLibrary.find(s => s.path === song.path);
-            if (songInLib) {
-              songInLib.isSeparated = false;
-              songInLib.is_separated = false;
-              songInLib.isMr = false;
-              songInLib.is_mr = false;
-              songInLib.mr_path = null;
-            }
+          closeContextMenu();
 
-            // Re-render library after deletion
-            const { renderLibrary } = await import('./library.js');
-            renderLibrary();
-          } catch (err) {
-            invoke('remote_js_log', { msg: `[MR Delete Error] ${err.message}` }).catch(() => {});
-            console.error("MR Delete failed:", err);
-          }
+          const { openConfirmModal } = await import('./modals.js');
+          openConfirmModal(
+            "MR 삭제",
+            `"${song.title || song.path}"의 MR 분리 결과를 삭제합니다. 다시 만들려면 분리를 처음부터 돌려야 합니다.`,
+            () => performMrDelete(song, deleteMr),
+          );
         };
       } else {
         invoke('remote_js_log', { msg: `[MR Delete Init] menuDeleteMr is null!` }).catch(() => {});
@@ -609,8 +656,7 @@ export function showSongContextMenu(e, song, originalIndex) {
             menuSeparate.classList.remove("disabled");
             menuSeparate.onclick = () => {
               invoke('remote_js_log', { msg: `[MR Separate Cancel] Cancelling separation` }).catch(() => {});
-              elements.contextMenu.classList.remove("active");
-              elements.contextMenu.style.display = 'none';
+              closeContextMenu();
               // audio.js handles cancel_separation
               import('../audio.js').then(({ cancelSeparation }) => {
                   cancelSeparation(song.path);
@@ -628,8 +674,7 @@ export function showSongContextMenu(e, song, originalIndex) {
             menuSeparate.classList.remove("disabled");
             menuSeparate.onclick = async () => {
               invoke('remote_js_log', { msg: `[MR Separate] Opening mode picker` }).catch(() => {});
-              elements.contextMenu.classList.remove("active");
-              elements.contextMenu.style.display = 'none';
+              closeContextMenu();
               try {
                 // 바로 분리하지 않고 속도/품질(모델) 선택 모달을 먼저 띄운다.
                 const { openSeparationModeModal } = await import('../separation-mode-modal.js');
@@ -661,8 +706,7 @@ export function showSongContextMenu(e, song, originalIndex) {
       } else {
         await selectTrack(originalIndex);
       }
-      elements.contextMenu.classList.remove("active");
-      elements.contextMenu.style.display = 'none';
+      closeContextMenu();
     };
   } else {
     invoke('remote_js_log', { msg: `[Menu Play Init] menuPlay is null!` }).catch(() => {});
@@ -671,8 +715,7 @@ export function showSongContextMenu(e, song, originalIndex) {
   if (menuLyricsView) {
     menuLyricsView.onclick = () => {
       invoke('remote_js_log', { msg: `[Menu LyricsView] Clicked for index ${originalIndex}` }).catch(() => {});
-      elements.contextMenu.classList.remove("active");
-      elements.contextMenu.style.display = 'none';
+      closeContextMenu();
       const openLyricDrawer = getAppHandler('openLyricDrawer');
       if (typeof openLyricDrawer === "function") {
         openLyricDrawer();
@@ -689,14 +732,13 @@ export function showSongContextMenu(e, song, originalIndex) {
     menuEdit.onclick = async () => {
       invoke('remote_js_log', { msg: `[Menu Edit] Clicked for index ${originalIndex}` }).catch(() => {});
       try {
-        const { openEditModal } = await import('./modals.js');
-        openEditModal(song, originalIndex);
+        const { openSongEditor } = await import('./song-editor.js');
+        await openSongEditor(song, originalIndex);
       } catch (err) {
         invoke('remote_js_log', { msg: `[Menu Edit Error] ${err.message}` }).catch(() => {});
         console.error("[Menu-Edit] Import or call failed:", err);
       }
-      elements.contextMenu.classList.remove("active");
-      elements.contextMenu.style.display = 'none';
+      closeContextMenu();
     };
   } else {
     invoke('remote_js_log', { msg: `[Menu Edit Init] menuEdit is null!` }).catch(() => {});
@@ -713,8 +755,7 @@ export function showSongContextMenu(e, song, originalIndex) {
         invoke('remote_js_log', { msg: `[Menu Delete Error] ${err.message}` }).catch(() => {});
         console.error("[Menu-Delete] Import or call failed:", err);
       }
-      elements.contextMenu.classList.remove("active");
-      elements.contextMenu.style.display = 'none';
+      closeContextMenu();
     };
   } else {
     invoke('remote_js_log', { msg: `[Menu Delete Init] menuDelete is null!` }).catch(() => {});

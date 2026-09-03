@@ -11,6 +11,8 @@
  * 선택은 localStorage에 저장하고, body[data-app-mode]로 노출해 UI가 게이팅한다.
  */
 
+import { brandIcon } from './brand-icons.js';
+
 const KEY = 'appMode';
 
 export const APP_MODES = {
@@ -20,7 +22,7 @@ export const APP_MODES = {
     tagline: '방송 · 공연',
     desc: '실시간으로 MR에 맞춰 노래합니다. 모니터/MR 채널 분리, 실시간 출력 장치 전환, OBS 오버레이. 노래 방송에 바로 쓰기 좋은 형태입니다.',
     supports: '보컬 · MR · 실시간 출력',
-    emoji: '📡',
+    emoji: brandIcon('live', 'brand'),
   },
   recording: {
     id: 'recording',
@@ -28,7 +30,7 @@ export const APP_MODES = {
     tagline: '커버 제작 · 미니 DAW',
     desc: '곡을 스템으로 열어 악기까지 분리하고 믹싱·이펙트로 트랙을 만듭니다. 커버 제작·연습에. (악기 분리·전용 화면은 준비 중)',
     supports: '보컬 · MR · 악기 스템 · 믹싱',
-    emoji: '🎛️',
+    emoji: brandIcon('stems', 'brand'),
   },
 };
 

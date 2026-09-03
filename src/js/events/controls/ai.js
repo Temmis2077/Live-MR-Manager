@@ -16,8 +16,7 @@ import {
 } from '../../model-api.js';
 
 const modelDescMap = {
-  kim: "일반적인 보컬·MR 분리에 적합합니다.",
-  inst_hq_3: "MR(반주) 품질이 더 중요할 때 추천합니다.",
+  melband_roformer_vocals_mit: "기본 모델 · MIT 상업 이용 허용 · 고품질 보컬/MR 분리",
 };
 
 // Cache of the current model list (built-in + custom) for lookups.
@@ -49,17 +48,16 @@ export async function refreshModelDropdown() {
   }
   modelListCache = Array.isArray(models) ? models : [];
 
-  let activeId = "kim";
+  let activeId = "melband_roformer_vocals_mit";
   try { activeId = await getModelSettings(); } catch (_) {}
 
   const labelFor = (m) => {
-    if (m.id === "kim") return "Kim Vocal 2 (기본/고속)";
-    if (m.id === "inst_hq_3") return "Inst HQ 3 (고품질 반주/MR)";
+    if (m.id === "melband_roformer_vocals_mit") return "Mel-Band RoFormer Vocals (기본/MIT)";
     return m.isCustom ? `${m.name} (커스텀)` : m.name;
   };
 
   const hasActive = modelListCache.some((m) => m.id === activeId);
-  const effectiveActive = hasActive ? activeId : (modelListCache[0]?.id || "kim");
+  const effectiveActive = hasActive ? activeId : (modelListCache[0]?.id || "melband_roformer_vocals_mit");
 
   optionsContainer.innerHTML = modelListCache
     .map((m) => {

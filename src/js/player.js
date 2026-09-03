@@ -298,8 +298,13 @@ export async function selectTrack(index) {
   // navigated away from must not flip vocalEnabled for the now-current one.
   const mrSeparated = await checkMrSeparated(song.path);
   if (mySequence !== state.playbackSequence) return;
+  // 캐시 검사 결과를 현재 세션 메타데이터에도 반영해 라이브 조절 패널이
+  // 실제 스템 존재 여부와 다른 활성 상태를 보이지 않게 한다.
+  song.mrReady = !!mrSeparated;
   if (mrSeparated) {
     state.vocalEnabled = false;
+    // UI 체크만 끄면 Rust 믹서는 이전 곡의 vocal_enabled를 유지한다.
+    await invoke('toggle_ai_feature', { feature: 'vocal', enabled: false });
   }
 
   updateAiTogglesState(song);

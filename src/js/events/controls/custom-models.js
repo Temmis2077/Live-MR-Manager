@@ -8,7 +8,7 @@ import {
   removeCustomModel,
 } from '../../model-api.js';
 import { refreshModelDropdown } from './ai.js';
-import { MODEL_CATALOG } from '../../model-catalog.js';
+import { MODEL_CATALOG, findLegacyModelPolicy } from '../../model-catalog.js';
 
 const GUIDE_URL = 'https://github.com/Temmis2077/OSW/blob/main/docs/CUSTOM_MODELS.md';
 
@@ -36,10 +36,23 @@ async function renderCatalog() {
   try { existing = await listCustomModels(); } catch (_) {}
   const isInstalled = (entry) => existing.some((m) => m.url && m.url === entry.url);
 
+  if (MODEL_CATALOG.length === 0) {
+    el.innerHTML = `
+      <div class="cm-catalog-card"><div class="cm-catalog-info">
+        <div class="cm-catalog-title">기본 모델은 이미 준비돼 있습니다</div>
+        <div class="cm-catalog-meta">Mel-Band RoFormer Vocals (MIT)가 기본 모델입니다.<br>
+        비상업·출처 미확인 모델은 원본 조건을 확인한 뒤 로컬 ONNX로만 추가하세요.
+        수익 방송·유료 커버에는 CC-BY-NC 모델을 사용하지 마세요.</div>
+      </div></div>`;
+    return;
+  }
+
   el.innerHTML = MODEL_CATALOG.map((entry) => {
     const installed = isInstalled(entry);
     const badges = [
       entry.recommended ? '<span class="cm-catalog-badge">추천</span>' : '',
+      entry.commercialUse === 'allowed' ? '<span class="cm-catalog-badge">상업 이용 허용</span>' : '',
+      entry.verification !== 'verified' ? '<span class="cm-catalog-badge muted">품질 검증 대기</span>' : '',
       entry.gpuRecommended ? '<span class="cm-catalog-badge muted">GPU 권장</span>' : '',
     ].join('');
     return `
@@ -83,12 +96,15 @@ async function renderCatalog() {
 
 function openModal() {
   const modal = document.getElementById('custom-model-modal');
-  if (modal) modal.classList.add('active');
+  if (!modal) return;
+  // Esc·배경 클릭·포커스 복귀는 ui/modals.js의 공통 경로가 붙여 준다.
+  import('../../ui/modals.js').then((m) => m.openOverlayModal(modal));
 }
 
 function closeModal() {
   const modal = document.getElementById('custom-model-modal');
-  if (modal) modal.classList.remove('active');
+  if (!modal) return;
+  import('../../ui/modals.js').then((m) => m.closeOverlayModal(modal));
 }
 
 async function populatePresets() {
@@ -112,6 +128,19 @@ function updatePresetDesc(key) {
   descEl.textContent = preset ? preset.description : '';
 }
 
+function updateSourcePolicy(presetKey) {
+  const localOnly = presetKey === 'melband_roformer_karaoke';
+  const fileRadio = document.querySelector('input[name="cm-source"][value="file"]');
+  const urlRadio = document.querySelector('input[name="cm-source"][value="url"]');
+  const urlInput = document.getElementById('cm-url');
+  if (urlRadio) urlRadio.disabled = localOnly;
+  if (localOnly && fileRadio) fileRadio.checked = true;
+  if (urlInput) {
+    const urlSelected = !localOnly && urlRadio?.checked;
+    urlInput.style.display = urlSelected ? 'block' : 'none';
+  }
+}
+
 async function renderCustomList() {
   const listEl = document.getElementById('cm-list');
   if (!listEl) return;
@@ -130,11 +159,16 @@ async function renderCustomList() {
       const preset = presetsCache.find((p) => p.key === m.presetKey);
       const presetLabel = preset ? preset.label : m.presetKey;
       const via = m.url ? 'URL' : '로컬 파일';
+      const legacyPolicy = findLegacyModelPolicy(m);
+      const policyNotice = legacyPolicy
+        ? `<div style="font-size:.72rem;color:var(--warning);">${legacyPolicy.message}</div>`
+        : '';
       return `
         <div class="cm-list-row" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;background:var(--surface-1);border:1px solid var(--glass-border);border-radius:8px;margin-bottom:8px;">
           <div style="min-width:0;">
             <div style="font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${m.name}</div>
             <div style="font-size:.72rem;color:var(--text-muted);">${presetLabel} · ${via}</div>
+            ${policyNotice}
           </div>
           <button class="btn-ai-action danger cm-remove-btn" data-id="${m.id}" style="width:auto;padding:0 14px;white-space:nowrap;">삭제</button>
         </div>`;
@@ -171,6 +205,7 @@ export function initCustomModelListeners() {
       await renderCatalog();
       await renderCustomList();
       updatePresetDesc(presetHidden ? presetHidden.value : '');
+      updateSourcePolicy(presetHidden ? presetHidden.value : '');
       openModal();
     };
   }
@@ -189,8 +224,12 @@ export function initCustomModelListeners() {
 
   // Preset selection (custom-select fires an input/change on the hidden field).
   if (presetHidden) {
-    presetHidden.addEventListener('change', () => updatePresetDesc(presetHidden.value));
-    presetHidden.addEventListener('input', () => updatePresetDesc(presetHidden.value));
+    const updatePreset = () => {
+      updatePresetDesc(presetHidden.value);
+      updateSourcePolicy(presetHidden.value);
+    };
+    presetHidden.addEventListener('change', updatePreset);
+    presetHidden.addEventListener('input', updatePreset);
   }
 
   if (addBtn) {

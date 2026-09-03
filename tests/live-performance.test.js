@@ -1,6 +1,6 @@
 import { lineProgress } from '../src/js/alignment-metadata.js';
 import { describe, expect, it } from 'vitest';
-import { appendLiveHistory, buildPerformerLyricModel, findUpcomingIndex, getLiveSectionState, isMrReady, moveQueueItem, nextLiveQueuePath, resolveNextLiveQueuePath, takePreviousLivePath, resolveLineWindow } from '../src/js/live-performance.js';
+import { appendLiveHistory, buildPerformerLyricModel, findUpcomingIndex, getLiveKeyBpm, getLiveSectionState, isMrReady, moveQueueItem, nextLiveQueuePath, resolveNextLiveQueuePath, takePreviousLivePath, resolveLineWindow } from '../src/js/live-performance.js';
 
 describe('live performer timing model', () => {
   const lyrics = [
@@ -70,6 +70,20 @@ describe('MR 준비 판정', () => {
   });
 });
 
+describe('라이브 헤더 KEY/BPM', () => {
+  it('서로 다른 저장 필드와 소수 BPM을 표시용 값으로 정리한다', () => {
+    expect(getLiveKeyBpm({ song_key: ' F# minor ', bpm: 127.6 }))
+      .toEqual({ key: 'F# minor', bpm: 128 });
+    expect(getLiveKeyBpm({ key: 'C', bpm: '95' }))
+      .toEqual({ key: 'C', bpm: 95 });
+  });
+
+  it('값이 없거나 유효 범위를 벗어나면 표시하지 않는다', () => {
+    expect(getLiveKeyBpm({ songKey: ' ', bpm: 0 })).toEqual({ key: null, bpm: null });
+    expect(getLiveKeyBpm(null)).toEqual({ key: null, bpm: null });
+  });
+});
+
 describe('가사 진행도 · 리드인', () => {
   const segs = [
     { text: '1번째 줄', start: 10, end: 12 },
@@ -97,7 +111,10 @@ describe('가사 진행도 · 리드인', () => {
   it('시작 시각을 지나면 그 자리에서 바로 쓸어내기 시작한다', () => {
     expect(buildPerformerLyricModel(segs, 1, 16, {}).progress).toBe(0);
     expect(buildPerformerLyricModel(segs, 1, 17, {}).progress).toBeCloseTo(0.5);
-    expect(buildPerformerLyricModel(segs, 1, 18, {}).progress).toBe(1);
+    // 종료 경계부터는 이미 부른 줄 대신 다음 줄을 0%로 미리 올린다.
+    expect(buildPerformerLyricModel(segs, 1, 17.999, {}).progress).toBeCloseTo(1, 2);
+    expect(buildPerformerLyricModel(segs, 1, 18, {}).progress).toBe(0);
+    expect(buildPerformerLyricModel(segs, 1, 18, {}).current.text).toBe('3번째 줄');
     expect(buildPerformerLyricModel(segs, 1, 17, {}).pending).toBe(false);
   });
 
@@ -106,7 +123,9 @@ describe('가사 진행도 · 리드인', () => {
   it('끝 시각이 없으면 다음 줄 시작까지로 채운다', () => {
     const lrc = [{ text: '첫 줄', start: 10, end: 0 }, { text: '둘째 줄', start: 16, end: 0 }];
     expect(buildPerformerLyricModel(lrc, 0, 13, {}).progress).toBeCloseTo(0.5);
-    expect(buildPerformerLyricModel(lrc, 0, 16, {}).progress).toBe(1);
+    expect(buildPerformerLyricModel(lrc, 0, 15.999, {}).progress).toBeCloseTo(1, 2);
+    expect(buildPerformerLyricModel(lrc, 0, 16, {}).current.text).toBe('둘째 줄');
+    expect(buildPerformerLyricModel(lrc, 0, 16, {}).progress).toBe(0);
   });
 
   it('뒤에 긴 간주가 붙어도 쓸어내기가 기어가지 않는다', () => {
@@ -144,30 +163,33 @@ describe('다음 줄 찾기 (라이브 화면·OBS 오버레이 공용)', () => 
   });
 });
 
-describe('"지금 부르는 줄" 자리를 다음 가사가 뺏지 않는다', () => {
-  // 정렬의 end는 토큰이 끝나는 시점이라 끝음을 끄는 동안 지나간다.
-  // 그때 바로 다음 줄로 넘기면 아직 부르는데 화면엔 다음 가사가 떠 있었다.
+describe('끝난 가사 대신 다음 가사를 메인에 미리 보여 준다', () => {
   const segs = [
     { text: '첫 줄', start: 10, end: 14 },
     { text: '둘째 줄', start: 16, end: 20 },
     { text: '후렴', start: 30, end: 34 },
   ];
 
-  it('줄이 끝난 직후에도 그 줄을 붙들고 있다', () => {
+  it('줄이 끝난 직후 다음 줄을 0% 상태로 올린다', () => {
     const m = buildPerformerLyricModel(segs, -1, 14.5, {});
-    expect(m.current.text).toBe('첫 줄');
-    expect(m.pending).toBe(false);
-    expect(m.progress).toBe(1);
+    expect(m.current.text).toBe('둘째 줄');
+    expect(m.displayIndex).toBe(1);
+    expect(m.pending).toBe(true);
+    expect(m.startsInSec).toBe(1.5);
+    expect(m.progress).toBe(0);
   });
 
-  it('긴 간주에서 한참 뒤의 가사를 미리 앉혀 두지 않는다', () => {
+  it('긴 간주에서도 앞으로 부를 가사를 계속 보여 준다', () => {
     // 둘째 줄은 20초에 끝나고 후렴은 30초에 시작한다.
     for (const t of [21, 24, 25.9]) {
-      expect(buildPerformerLyricModel(segs, -1, t, {}).current.text).toBe('둘째 줄');
+      const m = buildPerformerLyricModel(segs, -1, t, {});
+      expect(m.current.text).toBe('후렴');
+      expect(m.pending).toBe(true);
+      expect(m.progress).toBe(0);
     }
   });
 
-  it('다음 줄이 곧 시작할 때만 미리 바꾼다', () => {
+  it('다음 줄 시작 전에는 남은 시간을 알린다', () => {
     const 직전 = buildPerformerLyricModel(segs, -1, 27, {});
     expect(직전.current.text).toBe('후렴');
     expect(직전.pending).toBe(true);
@@ -233,6 +255,12 @@ describe('resolveLineWindow — 두 화면이 같은 구간을 쓴다', () => {
       .toEqual({ startSec: 10, endSec: 12 });
   });
 
+  it('AI 줄은 다음 가사 시작이 아니라 CTC 끝과 끝음 연장을 사용한다', () => {
+    expect(resolveLineWindow({
+      start: 10, end: 14, ctcEnd: 11.8, tailExtensionMs: 300, approx: true,
+    }, { start: 14 })).toEqual({ startSec: 10, endSec: 12.1 });
+  });
+
   it('끝 시각이 없으면 다음 줄 시작까지', () => {
     // LRC로 가져온 가사는 끝 시각이 없는 게 흔하다. 예전에는 오버레이가
     // end=0을 그대로 받아 진행도를 아예 안 그렸다.
@@ -281,12 +309,11 @@ describe('진행도는 오버레이로 보낸 값 하나만 쓴다', () => {
     { start: 14, end: 17, text: 'b' },
   ];
 
-  it('줄이 끝난 뒤 모델은 그 줄을 계속 보여주지만 진행도는 100%로 남는다', () => {
-    // 이 동작 자체는 공연자용으로 의도된 것이다. 다만 진행도를 여기서 가져다
-    // 쓰면 안 된다는 근거로 남긴다 — 이 값이 오버레이와 갈라지는 지점이다.
+  it('줄이 끝난 뒤 모델은 다음 줄을 0%로 미리 보여준다', () => {
     const m = buildPerformerLyricModel(list, -1, 13.4, M);
-    expect(m.current?.text).toBe('a');
-    expect(m.progress).toBe(1);
+    expect(m.current?.text).toBe('b');
+    expect(m.pending).toBe(true);
+    expect(m.progress).toBe(0);
   });
 
   it('오버레이가 쓰는 구간 계산은 그 구간 밖에서 0이다', () => {

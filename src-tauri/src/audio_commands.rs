@@ -16,6 +16,7 @@ use crate::audio_player::{
 const LIMITER_THRESHOLD: f32 = 0.8;
 use crate::types::{Status, PlaybackStatus, PlaybackProgress, AppState};
 use crate::state::DB;
+use crate::ipc::ApiError;
 use crate::youtube::YoutubeManager;
 use urlencoding;
 
@@ -25,14 +26,18 @@ pub static PLAYBACK_VERSION: AtomicU64 = AtomicU64::new(0);
 use crate::youtube_url::cache_key_variants;
 
 #[tauri::command]
-pub async fn play_track(window: WebviewWindow, path: String, duration_ms: Option<u64>, play_now: Option<bool>) -> Result<u64, String> {
+#[specta::specta]
+pub async fn play_track(window: WebviewWindow, path: String, duration_ms: Option<u64>, play_now: Option<bool>) -> Result<u64, ApiError> {
     let path_for_log = path.clone();
     let res = play_track_internal(window.clone(), path, duration_ms, None, play_now.unwrap_or(true)).await;
     if let Err(ref e) = res {
         sys_log(&format!("[AUDIO] play_track failed: path={}, error={}", path_for_log, e));
         let _ = window.emit("playback-status", PlaybackStatus { status: Status::Error, message: e.clone() });
     }
-    res
+    res.map_err(|error| {
+        ApiError::recoverable("audio.playback.load_failed", error)
+            .with_detail("path", path_for_log)
+    })
 }
 
 pub async fn play_track_internal(window: WebviewWindow, path: String, duration_ms_hint: Option<u64>, start_pos_ms: Option<u64>, play_now: bool) -> Result<u64, String> {
@@ -79,7 +84,7 @@ pub async fn play_track_internal(window: WebviewWindow, path: String, duration_m
     let paths = window.state::<crate::state::AppPaths>();
     
     // Determine the cache directory. 
-    let (vocal_path, inst_path) = if path.contains("separated") {
+    let (combined_vocal_path, inst_path) = if path.contains("separated") {
         let p = std::path::PathBuf::from(&path);
         let dir = if p.is_file() {
             p.parent().unwrap_or(&p).to_path_buf()
@@ -107,6 +112,17 @@ pub async fn play_track_internal(window: WebviewWindow, path: String, duration_m
         })
     };
     
+    let harmony_dir = combined_vocal_path.parent();
+    let harmony_pair = harmony_dir.and_then(crate::mr_cache::resolve_harmony_pair);
+    if harmony_pair.is_none() && harmony_dir.map(crate::mr_cache::has_harmony_artifacts).unwrap_or(false) {
+        sys_log("[AUDIO] Harmony artifacts ignored: metadata or quality validation failed; using combined vocal");
+    }
+    let vocal_path = harmony_pair.as_ref()
+        .map(|(lead, _)| lead.clone())
+        .unwrap_or_else(|| combined_vocal_path.clone());
+    let backing_path = harmony_pair.as_ref().map(|(_, backing)| backing.clone());
+    handler.backing_available.store(if backing_path.is_some() { 1 } else { 0 }, Ordering::Relaxed);
+
     let target_rate = handler.monitor.sample_rate.load(Ordering::Relaxed).max(1);
     let target_channels = (handler.monitor.channels.load(Ordering::Relaxed).max(1)) as u16;
     let target_rate_nz = NonZeroU32::new(target_rate).expect("Invalid sample rate");
@@ -149,12 +165,16 @@ pub async fn play_track_internal(window: WebviewWindow, path: String, duration_m
         
         let mut v_decoder = rodio::Decoder::new(BufReader::new(v_file)).map_err(|e| e.to_string())?;
         let mut i_decoder = rodio::Decoder::new(BufReader::new(i_file)).map_err(|e| e.to_string())?;
+        let mut b_decoder = backing_path.as_ref().and_then(|p| {
+            File::open(p).ok().and_then(|f| rodio::Decoder::new(BufReader::new(f)).ok())
+        });
         
         handler.track_sample_rate.store(v_decoder.sample_rate().into(), Ordering::Relaxed);
 
         if let Some(ms) = start_pos_ms {
             let _ = v_decoder.try_seek(Duration::from_millis(ms));
             let _ = i_decoder.try_seek(Duration::from_millis(ms));
+            if let Some(decoder) = b_decoder.as_mut() { let _ = decoder.try_seek(Duration::from_millis(ms)); }
         }
         
         let ms = if let Some(d) = i_decoder.total_duration() {
@@ -210,16 +230,20 @@ pub async fn play_track_internal(window: WebviewWindow, path: String, duration_m
         let resampled_metro = UniformSourceIterator::new(DynamicVolumeSource::new(metro_mon, handler.mon_metro_volume.clone()), target_channels_nz, target_rate_nz);
 
         // 메트로놈은 게인 0이라도 항상 믹스에 포함(라우팅을 atomic으로 실시간 반영).
-        let mixed_raw = resampled_i.mix(resampled_v).mix(resampled_metro).delay(Duration::from_millis(mon_delay_ms));
-        // 합산 클리핑 방지: 버스 출력 끝단 소프트 리미터.
-        let mixed = SoftClipSource::new(mixed_raw, LIMITER_THRESHOLD, handler.limiter_enabled.clone());
-
         let final_v = PLAYBACK_VERSION.load(Ordering::SeqCst);
         if final_v != target_version { return Ok(0); }
 
         {
             let controller = handler.controller.lock();
-            controller.append(mixed);
+            if let Some(backing_decoder) = b_decoder {
+                let stretched_b = StretchedSource::new(backing_decoder, handler.active_pitch.clone(), handler.active_tempo.clone(), Arc::new(AtomicU64::new(0)));
+                let resampled_b = UniformSourceIterator::new(DynamicVolumeSource::new(stretched_b, handler.backing_volume.clone()), target_channels_nz, target_rate_nz);
+                let mixed_raw = resampled_i.mix(resampled_v).mix(resampled_b).mix(resampled_metro).delay(Duration::from_millis(mon_delay_ms));
+                controller.append(SoftClipSource::new(mixed_raw, LIMITER_THRESHOLD, handler.limiter_enabled.clone()));
+            } else {
+                let mixed_raw = resampled_i.mix(resampled_v).mix(resampled_metro).delay(Duration::from_millis(mon_delay_ms));
+                controller.append(SoftClipSource::new(mixed_raw, LIMITER_THRESHOLD, handler.limiter_enabled.clone()));
+            }
             if play_now {
                 controller.play();
             } else {
@@ -243,9 +267,13 @@ pub async fn play_track_internal(window: WebviewWindow, path: String, duration_m
                         rodio::Decoder::new(BufReader::new(i2)),
                     ) {
                         (Ok(mut v_dec2), Ok(mut i_dec2)) => {
+                            let mut b_dec2 = backing_path.as_ref().and_then(|p| {
+                                File::open(p).ok().and_then(|f| rodio::Decoder::new(BufReader::new(f)).ok())
+                            });
                             if let Some(ms0) = start_pos_ms {
                                 let _ = v_dec2.try_seek(Duration::from_millis(ms0));
                                 let _ = i_dec2.try_seek(Duration::from_millis(ms0));
+                                if let Some(decoder) = b_dec2.as_mut() { let _ = decoder.try_seek(Duration::from_millis(ms0)); }
                             }
                             let sv = StretchedSource::new(v_dec2, handler.active_pitch.clone(), handler.active_tempo.clone(), Arc::new(AtomicU64::new(0)));
                             let si = StretchedSource::new(i_dec2, handler.active_pitch.clone(), handler.active_tempo.clone(), Arc::new(AtomicU64::new(0)));
@@ -255,12 +283,17 @@ pub async fn play_track_internal(window: WebviewWindow, path: String, duration_m
                             let metro_mr = crate::audio_player::MetronomeSource::new(handler.metro_bpm.clone(), mr_rate, mr_ch, start_frame_mr)
                                 .take_duration(Duration::from_millis(remaining_ms));
                             let rm = UniformSourceIterator::new(DynamicVolumeSource::new(metro_mr, handler.mr_metro_volume.clone()), mr_ch_nz, mr_rate_nz);
-                            let mr_mixed_raw = ri.mix(rv).mix(rm).delay(Duration::from_millis(mr_delay_ms));
-                            let mr_mixed = SoftClipSource::new(mr_mixed_raw, LIMITER_THRESHOLD, handler.limiter_enabled.clone());
-
                             if let Some(ctrl) = handler.mr_controller.lock().as_ref() {
                                 ctrl.clear();
-                                ctrl.append(mr_mixed);
+                                if let Some(backing_decoder) = b_dec2 {
+                                    let sb = StretchedSource::new(backing_decoder, handler.active_pitch.clone(), handler.active_tempo.clone(), Arc::new(AtomicU64::new(0)));
+                                    let rb = UniformSourceIterator::new(DynamicVolumeSource::new(sb, handler.mr_backing_volume.clone()), mr_ch_nz, mr_rate_nz);
+                                    let mixed = ri.mix(rv).mix(rb).mix(rm).delay(Duration::from_millis(mr_delay_ms));
+                                    ctrl.append(SoftClipSource::new(mixed, LIMITER_THRESHOLD, handler.limiter_enabled.clone()));
+                                } else {
+                                    let mixed = ri.mix(rv).mix(rm).delay(Duration::from_millis(mr_delay_ms));
+                                    ctrl.append(SoftClipSource::new(mixed, LIMITER_THRESHOLD, handler.limiter_enabled.clone()));
+                                }
                                 if play_now { ctrl.play(); } else { ctrl.pause(); }
                             }
                         }
@@ -276,6 +309,7 @@ pub async fn play_track_internal(window: WebviewWindow, path: String, duration_m
             state.current_track = Some(path.clone());
             state.is_playing = play_now;
         }
+        crate::separation::set_playback_active(play_now);
         
         let status = if play_now { Status::Playing } else { Status::Paused };
         let msg = if play_now { "Playing" } else { "Prepared" };
@@ -403,6 +437,7 @@ pub async fn play_track_internal(window: WebviewWindow, path: String, duration_m
         state.current_track = Some(path.clone());
         state.is_playing = play_now;
     }
+    crate::separation::set_playback_active(play_now);
     
     let status = if play_now { Status::Playing } else { Status::Paused };
     let msg = if play_now { "Playing" } else { "Prepared" };
@@ -429,7 +464,7 @@ pub fn set_master_volume(volume: f32) -> Result<(), String> {
     Ok(())
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct OutputDevice {
     pub name: String,
@@ -439,14 +474,18 @@ pub struct OutputDevice {
 
 /// 사용 가능한 출력 장치 목록. `isActive`는 현재 열려 있는 장치.
 #[tauri::command]
-pub async fn list_output_devices() -> Result<Vec<OutputDevice>, String> {
+#[specta::specta]
+pub async fn list_output_devices() -> Result<Vec<OutputDevice>, crate::ipc::ApiError> {
     use cpal::traits::{DeviceTrait, HostTrait};
     let active = match &*AUDIO_HANDLER {
         Ok(h) => h.monitor.device_name.lock().clone(),
         Err(_) => String::new(),
     };
     let host = cpal::default_host();
-    let devices = host.output_devices().map_err(|e| e.to_string())?;
+    let devices = host.output_devices().map_err(|error| {
+        crate::ipc::ApiError::recoverable("audio.device.enumeration", error.to_string())
+            .with_detail("host", "default")
+    })?;
     let mut out = Vec::new();
     for d in devices {
         if let Ok(desc) = d.description() {
@@ -464,6 +503,7 @@ pub async fn list_output_devices() -> Result<Vec<OutputDevice>, String> {
 
 /// 현재 선택된 출력 장치 이름(빈 문자열이면 시스템 기본).
 #[tauri::command]
+#[specta::specta]
 pub fn get_output_device() -> String {
     match &*AUDIO_HANDLER {
         Ok(h) => h.monitor.device_name.lock().clone(),
@@ -475,8 +515,12 @@ pub fn get_output_device() -> String {
 /// 재생하고, 마스터/보컬/MR 볼륨·피치·템포는 공유 상태라 그대로 유지된다.
 /// `name`이 빈 문자열이면 시스템 기본 장치로 되돌린다.
 #[tauri::command]
-pub async fn set_output_device(window: WebviewWindow, name: String) -> Result<String, String> {
-    let handler = AUDIO_HANDLER.as_ref().map_err(|e| e.clone())?.clone();
+#[specta::specta]
+pub async fn set_output_device(window: WebviewWindow, name: String) -> Result<String, ApiError> {
+    let handler = AUDIO_HANDLER
+        .as_ref()
+        .map_err(|error| ApiError::recoverable("audio.engine.unavailable", error.clone()))?
+        .clone();
 
     // 현재 재생 상태·위치 파악(전환 후 이어서 재생하기 위해).
     let (cur_track, was_playing) = {
@@ -498,7 +542,11 @@ pub async fn set_output_device(window: WebviewWindow, name: String) -> Result<St
         crate::audio_player::open_output_sink(if want.is_empty() { None } else { Some(&want) })
     })
     .await
-    .map_err(|e| e.to_string())??;
+    .map_err(|error| ApiError::recoverable("audio.device.switch_task_failed", error.to_string()))?
+    .map_err(|error| {
+        ApiError::recoverable("audio.device.open_failed", error)
+            .with_detail("requestedDevice", name.clone())
+    })?;
 
     // 새 player를 만들고, sink/player를 통째로 교체.
     let new_player = rodio::Player::connect_new(&stream.mixer());
@@ -538,6 +586,7 @@ pub async fn set_output_device(window: WebviewWindow, name: String) -> Result<St
 
 /// 현재 MR 채널(2번째 출력) 장치 이름. 빈 문자열이면 MR 채널 꺼짐.
 #[tauri::command]
+#[specta::specta]
 pub fn get_mr_output_device() -> String {
     match &*AUDIO_HANDLER {
         Ok(h) => h.mr.device_name.lock().clone(),
@@ -548,8 +597,11 @@ pub fn get_mr_output_device() -> String {
 /// MR 채널(2번째 출력) 장치를 설정한다. 빈 문자열이면 MR 채널을 끈다(모니터만).
 /// 곡이 로드돼 있으면 현재 위치에서 두 채널을 다시 구성한다.
 #[tauri::command]
-pub async fn set_mr_output_device(window: WebviewWindow, name: String) -> Result<String, String> {
-    let handler = AUDIO_HANDLER.as_ref().map_err(|e| e.clone())?.clone();
+#[specta::specta]
+pub async fn set_mr_output_device(window: WebviewWindow, name: String) -> Result<String, ApiError> {
+    let handler = AUDIO_HANDLER.as_ref()
+        .map_err(|error| ApiError::recoverable("audio.engine.unavailable", error.clone()))?
+        .clone();
 
     let (cur_track, was_playing) = {
         let state = handler.state.lock();
@@ -574,7 +626,9 @@ pub async fn set_mr_output_device(window: WebviewWindow, name: String) -> Result
             crate::audio_player::open_output_sink(Some(&want))
         })
         .await
-        .map_err(|e| e.to_string())??;
+        .map_err(|error| ApiError::recoverable("audio.mr_device.switch_task_failed", error.to_string()))?
+        .map_err(|error| ApiError::recoverable("audio.mr_device.open_failed", error)
+            .with_detail("requestedDevice", name.clone()))?;
         let player = rodio::Player::connect_new(&stream.mixer());
         player.set_volume(f32::from_bits(handler.master_gain.load(Ordering::Relaxed)));
         *handler.mr_stream.lock() = Some(stream);
@@ -604,20 +658,26 @@ pub async fn set_mr_output_device(window: WebviewWindow, name: String) -> Result
     Ok(resolved)
 }
 
-/// 채널 라우팅 설정. channel: "monitor" | "mr", source: "vocal" | "inst" | "metro".
+/// 채널 라우팅 설정. "vocal"은 리드 보컬의 호환 별칭이다.
 #[tauri::command]
-pub async fn set_channel_route(channel: String, source: String, enabled: bool) -> Result<(), String> {
-    let handler = AUDIO_HANDLER.as_ref().map_err(|e| e.clone())?.clone();
+#[specta::specta]
+pub async fn set_channel_route(channel: String, source: String, enabled: bool) -> Result<(), ApiError> {
+    let handler = AUDIO_HANDLER.as_ref()
+        .map_err(|error| ApiError::recoverable("audio.engine.unavailable", error.clone()))?
+        .clone();
     {
         let mut s = handler.state.lock();
         match (channel.as_str(), source.as_str()) {
             ("monitor", "vocal") => s.mon_route_vocal = enabled,
+            ("monitor", "backing") => s.mon_route_backing = enabled,
             ("monitor", "inst") => s.mon_route_inst = enabled,
             ("monitor", "metro") => s.mon_route_metro = enabled,
             ("mr", "vocal") => s.mr_route_vocal = enabled,
+            ("mr", "backing") => s.mr_route_backing = enabled,
             ("mr", "inst") => s.mr_route_inst = enabled,
             ("mr", "metro") => s.mr_route_metro = enabled,
-            _ => return Err(format!("알 수 없는 채널/소스: {}/{}", channel, source)),
+            _ => return Err(ApiError::new("audio.route.invalid", format!("알 수 없는 채널/소스: {}/{}", channel, source), false)
+                .with_detail("channel", channel).with_detail("source", source)),
         }
     }
     recompute_mix(&handler);
@@ -627,8 +687,11 @@ pub async fn set_channel_route(channel: String, source: String, enabled: bool) -
 /// 메트로놈 설정(활성/BPM/게인). bpm 0 = 곡 분석 BPM 자동(미구현 시 120).
 /// bpm 변경은 다음 재생/탐색부터 반영된다(생성된 클릭 스트림 특성상).
 #[tauri::command]
-pub async fn set_metronome(enabled: bool, bpm: f64, gain: f64) -> Result<(), String> {
-    let handler = AUDIO_HANDLER.as_ref().map_err(|e| e.clone())?.clone();
+#[specta::specta]
+pub async fn set_metronome(enabled: bool, bpm: f64, gain: f64) -> Result<(), ApiError> {
+    let handler = AUDIO_HANDLER.as_ref()
+        .map_err(|error| ApiError::recoverable("audio.engine.unavailable", error.clone()))?
+        .clone();
     {
         let mut s = handler.state.lock();
         s.metro_enabled = enabled;
@@ -643,8 +706,11 @@ pub async fn set_metronome(enabled: bool, bpm: f64, gain: f64) -> Result<(), Str
 
 /// 출력 소프트 리미터 on/off. 재생 중 즉시 반영(리미터 소스가 atomic을 읽음).
 #[tauri::command]
-pub async fn set_limiter(enabled: bool) -> Result<(), String> {
-    let handler = AUDIO_HANDLER.as_ref().map_err(|e| e.clone())?.clone();
+#[specta::specta]
+pub async fn set_limiter(enabled: bool) -> Result<(), ApiError> {
+    let handler = AUDIO_HANDLER.as_ref()
+        .map_err(|error| ApiError::recoverable("audio.engine.unavailable", error.clone()))?
+        .clone();
     handler.limiter_enabled.store(if enabled { 1 } else { 0 }, Ordering::Relaxed);
     Ok(())
 }
@@ -652,13 +718,17 @@ pub async fn set_limiter(enabled: bool) -> Result<(), String> {
 /// 버스 지연 보정(ms) 설정. bus: "monitor" | "mr". 값은 ≥0. 딜레이는 재생
 /// 파이프라인에 붙으므로, 곡이 로드돼 있으면 현재 위치에서 재구성해 즉시 반영한다.
 #[tauri::command]
-pub async fn set_bus_delay(window: WebviewWindow, bus: String, delay_ms: f64) -> Result<(), String> {
-    let handler = AUDIO_HANDLER.as_ref().map_err(|e| e.clone())?.clone();
+#[specta::specta]
+pub async fn set_bus_delay(window: WebviewWindow, bus: String, delay_ms: f64) -> Result<(), ApiError> {
+    let handler = AUDIO_HANDLER.as_ref()
+        .map_err(|error| ApiError::recoverable("audio.engine.unavailable", error.clone()))?
+        .clone();
     let d = (delay_ms as f32).max(0.0);
     let (key, target) = match bus.as_str() {
         "monitor" => ("output_delay_ms", &handler.monitor),
         "mr" => ("mr_delay_ms", &handler.mr),
-        other => return Err(format!("알 수 없는 버스: {}", other)),
+        other => return Err(ApiError::new("audio.bus.invalid", format!("알 수 없는 버스: {}", other), false)
+            .with_detail("bus", other)),
     };
     target.delay_ms.store(d.to_bits(), Ordering::Relaxed);
     {
@@ -688,8 +758,11 @@ pub async fn set_bus_delay(window: WebviewWindow, bus: String, delay_ms: f64) ->
 }
 
 #[tauri::command]
-pub async fn toggle_playback() -> Result<bool, String> {
-    let handler = AUDIO_HANDLER.as_ref().map_err(|e| e.clone())?.clone();
+#[specta::specta]
+pub async fn toggle_playback(window: WebviewWindow) -> Result<bool, ApiError> {
+    let handler = AUDIO_HANDLER.as_ref()
+        .map_err(|error| ApiError::recoverable("audio.engine.unavailable", error.clone()))?
+        .clone();
     
     let new_is_playing = {
         let controller = handler.controller.lock();
@@ -711,6 +784,17 @@ pub async fn toggle_playback() -> Result<bool, String> {
         let mut state = handler.state.lock();
         state.is_playing = new_is_playing;
     }
+    crate::separation::set_playback_active(new_is_playing);
+
+    // 컨트롤러만 멈추고 프런트에 상태를 알리지 않으면 state.isPlaying과
+    // 오버레이 위치 시계는 계속 재생 중으로 남아, 정지된 오디오 위에서 가사
+    // 진행도와 보컬 진입 카운트만 움직인다. play_track과 같은 상태 이벤트를
+    // 보내 모든 화면이 같은 순간에 멈추고 다시 시작하게 한다.
+    let status = if new_is_playing { Status::Playing } else { Status::Paused };
+    let message = if new_is_playing { "Playing" } else { "Paused" };
+    window
+        .emit("playback-status", PlaybackStatus { status, message: message.into() })
+        .map_err(|error| ApiError::recoverable("audio.playback.status_emit_failed", error.to_string()))?;
 
     Ok(new_is_playing)
 }
@@ -739,7 +823,8 @@ pub fn get_alignment_sync_state() -> Result<PlaybackProgress, String> {
 }
 
 #[tauri::command]
-pub async fn stop_playback() -> Result<(), String> {
+#[specta::specta]
+pub async fn stop_playback() -> Result<(), ApiError> {
     if let Ok(handler) = &*AUDIO_HANDLER {
         let controller = handler.controller.lock();
         controller.clear();
@@ -748,6 +833,7 @@ pub async fn stop_playback() -> Result<(), String> {
         state.is_playing = false;
         state.current_track = None;
     }
+    crate::separation::set_playback_active(false);
     Ok(())
 }
 
@@ -771,6 +857,20 @@ pub fn source_gains(s: &AppState) -> (f32, f32, f32) {
     (vocal, inst, metro)
 }
 
+pub fn source_gains_all(s: &AppState) -> (f32, f32, f32, f32) {
+    let v_ratio = (s.vocal_balance / 50.0).min(1.0);
+    let i_ratio = ((100.0 - s.vocal_balance) / 50.0).min(1.0);
+    let any_solo = s.vocal_solo || s.backing_solo || s.inst_solo;
+    let lead_gate = s.vocal_enabled && !s.vocal_muted && (!any_solo || s.vocal_solo);
+    let backing_gate = !s.backing_muted && (!any_solo || s.backing_solo);
+    let inst_gate = !s.inst_muted && (!any_solo || s.inst_solo);
+    let lead = if lead_gate { s.volume * v_ratio * (s.vocal_fader / 100.0) } else { 0.0 };
+    let backing = if backing_gate { s.volume * v_ratio * (s.backing_fader / 100.0) } else { 0.0 };
+    let inst = if inst_gate { s.volume * i_ratio * (s.inst_fader / 100.0) } else { 0.0 };
+    let metro = if s.metro_enabled { s.metro_gain } else { 0.0 };
+    (lead, backing, inst, metro)
+}
+
 /// 보컬/MR(인스트) 최종 게인 — 기본 라우팅(모니터=보컬+인스트) 기준의 소스 게인.
 /// 기존 단일 채널 동작 및 테스트 호환용.
 #[allow(dead_code)]
@@ -782,21 +882,25 @@ pub fn compute_track_gains(s: &AppState) -> (f32, f32) {
 /// 6개 채널×소스 게인. (모니터/MR) × (보컬/인스트/메트로놈)
 pub struct ChannelGains {
     pub mon_vocal: f32,
+    pub mon_backing: f32,
     pub mon_inst: f32,
     pub mon_metro: f32,
     pub mr_vocal: f32,
+    pub mr_backing: f32,
     pub mr_inst: f32,
     pub mr_metro: f32,
 }
 
 /// 소스 게인을 라우팅 매트릭스로 게이트해 채널별 최종 게인을 낸다. (순수 함수)
 pub fn compute_channel_gains(s: &AppState) -> ChannelGains {
-    let (v, i, m) = source_gains(s);
+    let (v, b, i, m) = source_gains_all(s);
     ChannelGains {
         mon_vocal: if s.mon_route_vocal { v } else { 0.0 },
+        mon_backing: if s.mon_route_backing { b } else { 0.0 },
         mon_inst: if s.mon_route_inst { i } else { 0.0 },
         mon_metro: if s.mon_route_metro { m } else { 0.0 },
         mr_vocal: if s.mr_route_vocal { v } else { 0.0 },
+        mr_backing: if s.mr_route_backing { b } else { 0.0 },
         mr_inst: if s.mr_route_inst { i } else { 0.0 },
         mr_metro: if s.mr_route_metro { m } else { 0.0 },
     }
@@ -811,9 +915,11 @@ pub fn recompute_mix(handler: &crate::audio_player::AudioHandler) {
         compute_channel_gains(&s)
     };
     handler.vocal_volume.store(g.mon_vocal.to_bits(), Ordering::Relaxed);
+    handler.backing_volume.store(g.mon_backing.to_bits(), Ordering::Relaxed);
     handler.instrumental_volume.store(g.mon_inst.to_bits(), Ordering::Relaxed);
     handler.mon_metro_volume.store(g.mon_metro.to_bits(), Ordering::Relaxed);
     handler.mr_vocal_volume.store(g.mr_vocal.to_bits(), Ordering::Relaxed);
+    handler.mr_backing_volume.store(g.mr_backing.to_bits(), Ordering::Relaxed);
     handler.mr_inst_volume.store(g.mr_inst.to_bits(), Ordering::Relaxed);
     handler.mr_metro_volume.store(g.mr_metro.to_bits(), Ordering::Relaxed);
 }
@@ -835,20 +941,25 @@ pub async fn set_vocal_balance(balance: f64) -> Result<(), String> {
 }
 
 /// 믹스·라우팅·메트로놈 상태(UI 복원용).
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct MixState {
     pub vocal_fader: f32,
+    pub backing_fader: f32,
     pub inst_fader: f32,
     pub vocal_muted: bool,
+    pub backing_muted: bool,
     pub inst_muted: bool,
     pub vocal_solo: bool,
+    pub backing_solo: bool,
     pub inst_solo: bool,
     // 라우팅 매트릭스.
     pub mon_route_vocal: bool,
+    pub mon_route_backing: bool,
     pub mon_route_inst: bool,
     pub mon_route_metro: bool,
     pub mr_route_vocal: bool,
+    pub mr_route_backing: bool,
     pub mr_route_inst: bool,
     pub mr_route_metro: bool,
     // 메트로놈.
@@ -864,29 +975,49 @@ pub struct MixState {
     pub mr_est_latency_ms: f32,
     // 출력 리미터 on/off.
     pub limiter_enabled: bool,
+    // 라이브 조절 패널이 실제 엔진값으로 복구·재동기화할 때 쓰는 공용 상태.
+    pub vocal_balance: f32,
+    pub vocal_enabled: bool,
+    pub master_volume: f32,
+    pub pitch: f32,
+    pub tempo: f32,
+    pub backing_available: bool,
 }
 
 #[tauri::command]
-pub fn get_mix_state() -> Result<MixState, String> {
-    let handler = AUDIO_HANDLER.as_ref().map_err(|e| e.clone())?.clone();
+#[specta::specta]
+pub fn get_mix_state() -> Result<MixState, ApiError> {
+    let handler = AUDIO_HANDLER.as_ref()
+        .map_err(|error| ApiError::recoverable("audio.engine.unavailable", error.clone()))?
+        .clone();
     let mr_device = handler.mr.device_name.lock().clone();
     let mon_delay = handler.monitor.delay_ms_val();
     let mon_est = handler.monitor.est_latency_val();
     let mr_delay = handler.mr.delay_ms_val();
     let mr_est = handler.mr.est_latency_val();
     let limiter_enabled = handler.limiter_enabled.load(Ordering::Relaxed) != 0;
+    let master_gain = f32::from_bits(handler.master_gain.load(Ordering::Relaxed)).max(0.0);
+    // set_master_volume의 제곱 곡선을 UI 단위(0~125)로 되돌린다.
+    let master_volume = master_gain.sqrt() * 125.0;
+    let pitch = f32::from_bits(handler.active_pitch.load(Ordering::Relaxed));
+    let tempo = f32::from_bits(handler.active_tempo.load(Ordering::Relaxed));
     let s = handler.state.lock();
     Ok(MixState {
         vocal_fader: s.vocal_fader,
+        backing_fader: s.backing_fader,
         inst_fader: s.inst_fader,
         vocal_muted: s.vocal_muted,
+        backing_muted: s.backing_muted,
         inst_muted: s.inst_muted,
         vocal_solo: s.vocal_solo,
+        backing_solo: s.backing_solo,
         inst_solo: s.inst_solo,
         mon_route_vocal: s.mon_route_vocal,
+        mon_route_backing: s.mon_route_backing,
         mon_route_inst: s.mon_route_inst,
         mon_route_metro: s.mon_route_metro,
         mr_route_vocal: s.mr_route_vocal,
+        mr_route_backing: s.mr_route_backing,
         mr_route_inst: s.mr_route_inst,
         mr_route_metro: s.mr_route_metro,
         metro_enabled: s.metro_enabled,
@@ -898,20 +1029,31 @@ pub fn get_mix_state() -> Result<MixState, String> {
         mr_delay_ms: mr_delay,
         mr_est_latency_ms: mr_est,
         limiter_enabled,
+        vocal_balance: s.vocal_balance,
+        vocal_enabled: s.vocal_enabled,
+        master_volume,
+        pitch,
+        tempo,
+        backing_available: handler.backing_available.load(Ordering::Relaxed) != 0,
     })
 }
 
 /// 트랙별 독립 페이더(0~100%). track: "vocal" | "inst".
 #[tauri::command]
-pub async fn set_track_fader(track: String, percent: f64) -> Result<(), String> {
-    let handler = AUDIO_HANDLER.as_ref().map_err(|e| e.clone())?.clone();
+#[specta::specta]
+pub async fn set_track_fader(track: String, percent: f64) -> Result<(), ApiError> {
+    let handler = AUDIO_HANDLER.as_ref()
+        .map_err(|error| ApiError::recoverable("audio.engine.unavailable", error.clone()))?
+        .clone();
     let pct = (percent as f32).clamp(0.0, 100.0);
     {
         let mut s = handler.state.lock();
         match track.as_str() {
-            "vocal" => s.vocal_fader = pct,
+            "vocal" | "lead" => s.vocal_fader = pct,
+            "backing" => s.backing_fader = pct,
             "inst" => s.inst_fader = pct,
-            other => return Err(format!("알 수 없는 트랙: {}", other)),
+            other => return Err(ApiError::new("audio.track.invalid", format!("알 수 없는 트랙: {}", other), false)
+                .with_detail("track", other)),
         }
     }
     recompute_mix(&handler);
@@ -920,14 +1062,19 @@ pub async fn set_track_fader(track: String, percent: f64) -> Result<(), String> 
 
 /// 트랙 음소거. track: "vocal" | "inst".
 #[tauri::command]
-pub async fn set_track_mute(track: String, muted: bool) -> Result<(), String> {
-    let handler = AUDIO_HANDLER.as_ref().map_err(|e| e.clone())?.clone();
+#[specta::specta]
+pub async fn set_track_mute(track: String, muted: bool) -> Result<(), ApiError> {
+    let handler = AUDIO_HANDLER.as_ref()
+        .map_err(|error| ApiError::recoverable("audio.engine.unavailable", error.clone()))?
+        .clone();
     {
         let mut s = handler.state.lock();
         match track.as_str() {
-            "vocal" => s.vocal_muted = muted,
+            "vocal" | "lead" => s.vocal_muted = muted,
+            "backing" => s.backing_muted = muted,
             "inst" => s.inst_muted = muted,
-            other => return Err(format!("알 수 없는 트랙: {}", other)),
+            other => return Err(ApiError::new("audio.track.invalid", format!("알 수 없는 트랙: {}", other), false)
+                .with_detail("track", other)),
         }
     }
     recompute_mix(&handler);
@@ -936,14 +1083,19 @@ pub async fn set_track_mute(track: String, muted: bool) -> Result<(), String> {
 
 /// 트랙 솔로. track: "vocal" | "inst". 솔로가 켜진 트랙만 소리난다.
 #[tauri::command]
-pub async fn set_track_solo(track: String, soloed: bool) -> Result<(), String> {
-    let handler = AUDIO_HANDLER.as_ref().map_err(|e| e.clone())?.clone();
+#[specta::specta]
+pub async fn set_track_solo(track: String, soloed: bool) -> Result<(), ApiError> {
+    let handler = AUDIO_HANDLER.as_ref()
+        .map_err(|error| ApiError::recoverable("audio.engine.unavailable", error.clone()))?
+        .clone();
     {
         let mut s = handler.state.lock();
         match track.as_str() {
-            "vocal" => s.vocal_solo = soloed,
+            "vocal" | "lead" => s.vocal_solo = soloed,
+            "backing" => s.backing_solo = soloed,
             "inst" => s.inst_solo = soloed,
-            other => return Err(format!("알 수 없는 트랙: {}", other)),
+            other => return Err(ApiError::new("audio.track.invalid", format!("알 수 없는 트랙: {}", other), false)
+                .with_detail("track", other)),
         }
     }
     recompute_mix(&handler);
@@ -965,8 +1117,11 @@ pub async fn set_tempo(ratio: f64) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn seek_to(window: WebviewWindow, position_ms: u64) -> Result<(), String> {
-    let handler = AUDIO_HANDLER.as_ref().map_err(|e| e.clone())?.clone();
+#[specta::specta]
+pub async fn seek_to(window: WebviewWindow, position_ms: u64) -> Result<(), ApiError> {
+    let handler = AUDIO_HANDLER.as_ref()
+        .map_err(|error| ApiError::recoverable("audio.engine.unavailable", error.clone()))?
+        .clone();
     // 탐색은 재생 상태를 바꾸지 않는다. 예전에는 play_now를 무조건 true로 넘겨서
     // 멈춰 둔 채 파형을 만지기만 해도 음악이 시작됐고, 프런트가 그때마다
     // toggle_playback으로 되돌리는 보정을 넣어야 했다(경합에 취약했다).
@@ -1001,7 +1156,8 @@ pub async fn seek_to(window: WebviewWindow, position_ms: u64) -> Result<(), Stri
                     status: Status::Error, 
                     message: format!("Seek failed: {}", e) 
                 });
-                return Err(e);
+                return Err(ApiError::recoverable("audio.playback.seek_failed", e)
+                    .with_detail("positionMs", position_ms.to_string()));
             }
         }
     }
@@ -1025,8 +1181,11 @@ pub async fn toggle_ai_feature(feature: String, enabled: bool) -> Result<(), Str
 }
 
 #[tauri::command]
-pub async fn get_playback_state() -> Result<AppState, String> {
-    let handler = AUDIO_HANDLER.as_ref().map_err(|e| e.clone())?.clone();
+#[specta::specta]
+pub async fn get_playback_state() -> Result<AppState, ApiError> {
+    let handler = AUDIO_HANDLER.as_ref()
+        .map_err(|error| ApiError::recoverable("audio.engine.unavailable", error.clone()))?
+        .clone();
     let state = handler.state.lock().clone();
     Ok(state)
 }
@@ -1035,7 +1194,7 @@ pub async fn get_playback_state() -> Result<AppState, String> {
 pub async fn get_model_settings() -> Result<String, String> {
     let db = DB.lock();
     let res = db.query_row("SELECT value FROM Settings WHERE key = 'active_model_id'", [], |row| row.get::<_, String>(0));
-    Ok(res.unwrap_or_else(|_| "kim".to_string()))
+    Ok(res.unwrap_or_else(|_| crate::state::DEFAULT_MODEL_ID.to_string()))
 }
 
 #[tauri::command]
@@ -1102,6 +1261,7 @@ pub fn start_playback_progress_loop(handle: tauri::AppHandle) {
                     } else { false }
                 };
                 if was_playing {
+                    crate::separation::set_playback_active(false);
                     let _ = handle.emit("playback-status", PlaybackStatus { status: Status::Finished, message: "Finished".into() });
                 }
             }
@@ -1172,7 +1332,7 @@ mod tests {
     }
 
     // --- 채널 라우팅 ---
-    use super::compute_channel_gains;
+    use super::{compute_channel_gains, source_gains_all};
 
     #[test]
     fn default_routing_monitor_full_mr_inst_only() {
@@ -1180,9 +1340,11 @@ mod tests {
         let s = AppState { volume: 100.0, vocal_balance: 50.0, ..Default::default() };
         let g = compute_channel_gains(&s);
         assert!((g.mon_vocal - 100.0).abs() < 1e-4);
+        assert!((g.mon_backing - 100.0).abs() < 1e-4);
         assert!((g.mon_inst - 100.0).abs() < 1e-4);
         assert_eq!(g.mon_metro, 0.0, "메트로놈 기본 꺼짐");
         assert_eq!(g.mr_vocal, 0.0, "MR 채널 기본은 보컬 없음");
+        assert!((g.mr_backing - 100.0).abs() < 1e-4, "MR 채널은 화음 포함");
         assert!((g.mr_inst - 100.0).abs() < 1e-4, "MR 채널은 인스트");
     }
 
@@ -1211,6 +1373,35 @@ mod tests {
         let g = compute_channel_gains(&s);
         assert!((g.mon_vocal - 50.0).abs() < 1e-4);
         assert!((g.mr_vocal - 50.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn backing_solo_silences_lead_and_instrumental() {
+        let s = AppState {
+            volume: 100.0,
+            vocal_balance: 50.0,
+            backing_solo: true,
+            ..Default::default()
+        };
+        let (lead, backing, inst, _) = source_gains_all(&s);
+        assert_eq!(lead, 0.0);
+        assert!((backing - 100.0).abs() < 1e-4);
+        assert_eq!(inst, 0.0);
+    }
+
+    #[test]
+    fn backing_mute_applies_to_monitor_and_mr_routes() {
+        let s = AppState {
+            volume: 100.0,
+            vocal_balance: 50.0,
+            backing_muted: true,
+            ..Default::default()
+        };
+        let g = compute_channel_gains(&s);
+        assert_eq!(g.mon_backing, 0.0);
+        assert_eq!(g.mr_backing, 0.0);
+        assert!(g.mon_vocal > 0.0);
+        assert!(g.mr_inst > 0.0);
     }
 }
 

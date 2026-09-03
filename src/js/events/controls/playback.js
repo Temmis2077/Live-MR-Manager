@@ -198,7 +198,10 @@ function initDockMoreMenu() {
   const itemLyricsWindow = document.getElementById("dock-menu-lyrics-window");
   const itemMrFolder = document.getElementById("dock-menu-mr-folder");
 
-  const closeMenu = () => popover.classList.remove("active");
+  const closeMenu = () => {
+    popover.classList.remove("active");
+    btn.setAttribute('aria-expanded', 'false');
+  };
 
   if (itemMrFolder) {
     // 분리 결과 폴더 열기 — 캐시 폴더명은 경로를 URL 인코딩한 값이라
@@ -259,6 +262,7 @@ function initDockMoreMenu() {
       itemMrFolder.classList.toggle("disabled", !isSeparated);
     }
     popover.classList.add("active");
+    btn.setAttribute('aria-expanded', 'true');
   };
 
   if (itemEdit) {
@@ -271,8 +275,8 @@ function initDockMoreMenu() {
         import('../../utils.js').then(m => m.showNotification("라이브러리에서 곡을 찾을 수 없습니다.", "error"));
         return;
       }
-      const { openEditModal } = await import('../../ui/modals.js');
-      openEditModal(state.songLibrary[idx], idx);
+      const { openSongEditor } = await import('../../ui/song-editor.js');
+      await openSongEditor(song, idx);
     };
   }
 

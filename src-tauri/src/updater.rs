@@ -92,34 +92,6 @@ async fn fetch_from_latest_release(client: &reqwest::Client) -> Option<(String, 
     pick_best_release(json.as_array()?)
 }
 
-async fn fetch_from_tags(client: &reqwest::Client) -> Option<(String, String)> {
-    let url = format!(
-        "https://api.github.com/repos/{}/{}/tags?per_page=30",
-        GITHUB_OWNER, GITHUB_REPO
-    );
-    let json = github_get_json(client, &url).await?;
-    let tags = json.as_array()?;
-
-    let mut best: Option<(semver::Version, String)> = None;
-    for tag in tags {
-        let name = tag.get("name")?.as_str()?;
-        let normalized = strip_version_prefix(name);
-        let Ok(version) = semver::Version::parse(&normalized) else {
-            continue;
-        };
-        let replace = best
-            .as_ref()
-            .map(|(current, _)| version > *current)
-            .unwrap_or(true);
-        if replace {
-            best = Some((version, name.to_string()));
-        }
-    }
-
-    let (_, tag_name) = best?;
-    Some((tag_name, default_release_url()))
-}
-
 async fn fetch_latest_release() -> Result<(String, String), String> {
     let client = reqwest::Client::builder()
         .user_agent(USER_AGENT)
@@ -127,13 +99,11 @@ async fn fetch_latest_release() -> Result<(String, String), String> {
         .build()
         .map_err(|e| e.to_string())?;
 
-    if let Some(found) = fetch_from_latest_release(&client).await {
-        return Ok(found);
-    }
-
-    fetch_from_tags(&client)
+    // 태그 API로 폴백하지 않는다. 릴리즈 작업 중 태그만 올라가 있고 릴리즈가
+    // 아직 draft인 구간에서 사용자에게 존재하지 않는 업데이트를 알리게 된다.
+    fetch_from_latest_release(&client)
         .await
-        .ok_or_else(|| "GitHub에서 최신 버전 정보를 가져오지 못했습니다.".to_string())
+        .ok_or_else(|| "공개된 GitHub 릴리즈에서 최신 버전 정보를 가져오지 못했습니다.".to_string())
 }
 
 pub async fn build_update_info() -> Result<AppUpdateInfo, String> {

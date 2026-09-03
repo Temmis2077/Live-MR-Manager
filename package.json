@@ -8,12 +8,25 @@
   "type": "module",
   "scripts": {
     "tauri": "tauri",
-    "dev": "node scripts/dev-server.mjs --root src --port 1420",
+    "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
+    "build": "npm run check:release && npm run check:docs && npm run check:ipc && npm run typecheck && vite build",
+    "prepare:runtime": "node scripts/prepare-onnx-runtime.mjs",
+    "check:release": "node scripts/check-release-readiness.mjs",
+    "check:docs": "node scripts/check-docs.mjs",
+    "check:ipc": "node scripts/check-ipc-boundary.mjs",
+    "generate:ipc": "cargo run --manifest-path src-tauri/Cargo.toml --bin generate_ipc && npm run generate:ipc-catalog",
+    "generate:ipc-catalog": "node scripts/generate-ipc-catalog.mjs",
+    "analyze:alignment-log": "node scripts/analyze-alignment-log.mjs",
+    "audit:architecture": "node scripts/audit-architecture.mjs",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
+    "@tauri-apps/api": "2.10.1",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.3",
     "vitest": "^3.2.4"
   }
 }

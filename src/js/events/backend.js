@@ -8,6 +8,7 @@ import { updateTaskUI, updateAiModelStatus, updateCardStatusBadge, updateAiToggl
 import { renderLibrary } from '../ui/library.js';
 import { showNotification } from '../utils.js';
 import { invoke } from '../tauri-bridge.js';
+import { playbackService } from '../../ipc/services/playback.js';
 import { youtubePathsMatch } from '../youtube-utils.js';
 let backendListenersInitialized = false;
 let taskUiUpdateScheduled = false;
@@ -92,7 +93,11 @@ function scheduleSeparationRetry(path, statusText) {
       if (done) { delete state.activeTasks[path]; scheduleTaskUiUpdate(); return; }
     } catch (_) {}
     const { startMrSeparation } = await import('../audio.js');
-    startMrSeparation(path, state.activeTasks[path]?.modelId || null)
+    startMrSeparation(
+      path,
+      state.activeTasks[path]?.modelId || null,
+      state.activeTasks[path]?.harmonyModelId || null,
+    )
       .catch((err) => console.warn("[Retry] resume failed:", path, err));
   }, delay);
   retryTimers.set(path, timer);
@@ -159,11 +164,9 @@ export async function setupBackendListeners() {
   backendListenersInitialized = true;
 
   // Playback Progress Update
-  await listen('playback-progress', (event) => {
+  await playbackService.onProgress((payload) => {
     if (!state.isSeeking) {
-      // Rust struct may serialize to CamelCase or snake_case depending on serde config.
-      const positionMs = event.payload.positionMs ?? event.payload.position_ms ?? 0;
-      const durationMs = event.payload.durationMs ?? event.payload.duration_ms ?? 0;
+      const { positionMs, durationMs } = payload;
 
       state.targetProgressMs = positionMs;
       // Ensure duration is always updated if available
@@ -173,10 +176,13 @@ export async function setupBackendListeners() {
     }
   });
 
-  // Playback Status & Auto-Next
-  await listen('playback-status', async (event) => {
-    const { status, message } = event.payload;
+  // Playback Status — 라이브 대기열은 자동으로 다음 곡을 시작하지 않는다.
+  await playbackService.onStatus(async (payload) => {
+    const { status, message } = payload;
     const s = (status || "").toLowerCase();
+    if (["playing", "paused", "stopped"].includes(s)) {
+      import('../track-mixer.js').then((m) => m.refreshMixerState()).catch(() => {});
+    }
 
     // 1. Loading state
     if (["loading", "downloading", "decoding", "pending"].includes(s)) {
@@ -213,7 +219,8 @@ export async function setupBackendListeners() {
         state.currentProgressMs = 0;
         state.targetProgressMs = 0;
 
-        // Reload track in paused state at 0:00 so it can be replayed
+        // 공연용 MR은 곡이 끝나도 자동 진행하지 않는다. 현재 곡을 0:00에
+        // 일시정지해 두고, 다음 곡은 사용자가 라이브 화면에서 직접 고른다.
         const { playTrack } = await import('../audio.js');
         await playTrack(state.currentTrack.path, state.trackDurationMs, false);
 
@@ -319,6 +326,17 @@ export async function setupBackendListeners() {
         .then((m) => m.onSeparationTerminated(path, pathMatches))
         .catch(() => {});
 
+      // 모든 분리 화면이 동일한 완료 신호를 사용한다. 열린 가사 편집기는
+      // 새 lead/vocal stem 기준 파형과 VAD만 안전하게 다시 읽는다.
+      try {
+        window.dispatchEvent(new CustomEvent('separation-stems-changed', {
+          detail: {
+            path,
+            status: isFinished ? 'finished' : (isCancelled ? 'cancelled' : 'error'),
+          },
+        }));
+      } catch (_) {}
+
       // Refresh library badges for all termination states (finished, cancelled, error)
       renderLibrary();
     } else {
@@ -394,6 +412,7 @@ export async function setupBackendListeners() {
         provider: String(saved.provider || "UNKNOWN"),
         model: String(saved.model || ""),
         modelId: saved.modelId || null,
+        harmonyModelId: saved.harmonyModelId || null,
         title: song?.title || saved.title || "알 수 없는 곡",
         thumbnail: song?.thumbnail || saved.thumbnail || ""
       };
@@ -408,7 +427,7 @@ export async function setupBackendListeners() {
       } catch (_) { /* 확인 실패 시엔 아래에서 재시도 */ }
       const saved = snapshot[path] || {};
       const { startMrSeparation } = await import('../audio.js');
-      startMrSeparation(path, saved.modelId || null).catch((err) => {
+      startMrSeparation(path, saved.modelId || null, saved.harmonyModelId || null).catch((err) => {
         console.warn("[Backend] Failed to resume separation:", path, err);
       });
     }

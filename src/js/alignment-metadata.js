@@ -4,6 +4,9 @@
 const ALIGNMENT_METADATA_SCHEMA_VERSION = 2;
 const SUPPORTED_METADATA_SCHEMA_VERSIONS = [1, 2];
 const TIMING_TOLERANCE_CENTISECONDS = 1;
+const WORD_OVERLAP_TOLERANCE_MS = 80;
+const MIN_WORD_DURATION_MS = 20;
+const VOCAL_REGION_JOIN_GAP_MS = 80;
 
 const METADATA_FIELDS = [
   'approx',
@@ -12,8 +15,12 @@ const METADATA_FIELDS = [
   'gateDecision',
   'confidence',
   'greedyTextSimilarity',
+  'ctcEnd',
+  'tailExtensionMs',
   'lineKind',
   'repeatedLyric',
+  'vadAssignment',
+  'syncAssistant',
 ];
 
 function sourceIdentity(segment) {
@@ -44,6 +51,19 @@ function startCentiseconds(segment) {
   return Math.round((Number(segment?.start) || 0) * 100);
 }
 
+/** LRC가 다음 줄 시작으로 채운 end 대신, 정렬 파이프라인이 확정한 실제 끝. */
+export function getProgressBoundsMs(segment) {
+  const startMs = Math.round((Number(segment?.start) || 0) * 1000);
+  const parsedEndMs = Math.round((Number(segment?.end) || 0) * 1000);
+  const ctcEndMs = Math.round((Number(segment?.ctcEnd) || 0) * 1000);
+  const tailMs = Math.max(0, Math.round(Number(segment?.tailExtensionMs) || 0));
+  const alignedEndMs = ctcEndMs > startMs ? ctcEndMs + tailMs : 0;
+  const endMs = alignedEndMs > startMs
+    ? (parsedEndMs > startMs ? Math.min(alignedEndMs, parsedEndMs) : alignedEndMs)
+    : parsedEndMs;
+  return { startMs, endMs };
+}
+
 /**
  * 단어별 타임스탬프를 저장 가능한 형태로 줄인다.
  *
@@ -54,18 +74,105 @@ function startCentiseconds(segment) {
  * 키를 짧게(t/s/e) 쓰는 이유는 한 곡에 단어가 수백 개라 파일이 금세 커지기
  * 때문이다. 시간은 ms 정수로 반올림한다 — 소수점은 의미가 없다.
  */
-function copyWordTimings(segment) {
-  const words = segment?.words;
+/**
+ * 모델의 단어 타임을 가사 싱크에서 확정된 줄 구간 안으로 정제한다.
+ * 구조가 의심스러우면 일부 단어만 억지로 살리지 않고 빈 배열을 반환해
+ * lineProgress가 검증된 줄 시작/끝의 선형 보간으로 물러나게 한다.
+ */
+export function filterWordTimingsForProgress(segment, inputWords = segment?.words, useVocalRegions = true) {
+  const vocalWeighted = useVocalRegions
+    ? buildVocalWeightedProgressWords(segment, segment?.vocalRegions)
+    : null;
+  if (vocalWeighted) return vocalWeighted;
+  const words = inputWords;
   if (!Array.isArray(words) || words.length === 0) return null;
+  const { startMs: lineStartMs, endMs: lineEndMs } = getProgressBoundsMs(segment);
+  const hasLineWindow = lineEndMs > lineStartMs;
   const out = [];
   for (const w of words) {
     const text = String(w?.word ?? w?.text ?? '').trim();
-    const s = Number(w?.startMs ?? w?.start_ms ?? (Number(w?.start) * 1000));
-    const e = Number(w?.endMs ?? w?.end_ms ?? (Number(w?.end) * 1000));
-    if (!text || !Number.isFinite(s) || !Number.isFinite(e) || e < s) continue;
-    out.push({ t: text, s: Math.round(s), e: Math.round(e) });
+    let s = Number(w?.startMs ?? w?.start_ms ?? (Number(w?.start) * 1000));
+    let e = Number(w?.endMs ?? w?.end_ms ?? (Number(w?.end) * 1000));
+    if (!text || !Number.isFinite(s) || !Number.isFinite(e) || e <= s) continue;
+    s = Math.round(s);
+    e = Math.round(e);
+    if (hasLineWindow) {
+      if (e <= lineStartMs || s >= lineEndMs) continue;
+      s = Math.max(lineStartMs, s);
+      e = Math.min(lineEndMs, e);
+    }
+    const previous = out[out.length - 1];
+    if (previous && s < previous.e) {
+      // 가사 싱크 전역 검사와 같은 보수적 원칙: 작은 프레임 겹침만 경계로
+      // 흡수하고, 큰 겹침·역전은 모델 단어열 전체를 신뢰하지 않는다.
+      if (previous.e - s > WORD_OVERLAP_TOLERANCE_MS) return null;
+      // 한쪽 끝에 몰아 두지 않고 겹친 구간의 가운데를 공유 경계로 삼는다.
+      // VAD가 없는 옛 사이드카에서만 쓰이는 보조 경로다.
+      const boundary = Math.round((s + previous.e) / 2);
+      previous.e = Math.max(previous.s + MIN_WORD_DURATION_MS, boundary);
+      s = previous.e;
+    }
+    if (e - s < MIN_WORD_DURATION_MS) continue;
+    out.push({ t: text, s, e });
   }
   return out.length > 0 ? out : null;
+}
+
+/**
+ * 가사 싱크가 저장한 보컬 활동 구간에 글자 진행량을 분배한다.
+ * 무음 간격은 토큰 사이의 실제 공백으로 남으므로 그동안 와이프가 멈춘다.
+ */
+function buildVocalWeightedProgressWords(segment, inputRegions) {
+  if (!Array.isArray(inputRegions) || inputRegions.length === 0) return null;
+  const { startMs: lineStartMs, endMs: lineEndMs } = getProgressBoundsMs(segment);
+  if (!(lineEndMs > lineStartMs)) return null;
+
+  const clipped = inputRegions
+    .map((region) => ({
+      s: Math.max(lineStartMs, Math.round(Number(region?.startMs ?? region?.s) || 0)),
+      e: Math.min(lineEndMs, Math.round(Number(region?.endMs ?? region?.e) || 0)),
+    }))
+    .filter((region) => region.e - region.s >= MIN_WORD_DURATION_MS)
+    .sort((a, b) => a.s - b.s);
+  if (clipped.length === 0) return null;
+
+  const regions = [];
+  for (const region of clipped) {
+    const previous = regions.at(-1);
+    if (previous && region.s - previous.e <= VOCAL_REGION_JOIN_GAP_MS) {
+      previous.e = Math.max(previous.e, region.e);
+    } else {
+      regions.push({ ...region });
+    }
+  }
+
+  const lyricText = String(segment?.original ?? segment?.text ?? '');
+  const lyricUnits = Array.from(lyricText).filter((char) => /[\p{L}\p{N}]/u.test(char)).length;
+  const rawWordUnits = Array.isArray(segment?.words)
+    ? segment.words.reduce((sum, word) => sum + Math.max(1, String(word?.word ?? word?.text ?? '').length), 0)
+    : 0;
+  const totalUnits = Math.max(1, lyricUnits || rawWordUnits);
+  const durations = regions.map((region) => region.e - region.s);
+  const totalDuration = durations.reduce((sum, duration) => sum + duration, 0);
+  let assigned = 0;
+  return regions.map((region, index) => {
+    const remainingRegions = regions.length - index - 1;
+    const remainingUnits = Math.max(1, totalUnits - assigned);
+    const units = index === regions.length - 1
+      ? remainingUnits
+      : Math.max(1, Math.min(
+        remainingUnits - Math.min(remainingUnits - 1, remainingRegions),
+        Math.round(totalUnits * durations[index] / totalDuration),
+      ));
+    assigned += units;
+    return { t: '•'.repeat(units), s: region.s, e: region.e };
+  });
+}
+
+function copyWordTimings(segment) {
+  // 사이드카에는 원래 모델 단어를 정제해 보존한다. VAD 분배 토큰은 표시용이며
+  // 저장 데이터가 아니므로 재생 시점에만 만든다.
+  return filterWordTimingsForProgress(segment, segment?.words, false);
 }
 
 function copyPersistedMetadata(segment) {
@@ -78,7 +185,8 @@ function copyPersistedMetadata(segment) {
   if (Array.isArray(segment?.qualityFlags)) {
     metadata.qualityFlags = [...new Set(segment.qualityFlags.map(String))];
   }
-  if (segment?.approx === false) {
+  const hasConfirmedTiming = Number(segment?.start) > 0 || Number(segment?.end) > 0;
+  if (segment?.approx === false && hasConfirmedTiming) {
     metadata.approx = false;
     metadata.alignmentTrust = 'manual';
     metadata.alignmentSource = 'manual';
@@ -146,6 +254,11 @@ export function applyAlignmentMetadata(segments, sidecar) {
   if (!sidecar || !SUPPORTED_METADATA_SCHEMA_VERSIONS.includes(sidecar.schemaVersion)) {
     return { segments: restored, appliedCount: 0, skippedCount: 0, reason: 'missing_or_unsupported' };
   }
+  const vocalRegions = readVocalRegions(sidecar);
+  if (vocalRegions.length > 0) {
+    // 곡 단위 오디오 정보라 가사 원문 fingerprint와 무관하게 유효하다.
+    restored.forEach((segment) => { segment.vocalRegions = vocalRegions; });
+  }
   if (sidecar.segmentCount !== restored.length
       || sidecar.sourceFingerprint !== sourceFingerprint(restored)
       || !Array.isArray(sidecar.segments)) {
@@ -176,11 +289,15 @@ export function applyAlignmentMetadata(segments, sidecar) {
     // 단어 타임 복원 — 줄 안 진행도(가라오케 와이프)가 쓴다. v1 사이드카에는
     // 없으므로 있을 때만 붙인다.
     if (Array.isArray(entry.words) && entry.words.length > 0) {
-      segment.words = entry.words.map((w) => ({
+      const restoredWords = entry.words.map((w) => ({
         word: String(w?.t ?? ''),
         startMs: Number(w?.s) || 0,
         endMs: Number(w?.e) || 0,
       }));
+      const filteredWords = filterWordTimingsForProgress(segment, restoredWords, false);
+      if (filteredWords) {
+        segment.words = filteredWords.map((w) => ({ word: w.t, startMs: w.s, endMs: w.e }));
+      }
     }
     appliedCount++;
   });
@@ -205,7 +322,11 @@ export function readVocalRegions(sidecar) {
   const raw = sidecar?.vocalRegions;
   if (!Array.isArray(raw)) return [];
   return raw
-    .map((r) => ({ startMs: Number(r?.s) || 0, endMs: Number(r?.e) || 0, activity: Number(r?.a) || 0 }))
+    .map((r) => ({
+      startMs: Number(r?.s ?? r?.start_ms ?? r?.startMs) || 0,
+      endMs: Number(r?.e ?? r?.end_ms ?? r?.endMs) || 0,
+      activity: Number(r?.a ?? r?.activity) || 0,
+    }))
     .filter((r) => r.endMs > r.startMs);
 }
 
@@ -239,13 +360,13 @@ export function lineProgress(segment, positionMs) {
   const pos = Number(positionMs);
   if (!Number.isFinite(pos)) return 0;
 
-  const startMs = (Number(segment.start) || 0) * 1000;
-  const endMs = (Number(segment.end) || 0) * 1000;
+  const { startMs, endMs } = getProgressBoundsMs(segment);
 
   if (pos <= startMs) return 0;
   if (endMs > startMs && pos >= endMs) return 1;
 
-  const words = Array.isArray(segment.words) ? segment.words : null;
+  const filteredWords = filterWordTimingsForProgress(segment);
+  const words = filteredWords?.map((w) => ({ word: w.t, startMs: w.s, endMs: w.e })) || null;
   if (words && words.length > 0) {
     // 글자 수로 가중치를 준다 — 단어 개수로 나누면 긴 단어가 순식간에 칠해진다.
     const lens = words.map((w) => Math.max(1, String(w.word || '').length));

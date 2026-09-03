@@ -4,10 +4,10 @@ contact_links:
     url: https://discord.gg/qfJnk3VJyf
     about: 설치·사용법 질문 (OSW의 버그·기능 제안은 이 레포 이슈로 부탁드립니다)
   - name: FAQ — 자주 묻는 질문
-    url: https://lmrm.vercel.app/faq
+    url: https://companion-six-kappa.vercel.app/faq
     about: 설치·사용법을 먼저 확인해 주세요.
   - name: 문의 허브 (Discord · Q&A)
-    url: https://lmrm.vercel.app/qa
+    url: https://companion-six-kappa.vercel.app/qa
     about: Discord 커뮤니티 및 문의 안내 페이지입니다.
   - name: OSW 최신 버전 (Releases)
     url: https://github.com/Temmis2077/OSW/releases

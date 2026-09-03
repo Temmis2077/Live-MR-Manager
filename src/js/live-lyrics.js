@@ -9,7 +9,7 @@
  * 한 곳에서 담당하고(그래야 오버레이와 어긋나지 않는다), 여기서는 그 결과를
  * 받아 그리기만 한다.
  */
-import { getDisplayLines } from './lrc-parser.js';
+import { getDisplayLineModel } from './lrc-parser.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -41,15 +41,45 @@ export function lineHtml(seg) {
   if (seg == null) return '';
   if (typeof seg === 'string') return esc(seg);
 
-  const lines = getDisplayLines(seg, 'app').filter(Boolean);
+  const lines = getDisplayLineModel(seg, 'app').filter((line) => line.text);
   if (lines.length === 0) return '';
   const [first, ...rest] = lines;
-  if (rest.length === 0) return esc(first);
+  if (rest.length === 0) return esc(first.text);
   // 원문을 크게, 차음·번역은 작고 흐리게 — 부를 때 눈이 원문으로 먼저 간다.
   const restHtml = rest
-    .map((l) => `<span class="live-lyric-sub">${esc(l)}</span>`)
+    .map((line) => `<span class="live-lyric-sub">${esc(line.text)}</span>`)
     .join('');
-  return `${esc(first)}${restHtml}`;
+  return `${esc(first.text)}${restHtml}`;
+}
+
+/**
+ * 진행 색상을 표시할 가사 HTML.
+ *
+ * 바깥 패널 폭에 background-clip을 적용하면 가운데 정렬된 짧은 가사는
+ * 진행 경계가 글자에 닿을 때까지 한참 기다리게 된다. 기본 글자와 강조 글자를
+ * 같은 content box에 정확히 겹쳐 두고, 강조 레이어만 0~1 비율로 자른다.
+ */
+export function karaokeLineHtml(seg) {
+  if (seg == null) return '';
+  const lines = typeof seg === 'string'
+    ? [{ text: seg, role: 'text', progressTarget: true }]
+    : getDisplayLineModel(seg, 'app').filter((line) => line.text);
+  if (lines.length === 0) return '';
+  return lines.map((line, index) => {
+    const target = line.progressTarget ? ' data-progress-target="true"' : '';
+    const sub = index > 0 ? ' live-lyric-sub' : '';
+    const text = esc(line.text);
+    const wipe = line.progressTarget
+      ? `<span class="live-lyric-wipe" aria-hidden="true">${text}</span>`
+      : '';
+    return `<span class="live-lyric-display-line${sub}" data-lyric-role="${line.role}"${target}><span class="live-lyric-base">${text}</span>${wipe}</span>`;
+  }).join('');
+}
+
+export function paintLyricElementProgress(element, ratio) {
+  if (!element) return;
+  const pct = Math.max(0, Math.min(1, Number(ratio) || 0));
+  element.style.setProperty('--lyric-wipe', pct.toFixed(4));
 }
 
 export function getSide() {
@@ -108,13 +138,10 @@ export function renderLiveLyrics(list) {
     return;
   }
 
-  // 진행도는 같은 글자에 그라디언트를 잘라 넣어 칠한다(background-clip: text).
-  //
-  // 처음엔 중앙 큰 가사처럼 같은 글자를 하나 더 겹쳐 놓고 왼쪽부터 드러냈는데,
-  // 겹친 요소가 원본과 8px 어긋났다 — 절대 위치 박스와 인라인 글자의 상자가
-  // 달라서다. 같은 글자 하나에 칠하면 어긋날 여지가 없다.
+  // 진행도는 실제 주 가사 글자 상자 안에서만 자른다. 행 전체 폭을 기준으로
+  // 칠하면 왼쪽 여백까지 진행 거리에 포함되어 중앙 가사·오버레이와 달라진다.
   body.innerHTML = segments
-    .map((s, i) => `<div class="live-lyric-line" data-index="${i}">${lineHtml(s)}</div>`)
+    .map((s, i) => `<div class="live-lyric-line" data-index="${i}">${karaokeLineHtml(s)}</div>`)
     .join('');
 }
 
@@ -130,7 +157,7 @@ export function paintLiveLyricProgress(ratio) {
   const cur = body.querySelectorAll('.live-lyric-line')[activeIndex];
   if (!cur) return;
   const pct = Math.max(0, Math.min(1, Number(ratio) || 0));
-  cur.style.setProperty('--lyric-progress', `${(pct * 100).toFixed(2)}%`);
+  cur.style.setProperty('--lyric-wipe', pct.toFixed(4));
 }
 
 /** 현재 부르는 줄 표시. 인덱스가 -1이면 표시를 지운다. */
@@ -143,6 +170,8 @@ export function highlightLiveLyric(index) {
   lines.forEach((el, i) => el.classList.toggle('active', i === index));
 
   const cur = lines[index];
+  // 새 줄은 이전 줄의 진행값을 물려받지 않고 텍스트와 같은 갱신에서 0부터 시작한다.
+  if (cur) cur.style.setProperty('--lyric-wipe', '0');
   // 공연 중에는 눈을 떼지 않아도 되게 현재 줄을 가운데로 붙든다.
   if (cur) cur.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }

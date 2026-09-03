@@ -14,8 +14,21 @@
     return `${r},${g},${b}`;
   }
 
-  function connectWS(onMessage, port) {
-    const wsPort = port || 14201;
+  function getTauriBridge() {
+    if (global.__TAURI__) return global.__TAURI__;
+    // 인앱 오버레이 미리보기는 같은 출처 iframe이다. Tauri 전역이 iframe에
+    // 직접 주입되지 않는 WebView도 있으므로 부모 창의 브리지를 함께 본다.
+    try {
+      if (global.parent && global.parent !== global && global.parent.__TAURI__) {
+        return global.parent.__TAURI__;
+      }
+    } catch (_) {
+      // OBS나 다른 출처 iframe은 parent 접근이 막힐 수 있다. 그때는 WS로 간다.
+    }
+    return null;
+  }
+
+  function connectWebSocket(onMessage, wsPort, onDisconnect) {
     let host = global.location.hostname || 'localhost';
     // 앱 내부 창(Tauri는 tauri.localhost/asset 호스트로 페이지를 띄움)에서는
     // 오버레이 서버가 같은 PC에 있으므로 localhost로 붙는다. OBS/브라우저에서
@@ -32,9 +45,49 @@
       }
     };
     socket.onclose = () => {
-      setTimeout(() => connectWS(onMessage, wsPort), 2000);
+      if (typeof onDisconnect === 'function') onDisconnect();
+      setTimeout(() => connectWS(onMessage, wsPort, onDisconnect), 2000);
     };
     return socket;
+  }
+
+  function connectWS(onMessage, port, onDisconnect) {
+    const wsPort = port || 14201;
+    const tauri = getTauriBridge();
+
+    // 앱 안에서는 이미 Rust가 내보내는 이벤트를 직접 받는다. loopback WS는
+    // WebView 보안 정책·방화벽 상태에 따라 막힐 수 있고, 굳이 네트워크를
+    // 한 바퀴 돌 필요도 없다. OBS/브라우저만 기존 WebSocket을 사용한다.
+    if (tauri?.event?.listen && tauri?.core?.invoke) {
+      let disposed = false;
+      let unlisten = null;
+      const controller = {
+        transport: 'tauri-event',
+        close() {
+          disposed = true;
+          if (typeof unlisten === 'function') unlisten();
+        },
+      };
+
+      Promise.resolve(tauri.event.listen('overlay-state-update', (event) => {
+        if (!disposed) onMessage(event?.payload ?? event);
+      })).then((stop) => {
+        unlisten = stop;
+        if (disposed && typeof stop === 'function') stop();
+        if (!disposed) return tauri.core.invoke('get_overlay_state');
+        return null;
+      }).then((state) => {
+        if (!disposed && state) onMessage(state);
+      }).catch((error) => {
+        if (disposed) return;
+        console.warn('[Overlay] Tauri event connection failed; using WebSocket.', error);
+        controller.fallback = connectWebSocket(onMessage, wsPort, onDisconnect);
+      });
+
+      return controller;
+    }
+
+    return connectWebSocket(onMessage, wsPort, onDisconnect);
   }
 
   function readBool(data, snakeKey, camelKey) {
@@ -46,6 +99,12 @@
     if (style[snakeKey] !== undefined) return style[snakeKey];
     if (style[camelKey] !== undefined) return style[camelKey];
     return fallback;
+  }
+
+  function previewStyleFromMessage(data, target) {
+    if (!data || data.type !== 'osw-overlay-preview-style') return null;
+    if (data.target !== target || !data.style || typeof data.style !== 'object') return null;
+    return data.style;
   }
 
   /**
@@ -113,6 +172,7 @@
     let lastPacketAt = 0;
     let lastTick = 0;
     let target = NaN;
+    let lastReturned = 0;
 
     function update(positionMs, durationMs, isPlaying) {
       const pos = Number(positionMs) || 0;
@@ -137,9 +197,18 @@
       playing = !!isPlaying;
 
       // 멈춰 있거나, 크게 벌어졌거나, 방금 재생을 시작했으면 그냥 맞춘다.
-      if (!playing || !wasPlaying || Math.abs(pos - estimated) > SNAP_MS) {
+      const largeJump = Math.abs(pos - estimated) > SNAP_MS;
+      const snapped = !playing || !wasPlaying || largeJump;
+      if (snapped) {
         estimated = pos;
-        if (!playing) rate = 1;
+        // 탐색·정지·재개 뒤에 이전 패킷의 target이 남아 있으면 다음
+        // 프레임에서 방금 맞춘 위치를 과거 값 쪽으로 다시 끌어당긴다.
+        // 카운트다운과 가사 인덱스가 경계에서 왕복하던 직접 원인이다.
+        target = pos;
+        lastTick = wall;
+        lastReturned = pos;
+        // 큰 점프 뒤의 이전 배속 추정도 더 이상 유효하지 않다.
+        if (!playing || largeJump) rate = 1;
       } else {
         target = pos;
       }
@@ -161,6 +230,11 @@
       }
       if (duration > 0 && estimated > duration) estimated = duration;
       if (estimated < 0) estimated = 0;
+      // 정상 재생 중 작은 패킷 오차를 수렴시키더라도 표시 시각은 역행하지
+      // 않는다. 명시적인 뒤로 탐색은 update()의 snap 경로에서 lastReturned도
+      // 함께 옮기므로 그대로 허용된다.
+      if (playing && estimated < lastReturned) estimated = lastReturned;
+      lastReturned = estimated;
       return estimated;
     }
 
@@ -214,5 +288,6 @@
     applyDesign,
     createPositionClock,
     lineWipeRatio,
+    previewStyleFromMessage,
   };
 })(window);

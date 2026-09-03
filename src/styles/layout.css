@@ -1,12 +1,7 @@
-/* Sidebar */
+/* Legacy sidebar is no longer part of the application shell. It remains
+   hidden temporarily for backup/older markup compatibility only. */
 .sidebar {
-  width: 210px;
-  background: var(--sidebar-bg);
-  border-right: 1px solid var(--glass-border);
-  display: flex;
-  flex-direction: column;
-  padding: 40px 24px;
-  z-index: 100;
+  display: none;
 }
 
 .logo-container {
@@ -69,14 +64,14 @@
   display: block;
 }
 
-/* Ο.Σ.Ω 로고 락업(OSW의 그리스 문자 표기). Ω=옴(오디오)·Σ=합(스템 합성)의
-   의미를 담고, 고전적 세리프 + 브랜드 보라로 행성 로고와 톤을 맞춘다. */
+/* Ο.Σ.Ω 로고 락업. Ω=옴(오디오)·Σ=합(스템 합성)의 의미를 계승하고,
+   붉은 신호에서 보라 궤도로 넘어가는 브랜드 축을 로고에만 허용한다. */
 .logo-text.logo-greek {
   font-family: 'Georgia', 'Times New Roman', serif;
   font-size: 1.85rem;
   font-weight: 700;
   letter-spacing: 1px;
-  background: linear-gradient(135deg, #8b45d6, #a874e0);
+  background: linear-gradient(110deg, var(--signal-active), var(--signal) 58%, var(--orbit-highlight));
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -179,10 +174,76 @@ body[data-app-mode="recording"] .nav-item.active {
   padding-bottom: var(--dock-height);
   width: 100%;
   overflow-y: hidden;
-  overflow-x: auto;
-  /* Allow horizontal scroll instead of breaking layout */
-  min-width: 1108px !important;
-  /* 5 grid columns: 1048px tracks + 60px library horizontal padding */
+  overflow-x: hidden;
+  min-width: 0;
+}
+
+/* ── Unified workspace contract ───────────────────────────── */
+.workspace {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.workspace-header {
+  min-height: var(--control-lg);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--page-gutter);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.workspace-body {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.workspace-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.workspace-panel,
+.workspace-drawer {
+  min-width: 0;
+  min-height: 0;
+  background: var(--sidebar-bg);
+  border-color: var(--glass-border);
+}
+
+.workspace-panel--secondary { width: var(--panel-secondary); }
+.workspace-panel--detail { width: var(--panel-detail); }
+
+.action-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.action-row--end { justify-content: flex-end; }
+.action-row--wrap { flex-wrap: wrap; }
+
+.workspace--settings,
+.workspace--tasks {
+  overflow-y: auto;
+  padding: var(--space-4) var(--page-gutter) var(--space-8);
+}
+
+.workspace--settings > .settings-container,
+.workspace--tasks > .tasks-container {
+  width: min(100%, var(--content-readable));
+  margin-inline: auto;
+  padding: 0;
 }
 
 .view-main {
@@ -457,38 +518,29 @@ h1 {
 }
 
 /* Global View Content Alignment (Locked to 30px Frame) */
-.settings-container,
-.tasks-container,
-#alignment-viewer-root,
 .song-grid {
   width: 100% !important;
   /* Fluid expansion */
   max-width: 1600px !important;
   /* Higher ceiling */
-  padding-left: var(--library-safe-area, 30px) !important;
-  padding-right: var(--library-safe-area, 30px) !important;
+  padding-left: var(--page-gutter) !important;
+  padding-right: var(--page-gutter) !important;
   margin: 0 !important;
   /* Left anchored */
   transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1), max-width 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Responsive Adjustments */
-@media (max-width: 1024px) {
-  .sidebar {
-    width: 80px;
-    padding: 24px 0;
-  }
-
-  .logo-text,
-  .nav-label,
-  .nav-item span {
-    display: none;
-  }
-
-  .nav-item {
-    justify-content: center;
-    padding: 14px 0;
-  }
+/* 가사 싱크는 위의 1600px 상한에서 뺀다.
+   글을 읽는 화면이면 줄 길이를 제한하는 게 맞지만, 여기서는 가로 폭이 곧
+   싱크 정밀도다 — 파형이 넓을수록 같은 1px이 더 짧은 시간을 가리킨다.
+   1920 전체 화면에서 320px을 비워 두고 있었다. 음원 관리(.song-grid)는
+   이미 상한이 풀려 있었고, 여기만 남아 있었다. */
+#alignment-viewer-root {
+  width: 100% !important;
+  max-width: none !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+  margin: 0 !important;
 }
 
 /* Alignment Viewer Overrides (Restored) */

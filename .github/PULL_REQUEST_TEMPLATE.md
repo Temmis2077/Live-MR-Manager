@@ -20,3 +20,6 @@
 - [ ] 기능 없는 버튼·미완성 UI를 새로 노출하지 않았습니다
 - [ ] UI를 바꿨다면 [UI 기준서](../docs/UI_DESIGN_GUIDELINES.md)를 확인했습니다
 - [ ] 서드파티 코드·모델·에셋을 추가했다면 [THIRD-PARTY.md](../docs/THIRD-PARTY.md)에 적었습니다
+- [ ] 새 프론트–백엔드 연결은 도메인 service와 Rust IPC 계약을 사용합니다
+- [ ] Rust IPC를 바꿨다면 `npm run generate:ipc` 후 생성 파일과 카탈로그를 포함했습니다
+- [ ] `npm run check:ipc`가 통과하며 직접 `invoke`/`listen` 경로를 늘리지 않았습니다

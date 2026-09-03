@@ -7,15 +7,15 @@ body:
   - type: markdown
     attributes:
       value: |
-        재현 가능한 버그는 이 템플릿으로 등록해 주세요. 일반 사용법 질문은 [FAQ](https://lmrm.vercel.app/faq) 또는 [문의 허브](https://lmrm.vercel.app/qa)를 이용해 주세요.
+        재현 가능한 버그는 이 템플릿으로 등록해 주세요. 일반 사용법 질문은 [FAQ](https://companion-six-kappa.vercel.app/faq) 또는 [문의 허브](https://companion-six-kappa.vercel.app/qa)를 이용해 주세요.
         **토큰·Client Secret·전체 로그는 올리지 마세요.**
 
   - type: input
     id: app_version
     attributes:
       label: 앱 버전
-      description: "예: v0.4.15 (설정 → 앱 업데이트에서 확인)"
-      placeholder: v0.4.15
+      description: "예: v1.0.0-beta.1 (설정 → 정보에서 확인)"
+      placeholder: v1.0.0-beta.1
     validations:
       required: true
 
@@ -63,4 +63,7 @@ body:
     id: logs
     attributes:
       label: 로그 (선택)
-      description: 민감 정보(토큰, 채널 ID 전체)는 제외해 주세요.
+      description: |
+        앱에서 **설정 → 도움말·문의 → 「로그 폴더 열기」** 를 누르면 `app.log`가 있는 폴더가 열립니다.
+        파일을 그대로 끌어다 놓거나, 문제가 난 시점 앞뒤를 붙여 넣어 주세요.
+        민감 정보(토큰, 채널 ID 전체)는 제외해 주세요.

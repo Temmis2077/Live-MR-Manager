@@ -26,6 +26,17 @@
   box-shadow: 0 15px 40px var(--shadow-strong);
   animation: toastIn 0.4s cubic-bezier(0.23, 1, 0.32, 1);
   transition: all 0.3s ease;
+  cursor: pointer;
+}
+
+.toast:hover {
+  background: var(--surface-2);
+  border-color: color-mix(in srgb, var(--accent-primary) 38%, var(--glass-border));
+}
+
+.toast:focus-visible {
+  outline: 2px solid var(--accent-secondary);
+  outline-offset: 2px;
 }
 
 .toast.removing {
@@ -102,6 +113,10 @@
 .toast.update-available {
   align-items: flex-start;
   min-width: 340px;
+}
+
+.toast.update-available .toast-btn {
+  cursor: pointer;
 }
 
 .toast.update-available .toast-body {

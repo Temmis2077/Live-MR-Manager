@@ -506,11 +506,14 @@ pub struct AudioHandler {
     pub total_duration_ms: Arc<AtomicU64>,
     pub track_sample_rate: Arc<AtomicU32>,
     pub vocal_volume: Arc<AtomicU32>, // 모니터 채널 보컬 게인, f32 bits
+    pub backing_volume: Arc<AtomicU32>, // 모니터 채널 화음/코러스 게인, f32 bits
     pub instrumental_volume: Arc<AtomicU32>, // 모니터 채널 인스트 게인, f32 bits
     pub mon_metro_volume: Arc<AtomicU32>, // 모니터 채널 메트로놈 게인
     pub mr_vocal_volume: Arc<AtomicU32>,  // MR 채널 보컬 게인
+    pub mr_backing_volume: Arc<AtomicU32>, // MR 채널 화음/코러스 게인
     pub mr_inst_volume: Arc<AtomicU32>,   // MR 채널 인스트 게인
     pub mr_metro_volume: Arc<AtomicU32>,  // MR 채널 메트로놈 게인
+    pub backing_available: Arc<AtomicU32>, // 현재 곡의 별도 화음 stem 존재 여부
     /// 메트로놈 BPM(f32 bits). 재생 중 변경을 클릭에 실시간 반영하기 위해 공유.
     /// 0 이하면 소스가 120으로 처리.
     pub metro_bpm: Arc<AtomicU32>,
@@ -652,11 +655,14 @@ pub static AUDIO_HANDLER: Lazy<Result<Arc<AudioHandler>, String>> = Lazy::new(||
         total_duration_ms: Arc::new(AtomicU64::new(0)),
         track_sample_rate: Arc::new(AtomicU32::new(device_rate)),
         vocal_volume: Arc::new(AtomicU32::new(100.0f32.to_bits())),
+        backing_volume: Arc::new(AtomicU32::new(100.0f32.to_bits())),
         instrumental_volume: Arc::new(AtomicU32::new(100.0f32.to_bits())),
         mon_metro_volume: Arc::new(AtomicU32::new(0.0f32.to_bits())),
         mr_vocal_volume: Arc::new(AtomicU32::new(0.0f32.to_bits())),
+        mr_backing_volume: Arc::new(AtomicU32::new(100.0f32.to_bits())),
         mr_inst_volume: Arc::new(AtomicU32::new(0.0f32.to_bits())),
         mr_metro_volume: Arc::new(AtomicU32::new(0.0f32.to_bits())),
+        backing_available: Arc::new(AtomicU32::new(0)),
         metro_bpm: Arc::new(AtomicU32::new(0.0f32.to_bits())),
         limiter_enabled: Arc::new(AtomicU32::new(1)), // 기본 켜짐
         master_gain: Arc::new(AtomicU32::new(1.0f32.to_bits())),
